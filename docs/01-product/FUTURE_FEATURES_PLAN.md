@@ -50,16 +50,18 @@ This document outlines planned features for future versions of Annie chatbot, be
 
 ### Features
 
+- **PostgreSQL Database**: Persistent storage for conversations, decisions, outcomes
+- **Multi-Modality**: Image and voice understanding
 - **WebSocket Support**: Bidirectional communication
-- **Voice Interaction**: STT and TTS
+- **Advanced Decision Frameworks**: Enhanced analysis and tracking
 - **Advanced Gamification**: Unlockable features
 - **Multi-Persona Support**: Multiple character modes
 
 ### Technical Decisions
 
+- **Database**: PostgreSQL 16+ with Redis cache layer
+- **Multi-Modality**: Vision models for images, Whisper for voice
 - **WebSocket**: Native WebSocket support
-- **STT**: Web Speech API or Whisper
-- **TTS**: ElevenLabs or Azure Neural TTS
 - **Gamification**: Enhanced affection system
 
 ### Timeline
@@ -100,9 +102,9 @@ This document outlines planned features for future versions of Annie chatbot, be
 ### Features
 
 - **Fine-tuning**: Character-specific fine-tuning
-- **Multi-modal**: Image and voice understanding
 - **Advanced Memory**: Enhanced memory capabilities
 - **Personalization**: Deep personalization
+- **Voice Interaction**: STT and TTS (moved from V2.0)
 
 ### Timeline
 
@@ -115,19 +117,20 @@ This document outlines planned features for future versions of Annie chatbot, be
 
 1. Web Interface (V1.1)
 2. iOS App (V1.2)
-3. WebSocket Support (V2.0)
+3. PostgreSQL Database (V2.0)
+4. Multi-Modality (V2.0)
+5. WebSocket Support (V2.0)
 
 ### Medium Priority
 
-4. Voice Interaction (V2.0)
-5. Advanced Gamification (V2.0)
-6. A2A Protocol (V2.1)
+6. Voice Interaction (V3.0)
+7. Advanced Gamification (V2.0)
+8. A2A Protocol (V2.1)
 
 ### Low Priority
 
-7. Fine-tuning (V3.0)
-8. Multi-modal (V3.0)
-9. Advanced Personalization (V3.0)
+9. Fine-tuning (V3.0)
+10. Advanced Personalization (V3.0)
 
 ## References
 

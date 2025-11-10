@@ -1,10 +1,25 @@
 # V1 Implementation Plan
 
-## Overview
+## Decision-Making Architecture
 
-This document outlines the implementation plan for Annie chatbot V1, focusing on core functionality: MCP Server, Internet Access Tool, Telegram Bot, and agentic-memories integration.
+**Core Principle**: agentic-memories provides the backbone for all decision-making capabilities in V1.0.
 
-## V1 Scope
+**Decision Flow**:
+1. User asks for decision help
+2. Annie retrieves relevant memories from agentic-memories (past decisions, outcomes, preferences)
+3. Annie gathers real-time information via Internet Access tool if needed
+4. Annie analyzes options with pros/cons using memory context
+5. Annie provides recommendation with reasoning based on user's history
+6. Annie stores decision context in agentic-memories for future learning
+
+**agentic-memories Integration**:
+- Stores conversation context and decisions
+- Retrieves relevant past decisions and outcomes
+- Maintains user preferences and risk profiles
+- Enables personalized recommendations
+- Supports learning from decision patterns
+
+## V1.0 Scope
 
 ### Core Components
 
@@ -13,16 +28,31 @@ This document outlines the implementation plan for Annie chatbot V1, focusing on
 3. **Telegram Bot** - User interface via Telegram
 4. **Internet Access Tool** - Web search capability
 5. **Memories Tool** - agentic-memories integration
-6. **Docker Infrastructure** - Containerized deployment
+6. **Stock Trader Tool** - Stock market analysis and recommendations
+7. **Decision Support** - Pros/cons analysis for user decisions
+8. **Docker Infrastructure** - Containerized deployment
+9. **Redis State Management** - Session and conversation state (PostgreSQL deferred to V2.0)
 
-### Out of Scope for V1
+### Out of Scope for V1.0
 
-- Web interface
-- iOS app
-- A2A protocol integration
-- 3D animation
-- Voice interaction
-- Advanced gamification features
+- Web interface (V1.1)
+- iOS app (V1.2)
+- PostgreSQL database (V2.0)
+- 3D animation (V1.1)
+- Voice interaction (V1.2)
+- Multi-modality (V2.0)
+- A2A protocol integration (V2.1)
+- Advanced gamification features (V2.0)
+
+## Detailed Task Breakdown
+
+For granular, actionable tasks broken down into 1-2 day increments, see [V1 Detailed Tasks](./V1_DETAILED_TASKS.md).
+
+**Summary**:
+- **50 tasks** across 5 phases
+- Each task: 1-2 days duration
+- Clear deliverables and dependencies
+- Total duration: ~10 weeks
 
 ## Implementation Phases
 
@@ -90,7 +120,7 @@ This document outlines the implementation plan for Annie chatbot V1, focusing on
 
 ### Phase 3: MCP Tools (Week 5-6)
 
-**Goal**: Implement core MCP tools
+**Goal**: Implement core MCP tools including Stock Trader
 
 **Tasks**:
 1. **Internet Access Tool**
@@ -106,15 +136,26 @@ This document outlines the implementation plan for Annie chatbot V1, focusing on
    - Portfolio summary function
    - Error handling and fallbacks
 
-3. **Tool Registration**
-   - Register tools in MCP server
+3. **Stock Trader Tool**
+   - **Implementation**: Separate MCP tool (`stock_trader`)
+   - Stock market data API integration (Alpha Vantage/Polygon.io/Finnhub)
+   - Real-time stock price lookup
+   - Market analysis function
+   - Stock recommendation function
+   - Risk assessment
+   - Portfolio analysis integration
+   - Historical data analysis
+
+4. **Tool Registration**
+   - Register all tools in MCP server
    - Tool schemas
    - Input validation
 
 **Deliverables**:
 - Internet search tool working
 - Memories tool working
-- Tools callable via MCP
+- Stock Trader tool working (separate MCP tool with dedicated API)
+- All tools callable via MCP
 
 ### Phase 4: Telegram Bot (Week 7-8)
 
@@ -199,16 +240,22 @@ This document outlines the implementation plan for Annie chatbot V1, focusing on
 
 ### State Storage
 
-**Decision**: Redis for hot data, PostgreSQL for cold data
+**Decision**: Redis-only for V1.0, PostgreSQL added in V2.0
 
 **Rationale**:
 - Redis fast for sessions and cache
-- PostgreSQL persistent for history
-- Hybrid approach balances speed and persistence
+- Simplifies V1.0 implementation
+- PostgreSQL adds persistence in V2.0
+- V1.0 focuses on functionality over persistence
 
-**Implementation**:
-- Redis: Sessions, conversation cache, real-time state
-- PostgreSQL: Conversation history, user preferences
+**Implementation V1.0**:
+- Redis: Sessions, conversation cache, real-time state, temporary history
+- TTL-based expiration for old data
+- agentic-memories provides long-term memory storage
+
+**Implementation V2.0**:
+- PostgreSQL: Persistent conversation history, user preferences, decision outcomes
+- Redis: Hot cache layer
 - Sync mechanism between them
 
 ### Streaming
@@ -247,7 +294,8 @@ annie/
 │   ├── tools/
 │   │   ├── __init__.py
 │   │   ├── internet_access.py
-│   │   └── memories.py
+│   │   ├── memories.py
+│   │   └── stock_trader.py   # Stock Trader tool
 │   └── requirements.txt
 ├── telegram_bot/
 │   ├── bot.py               # Telegram bot main
@@ -273,6 +321,7 @@ annie/
 **Optional**:
 - `OPENAI_API_KEY` - ChatGPT-5 fallback
 - `BRAVE_API_KEY` - Brave Search API key
+- `STOCK_API_KEY` - Stock market API key (Alpha Vantage/Polygon.io)
 - `LLM_PROVIDER` - Primary LLM provider (default: grok4)
 - `LOG_LEVEL` - Logging level (default: INFO)
 
@@ -284,7 +333,9 @@ annie/
 - [ ] Bot responds with streaming text
 - [ ] Internet search tool works
 - [ ] Memories tool stores and retrieves memories
+- [ ] **Stock Trader tool provides market analysis**
 - [ ] LLM uses tools when appropriate
+- [ ] Basic pros/cons analysis for decisions works
 - [ ] Fallback to ChatGPT-5 if Grok-4 fails
 - [ ] Error handling for all failure scenarios
 
@@ -318,29 +369,98 @@ annie/
    - Mitigation: Graceful degradation, local cache
    - Fallback: Continue without memories feature
 
-### Operational Risks
+### Error Handling Strategy
 
-1. **Docker Setup Complexity**
-   - Mitigation: Comprehensive `run_docker.sh` script
-   - Fallback: Manual setup instructions
+**Decision**: Basic error handling for V1.0 - focus on features, polish later
 
-2. **Environment Variable Management**
-   - Mitigation: Interactive `.env` creation
-   - Fallback: Documentation for manual setup
+**Approach**:
+- Handle happy path well
+- Graceful errors with user-friendly messages
+- Basic fallbacks for critical failures
+- Comprehensive error handling deferred to V2.0
 
-## Next Steps After V1
+**Error Scenarios**:
 
-1. **V1.1**: Add web interface
-2. **V1.2**: Add iOS app
-3. **V2.0**: Add WebSocket support, advanced features
-4. **V2.1**: Add A2A protocol integration
-5. **V3.0**: Add 3D animation, voice interaction
+1. **agentic-memories Down**:
+   - Graceful degradation: Continue without memory retrieval
+   - User-friendly message: "Memory service temporarily unavailable, continuing without context"
+   - Store conversation locally in Redis for later sync
+
+2. **LLM API Fails**:
+   - Automatic fallback to ChatGPT-5 if Grok-4 fails
+   - User-friendly message: "Switching to backup service"
+   - If both fail: Clear error message, suggest retry
+
+3. **Internet Search Fails**:
+   - Continue without real-time data
+   - User-friendly message: "Unable to fetch current data, using available information"
+   - Provide recommendation based on available context
+
+4. **Stock API Fails**:
+   - Fallback to internet search for stock data
+   - User-friendly message: "Using alternative data source"
+   - Basic analysis without real-time prices if needed
+
+### Decision Tracking
+
+**Decision**: No outcome tracking in V1.0 - defer to V2.0
+
+**V1.0 Approach**:
+- Annie provides advice and recommendations
+- Stores conversation context in agentic-memories
+- No explicit outcome tracking
+- No feedback mechanism
+- Focus on providing quality advice
+
+**V2.0 Enhancement**:
+- Track decision outcomes
+- User feedback mechanism (explicit + implicit)
+- Learn from what worked/didn't work
+- Use outcomes for future recommendations
+- Advanced learning from decision patterns
+
+## Version Roadmap
+
+### V1.0 (Current)
+- Telegram bot
+- MCP server with Internet, Memories, Stock Trader tools
+- Redis state management
+- Basic decision support
+
+### V1.1: Web Interface
+- React/Next.js web interface
+- 3D avatar (React Three Fiber)
+- SSE streaming support
+- Mobile responsive
+
+### V1.2: iOS App
+- Native iOS app (SwiftUI)
+- 3D avatar (SceneKit)
+- Voice interaction
+- Push notifications
+
+### V2.0: Advanced Features
+- PostgreSQL database for persistence
+- Multi-modality (images, voice understanding)
+- Advanced decision frameworks
+- **Decision outcome tracking and learning**
+- Enhanced gamification
+- WebSocket support
+
+### V2.1: A2A Protocol
+- A2A protocol integration
+- Claude/Gemini integration
+- Agent registry
+
+### V3.0: Advanced AI
+- Fine-tuning for character
+- Deep personalization
+- Advanced memory capabilities
 
 ## References
 
-- MCP_SERVER_RESEARCH.md: MCP implementation details
-- LLM_INTEGRATION_RESEARCH.md: LLM integration patterns
-- DOCKER_ARCHITECTURE_RESEARCH.md: Docker setup
-- AGENTIC_MEMORIES_INTEGRATION.md: Memories integration
-- EXTERNAL_APIS_RESEARCH.md: External API integration
+- [V1/V2 Definition](./V1_V2_DEFINITION.md) - Clear version boundaries
+- [Architecture Plan](../02-architecture/ARCHITECTURE_PLAN.md) - System architecture
+- [Product Requirements](../01-product/PRODUCT_REQUIREMENTS.md) - Product vision
+- [Future Features Plan](../01-product/FUTURE_FEATURES_PLAN.md) - V1.1+ roadmap
 

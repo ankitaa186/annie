@@ -27,7 +27,9 @@ Technical specifications and integration details.
 ### 04-Implementation
 Implementation guides and plans.
 
-- **[V1_IMPLEMENTATION_PLAN.md](./04-implementation/V1_IMPLEMENTATION_PLAN.md)** - V1 implementation plan with phases and tasks
+- **[V1_IMPLEMENTATION_PLAN.md](./04-implementation/V1_IMPLEMENTATION_PLAN.md)** - V1.0 implementation plan with phases and tasks
+- **[V1_DETAILED_TASKS.md](./04-implementation/V1_DETAILED_TASKS.md)** - Granular 1-2 day task breakdown (50 tasks)
+- **[V1_V2_DEFINITION.md](./04-implementation/V1_V2_DEFINITION.md)** - Clear V1.0 vs V2.0 boundaries and scope
 - **[DEVELOPMENT_SETUP_GUIDE.md](./04-implementation/DEVELOPMENT_SETUP_GUIDE.md)** - Complete development environment setup
 
 ### 05-Deployment
