@@ -9,6 +9,9 @@ This directory contains all planning and reference documentation for the Annie c
 ### 01-Product
 Product-level documentation and requirements.
 
+- **[PRODUCT_REQUIREMENTS.md](./01-product/PRODUCT_REQUIREMENTS.md)** - Product vision, user stories, success metrics
+- **[FUTURE_FEATURES_PLAN.md](./01-product/FUTURE_FEATURES_PLAN.md)** - Future features roadmap (V1.1+)
+
 ### 02-Architecture
 System architecture and design decisions.
 
@@ -25,9 +28,7 @@ Technical specifications and integration details.
 Implementation guides and plans.
 
 - **[V1_IMPLEMENTATION_PLAN.md](./04-implementation/V1_IMPLEMENTATION_PLAN.md)** - V1 implementation plan with phases and tasks
-- **[FUTURE_FEATURES_PLAN.md](./04-implementation/FUTURE_FEATURES_PLAN.md)** - Future features roadmap
 - **[DEVELOPMENT_SETUP_GUIDE.md](./04-implementation/DEVELOPMENT_SETUP_GUIDE.md)** - Complete development environment setup
-- **[CONTRIBUTING.md](./04-implementation/CONTRIBUTING.md)** - Contribution guidelines and standards
 
 ### 05-Deployment
 Deployment and operations documentation.
@@ -49,6 +50,7 @@ Reference materials and research summaries.
 ## Document Status
 
 ### Planning Documents
+- ✅ Product Requirements - Complete
 - ✅ V1 Implementation Plan - Complete
 - ✅ Architecture Plan - Complete
 - ✅ Deployment Plan - Complete
@@ -61,10 +63,11 @@ Reference materials and research summaries.
 
 ### Development Guides
 - ✅ Development Setup Guide - Complete
-- ✅ Contributing Guidelines - Complete
 
 ### Reference
 - ✅ Research Summary - Complete
 
-**Total**: 10 comprehensive documentation files
+**Total**: 11 comprehensive documentation files
+
+**Note**: Contributing guidelines are located at [`CONTRIBUTING.md`](../../CONTRIBUTING.md) (project root).
 

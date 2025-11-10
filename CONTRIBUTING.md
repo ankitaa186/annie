@@ -38,9 +38,9 @@ We are committed to providing a welcoming and inspiring community for all. Pleas
 
 ### Prerequisites
 
-1. Read the [Development Setup Guide](./DEVELOPMENT_SETUP_GUIDE.md)
+1. Read the [Development Setup Guide](./docs/04-implementation/DEVELOPMENT_SETUP_GUIDE.md)
 2. Set up your local development environment
-3. Familiarize yourself with the [Architecture Plan](../02-architecture/ARCHITECTURE_PLAN.md)
+3. Familiarize yourself with the [Architecture Plan](./docs/02-architecture/ARCHITECTURE_PLAN.md)
 4. Review existing [Issues](https://github.com/yourusername/annie/issues)
 
 ### Finding Something to Work On

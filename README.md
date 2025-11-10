@@ -26,7 +26,8 @@ See [`docs/`](./docs/) for comprehensive documentation:
 - **[V1 Implementation Plan](./docs/04-implementation/V1_IMPLEMENTATION_PLAN.md)** - Implementation roadmap and phases
 - **[Architecture Plan](./docs/02-architecture/ARCHITECTURE_PLAN.md)** - System architecture and design
 - **[Deployment Plan](./docs/05-deployment/DEPLOYMENT_PLAN.md)** - Docker deployment and operations
-- **[Future Features Plan](./docs/04-implementation/FUTURE_FEATURES_PLAN.md)** - Roadmap for V1.1+
+- **[Product Requirements](./docs/01-product/PRODUCT_REQUIREMENTS.md)** - Product vision and requirements
+- **[Future Features Plan](./docs/01-product/FUTURE_FEATURES_PLAN.md)** - Roadmap for V1.1+
 - **[Research Summary](./docs/06-reference/RESEARCH_SUMMARY.md)** - Comprehensive research reference
 
 ## Quick Start
@@ -163,7 +164,7 @@ annie/
 
 ## Contributing
 
-See [V1 Implementation Plan](./docs/04-implementation/V1_IMPLEMENTATION_PLAN.md) for development roadmap.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for contribution guidelines and [V1 Implementation Plan](./docs/04-implementation/V1_IMPLEMENTATION_PLAN.md) for development roadmap.
 
 ## License
 

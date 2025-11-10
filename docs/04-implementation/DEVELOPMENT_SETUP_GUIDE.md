@@ -562,7 +562,7 @@ git push origin feature/new-feature
 1. **Explore Documentation**: Read [`docs/README.md`](../README.md)
 2. **Review Architecture**: See [`ARCHITECTURE_PLAN.md`](../02-architecture/ARCHITECTURE_PLAN.md)
 3. **Follow Implementation Plan**: See [`V1_IMPLEMENTATION_PLAN.md`](./V1_IMPLEMENTATION_PLAN.md)
-4. **Start Contributing**: See [`CONTRIBUTING.md`](./CONTRIBUTING.md)
+4. **Start Contributing**: See [`CONTRIBUTING.md`](../../CONTRIBUTING.md)
 
 ## Getting Help
 

@@ -4,7 +4,8 @@
 > - [V1 Implementation Plan](../04-implementation/V1_IMPLEMENTATION_PLAN.md) - Implementation phases and tasks
 > - [Architecture Plan](../02-architecture/ARCHITECTURE_PLAN.md) - System architecture and design
 > - [Deployment Plan](../05-deployment/DEPLOYMENT_PLAN.md) - Docker deployment and operations
-> - [Future Features Plan](../04-implementation/FUTURE_FEATURES_PLAN.md) - Future roadmap
+> - [Product Requirements](../01-product/PRODUCT_REQUIREMENTS.md) - Product vision and requirements
+> - [Future Features Plan](../01-product/FUTURE_FEATURES_PLAN.md) - Future roadmap
 
 ## Table of Contents
 1. [Grok's Annie Overview](#groks-annie-overview)
@@ -1960,124 +1961,33 @@ User continues on Web → Backend API → Redis State Store (seamless continuati
 
 ## Implementation Timeline & Milestones
 
-### Phase 1: Foundation (Weeks 1-4)
-**Goal**: Set up core infrastructure and MCP server
+> **Note**: Detailed implementation timeline and phases are documented in [V1 Implementation Plan](../04-implementation/V1_IMPLEMENTATION_PLAN.md).
 
-**Week 1-2: MCP Server Setup**
-- [ ] Install MCP Python SDK and dependencies
-- [ ] Create base MCP server structure
-- [ ] Implement stdio transport
-- [ ] Set up tool registration system
-- [ ] Create error handling framework
+### V1 Implementation (10 Weeks)
 
-**Week 3-4: Tool Implementations**
-- [ ] Implement Internet Access tool (search + fetch)
-- [ ] Integrate agentic-memories HTTP client
-- [ ] Implement Memories tool (store + retrieve)
-- [ ] Create Stock Trader tool skeleton
-- [ ] Add tool chaining logic
+The current V1 implementation follows a 5-phase approach over 10 weeks:
 
-**Deliverables**: Working MCP server with all 3 tools, unit tests
+- **Phase 1: Foundation** (Week 1-2) - Docker setup and MCP server foundation
+- **Phase 2: Core Backend** (Week 3-4) - Backend API with LLM integration
+- **Phase 3: MCP Tools** (Week 5-6) - Internet Access and Memories tools
+- **Phase 4: Telegram Bot** (Week 7-8) - Telegram interface implementation
+- **Phase 5: Integration & Testing** (Week 9-10) - End-to-end integration and testing
 
-### Phase 2: Backend Core (Weeks 5-8)
-**Goal**: Build unified backend API with LLM integration
+**V1 Scope**: Telegram bot only. Web interface, iOS app, and A2A protocol are deferred to future versions (V1.1, V1.2, V2.1).
 
-**Week 5-6: API Server**
-- [ ] Set up FastAPI/Express server
-- [ ] Implement unified chat endpoint
-- [ ] Add MCP client integration
-- [ ] Set up WebSocket/SSE streaming
-- [ ] Implement cross-platform state sync
-
-**Week 7-8: LLM Integration**
-- [ ] Integrate Grok-4 API client
-- [ ] Integrate ChatGPT-5 API client
-- [ ] Implement streaming responses
-- [ ] Add tool calling support
-- [ ] Create model selection logic
-
-**Deliverables**: Backend API with LLM streaming, MCP integration
-
-### Phase 3: Platform Interfaces (Weeks 9-14)
-**Goal**: Implement all access interfaces
-
-**Week 9-10: Telegram Bot**
-- [ ] Set up Telegram Bot API
-- [ ] Create Telegram adapter
-- [ ] Implement message handling
-- [ ] Add voice message support
-- [ ] Test with backend API
-
-**Week 11-12: Web Interface**
-- [ ] Set up Next.js project
-- [ ] Integrate Three.js for 3D avatar
-- [ ] Implement WebSocket client
-- [ ] Add voice input/output
-- [ ] Create responsive mobile UI
-
-**Week 13-14: iOS App**
-- [ ] Set up SwiftUI project
-- [ ] Implement WebSocket client
-- [ ] Add 3D avatar (SceneKit)
-- [ ] Integrate Speech framework
-- [ ] Test App Store submission
-
-**Deliverables**: All 4 interfaces functional
-
-### Phase 4: Advanced Features (Weeks 15-18)
-**Goal**: Add gamification, A2A, and polish
-
-**Week 15-16: Gamification System**
-- [ ] Implement affection scoring algorithm
-- [ ] Create unlock system
-- [ ] Add response style adaptation
-- [ ] Build analytics dashboard
-
-**Week 17: A2A Integration**
-- [ ] Research A2A protocol specs
-- [ ] Implement A2A server/adapter
-- [ ] Register with A2A registry
-- [ ] Test with Claude/Gemini
-
-**Week 18: Polish & Optimization**
-- [ ] Performance optimization
-- [ ] Error handling improvements
-- [ ] Caching strategies
-- [ ] Load testing
-
-**Deliverables**: Complete system with all features
-
-### Phase 5: Testing & Deployment (Weeks 19-20)
-**Goal**: Comprehensive testing and production deployment
-
-**Week 19: Testing**
-- [ ] Unit tests (80%+ coverage)
-- [ ] Integration tests
-- [ ] E2E tests for all interfaces
-- [ ] Security testing
-- [ ] Performance testing
-
-**Week 20: Deployment**
-- [ ] Set up production infrastructure
-- [ ] Deploy backend services
-- [ ] Deploy MCP server
-- [ ] Deploy web interface
-- [ ] Submit iOS app to App Store
-- [ ] Monitor and iterate
-
-**Deliverables**: Production-ready system
+**Future Roadmap**: See [Future Features Plan](../01-product/FUTURE_FEATURES_PLAN.md) for V1.1+ features.
 
 ### Critical Path Dependencies
 
 ```
-MCP Server → Backend API → Platform Interfaces
+MCP Server → Backend API → Telegram Bot
      ↓            ↓              ↓
   Tools      LLM Integration   Testing
      ↓            ↓              ↓
   Memories    Streaming      Deployment
 ```
 
-**Total Timeline**: ~20 weeks (5 months) for MVP, +4-8 weeks for polish
+**Total Timeline**: 10 weeks for V1 MVP
 
 ---
 

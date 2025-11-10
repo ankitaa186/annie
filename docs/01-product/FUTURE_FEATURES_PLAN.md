@@ -131,7 +131,8 @@ This document outlines planned features for future versions of Annie chatbot, be
 
 ## References
 
-- A2A_PROTOCOL_RESEARCH.md: A2A protocol details
-- 3D_ANIMATION_RESEARCH.md: 3D animation implementation
-- REALTIME_COMMUNICATION_RESEARCH.md: WebSocket patterns
+- [Product Requirements](./PRODUCT_REQUIREMENTS.md) - Product vision and goals
+- [V1 Implementation Plan](../04-implementation/V1_IMPLEMENTATION_PLAN.md) - Current implementation
+- [Architecture Plan](../02-architecture/ARCHITECTURE_PLAN.md) - System architecture
+- [Research Summary](../06-reference/RESEARCH_SUMMARY.md) - Technical research details
 
