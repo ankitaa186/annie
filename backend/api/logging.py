@@ -154,7 +154,27 @@ class HumanReadableFormatter(logging.Formatter):
         if hasattr(record, "duration_ms"):
             operation = getattr(record, "operation", "unknown")
             record.msg = f"{record.msg} [operation={operation}, duration={record.duration_ms}ms]"
-        
+
+        # Add any extra fields (like error_type, error, etc.)
+        extra_fields = []
+        for key, value in record.__dict__.items():
+            if key not in [
+                "name", "msg", "args", "created", "filename", "funcName",
+                "levelname", "levelno", "lineno", "module", "msecs", "message",
+                "pathname", "process", "processName", "relativeCreated", "thread",
+                "threadName", "exc_info", "exc_text", "stack_info", "service",
+                "user_id", "conversation_id", "request_id", "error_code",
+                "duration_ms", "operation"
+            ]:
+                # Mask sensitive fields
+                if any(sensitive in key.lower() for sensitive in SENSITIVE_FIELDS):
+                    extra_fields.append(f"{key}={mask_sensitive_value(str(value))}")
+                else:
+                    extra_fields.append(f"{key}={value}")
+
+        if extra_fields:
+            record.msg = f"{record.msg} [{', '.join(extra_fields)}]"
+
         # Mask sensitive data in message
         record.msg = self._mask_sensitive_data(str(record.msg))
         

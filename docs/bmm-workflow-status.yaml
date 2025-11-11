@@ -36,12 +36,12 @@ workflow_status:
 
   # Phase 1: Planning
   prd: "docs/01-product/PRODUCT_REQUIREMENTS.md"  # agent: pm
-  validate-prd: optional  # agent: pm
-  create-design: conditional  # agent: ux-designer
+  validate-prd: skipped  # agent: pm
+  create-design: skipped  # agent: ux-designer
 
   # Phase 2: Solutioning
   create-architecture: "docs/02-architecture/ARCHITECTURE_PLAN.md"  # agent: architect
-  validate-architecture: optional  # agent: architect
+  validate-architecture: skipped  # agent: architect
   solutioning-gate-check: "docs/bmm-readiness-assessment-2025-11-10.md"  # agent: architect
 
   # Phase 3: Implementation
