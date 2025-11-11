@@ -62,6 +62,7 @@ REQUIRED_VARS = [
 OPTIONAL_VARS = {
     "LOG_LEVEL": "INFO",
     "ENVIRONMENT": "dev",
+    "MCP_SERVER_PORT": "8002",
 }
 
 # Sensitive variables that should be masked in logs
@@ -96,26 +97,28 @@ def validate_environment() -> dict:
     for var, default in OPTIONAL_VARS.items():
         config[var] = get_env_var(var, default=default)
     
-    # Load tool API keys (optional but recommended)
+    # Load tool API keys (optional - for Epic 4 tools)
+    # These keys are not required for Sprint 1, just log warnings
+    from mcp_server.logging import get_logger
+    logger = get_logger(__name__)
+
     brave_key = get_env_var("BRAVE_SEARCH_API_KEY")
     if brave_key and brave_key != "REPLACE_ME":
         config["BRAVE_SEARCH_API_KEY"] = brave_key
     else:
-        errors.append(
-            "BRAVE_SEARCH_API_KEY is not set. Internet access tool will not work. "
-            "Please set it in your .env file."
+        logger.warning(
+            "BRAVE_SEARCH_API_KEY is not set. Internet access tool will not work until configured."
         )
-    
+
     stock_key = get_env_var("STOCK_API_KEY")
     if stock_key and stock_key != "REPLACE_ME":
         config["STOCK_API_KEY"] = stock_key
     else:
-        errors.append(
-            "STOCK_API_KEY is not set. Stock trader tool will not work. "
-            "Please set it in your .env file."
+        logger.warning(
+            "STOCK_API_KEY is not set. Stock trader tool will not work until configured."
         )
-    
-    # Raise errors if any validation failed
+
+    # Raise errors only if critical validation failed
     if errors:
         error_msg = "Environment validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
         raise ValueError(error_msg)
@@ -126,11 +129,17 @@ def validate_environment() -> dict:
 def get_config() -> dict:
     """
     Get validated configuration dictionary.
-    
+
     Returns:
         Dictionary of validated configuration values
     """
-    return validate_environment()
+    config = validate_environment()
+
+    # Convert port to int for uvicorn
+    if "MCP_SERVER_PORT" in config:
+        config["MCP_SERVER_PORT"] = int(config["MCP_SERVER_PORT"])
+
+    return config
 
 
 # Validate on import (can be disabled for testing)

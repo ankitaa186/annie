@@ -1,55 +1,59 @@
 """
 MCP Server Main Module
 
-Implements MCP (Model Context Protocol) server with stdio transport
+Implements MCP (Model Context Protocol) server with HTTP transport
 and JSON-RPC 2.0 protocol support.
 """
 
 import json
-import sys
 import time
 from datetime import datetime
 from typing import Any, Dict, Optional
 
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import JSONResponse
+
+from mcp_server.config import get_config
 from mcp_server.logging import get_logger, log_performance
 from mcp_server.tools import ToolRegistry, health_check_tool
 
 logger = get_logger(__name__)
+config = get_config()
 
 
 class MCPServer:
-    """MCP Server implementation with stdio transport."""
-    
+    """MCP Server implementation with HTTP transport."""
+
     def __init__(self):
         """Initialize MCP server."""
         self.tool_registry = ToolRegistry()
         self.register_default_tools()
         logger.info("MCP Server initialized")
-    
+
     def register_default_tools(self):
         """Register default tools."""
         self.tool_registry.register(health_check_tool)
         logger.info(f"Registered {len(self.tool_registry.tools)} tools")
-    
+
     def handle_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle JSON-RPC 2.0 request.
-        
+
         Args:
             request: JSON-RPC 2.0 request dictionary
-        
+
         Returns:
             JSON-RPC 2.0 response dictionary
         """
         request_id = request.get("id")
         method = request.get("method")
         params = request.get("params", {})
-        
+
         logger.debug(
             f"Received request: method={method}, id={request_id}",
             extra={"request_id": str(request_id), "method": method}
         )
-        
+
         try:
             if method == "tools/list":
                 return self.handle_tools_list(request_id)
@@ -72,14 +76,14 @@ class MCPServer:
                 -32603,
                 f"Internal error: {str(e)}"
             )
-    
+
     def handle_tools_list(self, request_id: Optional[Any]) -> Dict[str, Any]:
         """
         Handle tools/list request.
-        
+
         Args:
             request_id: Request ID
-        
+
         Returns:
             JSON-RPC response with list of available tools
         """
@@ -90,39 +94,39 @@ class MCPServer:
                 "description": tool_info.get("description", ""),
                 "inputSchema": tool_info.get("inputSchema", {})
             })
-        
+
         logger.info(f"Listed {len(tools)} tools", extra={"request_id": str(request_id)})
-        
+
         return {
             "jsonrpc": "2.0",
             "result": {"tools": tools},
             "id": request_id
         }
-    
+
     @log_performance("tool_call")
     def handle_tool_call(self, request_id: Optional[Any], params: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle tools/call request.
-        
+
         Args:
             request_id: Request ID
             params: Tool call parameters (name, arguments)
-        
+
         Returns:
             JSON-RPC response with tool result
         """
         tool_name = params.get("name")
         arguments = params.get("arguments", {})
-        
+
         if not tool_name:
             return self.create_error_response(
                 request_id,
                 -32602,
                 "Invalid params: 'name' is required"
             )
-        
+
         start_time = time.time()
-        
+
         logger.info(
             f"Tool call: {tool_name}",
             extra={
@@ -131,7 +135,7 @@ class MCPServer:
                 "parameters": arguments
             }
         )
-        
+
         # Get tool handler
         tool_info = self.tool_registry.get_tool(tool_name)
         if not tool_info:
@@ -140,13 +144,13 @@ class MCPServer:
                 -32601,
                 f"Tool not found: {tool_name}"
             )
-        
+
         # Execute tool
         try:
             tool_handler = tool_info["handler"]
             result = tool_handler(**arguments)
             duration_ms = int((time.time() - start_time) * 1000)
-            
+
             logger.info(
                 f"Tool call completed: {tool_name}",
                 extra={
@@ -156,7 +160,7 @@ class MCPServer:
                     "result": result
                 }
             )
-            
+
             return {
                 "jsonrpc": "2.0",
                 "result": {
@@ -186,7 +190,7 @@ class MCPServer:
                 -32603,
                 f"Tool execution error: {str(e)}"
             )
-    
+
     def create_error_response(
         self,
         request_id: Optional[Any],
@@ -195,12 +199,12 @@ class MCPServer:
     ) -> Dict[str, Any]:
         """
         Create JSON-RPC error response.
-        
+
         Args:
             request_id: Request ID
             code: Error code
             message: Error message
-        
+
         Returns:
             JSON-RPC error response
         """
@@ -208,7 +212,7 @@ class MCPServer:
             f"Error response: code={code}, message={message}",
             extra={"request_id": str(request_id), "error_code": code}
         )
-        
+
         return {
             "jsonrpc": "2.0",
             "error": {
@@ -217,52 +221,134 @@ class MCPServer:
             },
             "id": request_id
         }
-    
-    def run(self):
-        """Run MCP server with stdio transport."""
-        logger.info("Starting MCP server with stdio transport...")
-        
-        try:
-            while True:
-                # Read JSON-RPC message from stdin
-                line = sys.stdin.readline()
-                if not line:
-                    # EOF reached - log and wait briefly before continuing
-                    # This handles cases where stdin temporarily closes
-                    logger.debug("EOF on stdin, waiting for input...")
-                    time.sleep(0.1)
-                    continue
-                
-                line = line.strip()
-                if not line:
-                    continue
-                
-                try:
-                    request = json.loads(line)
-                    response = self.handle_request(request)
-                    
-                    # Write response to stdout
-                    print(json.dumps(response), flush=True)
-                except json.JSONDecodeError as e:
-                    logger.error(f"Invalid JSON: {str(e)}", exc_info=True)
-                    error_response = self.create_error_response(
-                        None,
-                        -32700,
-                        f"Parse error: {str(e)}"
-                    )
-                    print(json.dumps(error_response), flush=True)
-        except KeyboardInterrupt:
-            logger.info("MCP server shutting down...")
-        except Exception as e:
-            logger.error(f"Fatal error: {str(e)}", exc_info=True)
-            sys.exit(1)
 
 
-def main():
-    """Main entry point for MCP server."""
-    server = MCPServer()
-    server.run()
+# Create FastAPI app
+app = FastAPI(
+    title="Annie MCP Server",
+    description="MCP (Model Context Protocol) Server for Annie",
+    version="1.0.0"
+)
+
+# Initialize MCP server instance
+mcp_server = MCPServer()
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint."""
+    return JSONResponse(content={
+        "status": "ok",
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "tools_registered": len(mcp_server.tool_registry.tools)
+    })
+
+
+@app.get("/tools/list")
+async def list_tools():
+    """
+    List all available MCP tools.
+
+    Returns JSON-RPC 2.0 response with tools list.
+    """
+    request_data = {
+        "jsonrpc": "2.0",
+        "method": "tools/list",
+        "id": "http-list"
+    }
+
+    response = mcp_server.handle_request(request_data)
+    return JSONResponse(content=response)
+
+
+@app.post("/tools/call")
+async def call_tool(request: Request):
+    """
+    Call an MCP tool via JSON-RPC 2.0.
+
+    Expects JSON-RPC 2.0 request body:
+    {
+        "jsonrpc": "2.0",
+        "method": "tools/call",
+        "params": {
+            "name": "tool_name",
+            "arguments": {...}
+        },
+        "id": 1
+    }
+    """
+    try:
+        request_data = await request.json()
+
+        # Validate JSON-RPC 2.0 format
+        if request_data.get("jsonrpc") != "2.0":
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32600,
+                        "message": "Invalid Request: jsonrpc version must be '2.0'"
+                    },
+                    "id": request_data.get("id")
+                }
+            )
+
+        response = mcp_server.handle_request(request_data)
+        return JSONResponse(content=response)
+
+    except json.JSONDecodeError as e:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32700,
+                    "message": f"Parse error: {str(e)}"
+                },
+                "id": None
+            }
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error: {str(e)}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32603,
+                    "message": f"Internal error: {str(e)}"
+                },
+                "id": None
+            }
+        )
+
+
+@app.get("/")
+async def root():
+    """Root endpoint with server info."""
+    return JSONResponse(content={
+        "name": "Annie MCP Server",
+        "version": "1.0.0",
+        "status": "running",
+        "transport": "http",
+        "endpoints": {
+            "health": "/health",
+            "list_tools": "/tools/list",
+            "call_tool": "/tools/call (POST)"
+        }
+    })
 
 
 if __name__ == "__main__":
-    main()
+    import uvicorn
+
+    port = config.get("MCP_SERVER_PORT", 8002)
+
+    logger.info(f"Starting MCP server on port {port}...")
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=port,
+        log_level=config.get("LOG_LEVEL", "info").lower()
+    )

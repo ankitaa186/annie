@@ -5,7 +5,9 @@
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
 
+# HTTP client for MCP server and LLM APIs
+httpx>=0.25.0
+
 # Core dependencies will be added in subsequent stories:
 # - Redis client (state management)
-# - HTTP client (for LLM APIs)
 # - SSE support (streaming responses)

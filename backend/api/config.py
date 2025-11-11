@@ -65,7 +65,7 @@ OPTIONAL_VARS = {
     "LOG_LEVEL": "INFO",
     "REDIS_HOST": "redis",
     "REDIS_PORT": "6379",
-    "MCP_SERVER_NAME": "mcp-server",
+    "MCP_SERVER_URL": "http://mcp-server:8002",
     "BACKEND_PORT": "8000",
     "ENVIRONMENT": "dev",
 }

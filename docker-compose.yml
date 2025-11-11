@@ -12,7 +12,7 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - MCP_SERVER_NAME=mcp-server
+      - MCP_SERVER_URL=http://mcp-server:8002
       - GROK_API_KEY=${GROK_API_KEY}
       - CHATGPT_API_KEY=${CHATGPT_API_KEY}
       - AGENTIC_MEMORIES_URL=${AGENTIC_MEMORIES_URL}
@@ -38,15 +38,16 @@ services:
       context: ./mcp_server
       dockerfile: Dockerfile
     container_name: annie-mcp-server
-    stdin_open: true
-    tty: true
+    ports:
+      - "${MCP_SERVER_PORT:-8002}:8002"
     environment:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - MCP_SERVER_PORT=8002
       - BRAVE_SEARCH_API_KEY=${BRAVE_SEARCH_API_KEY}
       - STOCK_API_KEY=${STOCK_API_KEY}
       - AGENTIC_MEMORIES_URL=${AGENTIC_MEMORIES_URL}
     healthcheck:
-      test: ["CMD-SHELL", "pgrep -f 'python.*mcp_server.server' || exit 1"]
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8002/health').raise_for_status()"]
       interval: 30s
       timeout: 10s
       retries: 3
