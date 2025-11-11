@@ -101,42 +101,47 @@ def validate_environment() -> dict:
         except ValueError as e:
             errors.append(str(e))
     
-    # Validate LLM provider configuration
+    # Load optional variables with defaults
+    for var, default in OPTIONAL_VARS.items():
+        config[var] = get_env_var(var, default=default)
+
+    # Load LLM provider configuration (optional for Story 2.1, required for Story 2.2)
+    # For now, log warnings if not configured
+    from api.logging import get_logger
+    logger = get_logger(__name__)
+
     llm_provider = get_env_var("LLM_PROVIDER", default="grok-4")
     config["LLM_PROVIDER"] = llm_provider
-    
+
     if llm_provider == "grok-4":
         grok_key = get_env_var("GROK_API_KEY")
         if not grok_key or grok_key == "REPLACE_ME":
-            errors.append(
-                f"LLM_PROVIDER is set to 'grok-4' but GROK_API_KEY is not set. "
-                f"Please set GROK_API_KEY in your .env file."
+            logger.warning(
+                "LLM_PROVIDER is set to 'grok-4' but GROK_API_KEY is not set. "
+                "LLM functionality will not work until configured (required for Story 2.2)."
             )
         else:
             config["GROK_API_KEY"] = grok_key
     elif llm_provider == "chatgpt-5":
         chatgpt_key = get_env_var("CHATGPT_API_KEY")
         if not chatgpt_key or chatgpt_key == "REPLACE_ME":
-            errors.append(
-                f"LLM_PROVIDER is set to 'chatgpt-5' but CHATGPT_API_KEY is not set. "
-                f"Please set CHATGPT_API_KEY in your .env file."
+            logger.warning(
+                "LLM_PROVIDER is set to 'chatgpt-5' but CHATGPT_API_KEY is not set. "
+                "LLM functionality will not work until configured (required for Story 2.2)."
             )
         else:
             config["CHATGPT_API_KEY"] = chatgpt_key
     else:
-        errors.append(
-            f"Invalid LLM_PROVIDER '{llm_provider}'. Must be 'grok-4' or 'chatgpt-5'."
+        logger.warning(
+            f"Invalid LLM_PROVIDER '{llm_provider}'. Must be 'grok-4' or 'chatgpt-5'. "
+            f"LLM functionality will not work until configured properly."
         )
-    
-    # Load optional variables with defaults
-    for var, default in OPTIONAL_VARS.items():
-        config[var] = get_env_var(var, default=default)
-    
+
     # Load optional LLM keys (may be set even if not primary provider)
     grok_key = get_env_var("GROK_API_KEY")
     if grok_key and grok_key != "REPLACE_ME":
         config["GROK_API_KEY"] = grok_key
-    
+
     chatgpt_key = get_env_var("CHATGPT_API_KEY")
     if chatgpt_key and chatgpt_key != "REPLACE_ME":
         config["CHATGPT_API_KEY"] = chatgpt_key

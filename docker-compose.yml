@@ -13,6 +13,7 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - MCP_SERVER_URL=http://mcp-server:8002
+      - LLM_PROVIDER=${LLM_PROVIDER:-grok-4}
       - GROK_API_KEY=${GROK_API_KEY}
       - CHATGPT_API_KEY=${CHATGPT_API_KEY}
       - AGENTIC_MEMORIES_URL=${AGENTIC_MEMORIES_URL}

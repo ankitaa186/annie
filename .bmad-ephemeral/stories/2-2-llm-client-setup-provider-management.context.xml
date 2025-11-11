@@ -1,0 +1,178 @@
+<story-context id=".bmad/bmm/workflows/4-implementation/story-context/template" v="1.0">
+  <metadata>
+    <epicId>2</epicId>
+    <storyId>2.2</storyId>
+    <title>LLM Client Setup & Provider Management</title>
+    <status>ready-for-dev</status>
+    <generatedAt>2025-11-11</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>.bmad-ephemeral/stories/2-2-llm-client-setup-provider-management.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>a developer</asA>
+    <iWant>a unified LLM client with provider selection and fallback</iWant>
+    <soThat>Annie can use multiple LLM providers reliably</soThat>
+    <tasks>
+      <task id="1" acs="1,2,7">Implement LLM Client base class with provider configuration from environment variables</task>
+      <task id="2" acs="3">Implement provider failover logic with 2-second timeout</task>
+      <task id="3" acs="4,5">Implement error handling for both providers failing with structured logging</task>
+      <task id="4" acs="6">Implement rate limiting and retry logic</task>
+      <task id="5" acs="1,2">Implement basic chat completion method with OpenAI-compatible format</task>
+      <task id="6" acs="1,2">Update LLM health check in main.py</task>
+      <task id="7" acs="1,2,3,4,5,6,7">End-to-end testing of all LLM client features</task>
+    </tasks>
+  </story>
+
+  <acceptanceCriteria>
+    <ac id="1">Given Grok-4 API key is configured, when I initialize the LLM client, then it authenticates and can make API calls successfully</ac>
+    <ac id="2">Given the LLM client, when I configure providers, then it supports Grok-4 (primary) and ChatGPT-5 (fallback) with provider selection logic</ac>
+    <ac id="3">Given Grok-4 fails (network error, API error, rate limit), when I call the LLM client, then it automatically falls back to ChatGPT-5 within 2 seconds</ac>
+    <ac id="4">Given both LLMs fail, when I call the LLM client, then it returns a clear, user-friendly error message: "I'm experiencing technical difficulties. Please try again in a moment."</ac>
+    <ac id="5">Given the LLM client, when I check error handling, then provider failures are logged with error details, retry attempts, and fallback actions</ac>
+    <ac id="6">Given the LLM client, when rate limiting occurs, then it handles rate limit errors gracefully and suggests retry after appropriate delay</ac>
+    <ac id="7">Given the LLM client, when I check configuration, then API keys, base URLs, and timeouts are configurable via environment variables</ac>
+  </acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc>
+        <path>.bmad-ephemeral/stories/tech-spec-epic-2.md</path>
+        <title>Epic 2 Technical Specification</title>
+        <section>LLM Client Module Design</section>
+        <snippet>Unified client for Grok-4 (primary) and ChatGPT-5 (fallback) with automatic provider failover within 2 seconds. Handles streaming responses, function calling requests, rate limiting and retry logic.</snippet>
+      </doc>
+      <doc>
+        <path>docs/02-architecture/ARCHITECTURE_PLAN.md</path>
+        <title>Architecture Plan</title>
+        <section>Backend API Service - LLM Client Component</section>
+        <snippet>Unified client for Grok-4/ChatGPT-5 supporting provider failover, streaming handler for SSE responses, and state management via Redis.</snippet>
+      </doc>
+      <doc>
+        <path>.bmad-ephemeral/stories/2-1-backend-api-foundation.md</path>
+        <title>Story 2.1: Backend API Foundation</title>
+        <section>Learnings - Config Validation and Health Checks</section>
+        <snippet>Backend config validation supports LLM provider configuration with warnings (not errors). LLM health check placeholder exists in main.py awaiting implementation. Structured logging pattern: get_logger(__name__).</snippet>
+      </doc>
+      <doc>
+        <path>docs/epics-and-stories.md</path>
+        <title>Epic and Story Breakdown</title>
+        <section>Epic 2: Core Chat & LLM Integration</section>
+        <snippet>Epic 2 implements unified LLM client with provider failover, SSE streaming support, function calling integration, conversation state management, and error handling patterns.</snippet>
+      </doc>
+      <doc>
+        <path>docs/TECHNICAL_DEBT.md</path>
+        <title>Technical Debt Tracking</title>
+        <section>Missing Automated Tests & Placeholder Health Checks</section>
+        <snippet>LLM API health check currently returns hardcoded "ok" - to be implemented in Story 2.2. Missing pytest test suite for backend API to be addressed.</snippet>
+      </doc>
+    </docs>
+    <code>
+      <artifact>
+        <path>backend/api/config.py</path>
+        <kind>configuration module</kind>
+        <symbol>get_config(), get_env_var(), mask_sensitive_value()</symbol>
+        <lines>108-148</lines>
+        <reason>LLM provider configuration already exists with warning-based validation. Use get_config() to access LLM_PROVIDER, GROK_API_KEY, CHATGPT_API_KEY.</reason>
+      </artifact>
+      <artifact>
+        <path>backend/api/logging.py</path>
+        <kind>logging module</kind>
+        <symbol>get_logger()</symbol>
+        <lines>1-40</lines>
+        <reason>Structured logging pattern with sensitive data masking. Use get_logger(__name__) to create logger instances for LLM client.</reason>
+      </artifact>
+      <artifact>
+        <path>backend/api/main.py</path>
+        <kind>fastapi application</kind>
+        <symbol>check_llm_api_health()</symbol>
+        <lines>87-91</lines>
+        <reason>Placeholder health check function that needs replacement with actual LLM client health check implementation.</reason>
+      </artifact>
+      <artifact>
+        <path>backend/api/mcp_client.py</path>
+        <kind>http client</kind>
+        <symbol>MCPClient class</symbol>
+        <lines>15-60</lines>
+        <reason>Reference example of HTTP client pattern using httpx with timeout configuration and error handling.</reason>
+      </artifact>
+    </code>
+    <dependencies>
+      <python>
+        <package name="fastapi" version=">=0.104.0" />
+        <package name="uvicorn" version=">=0.24.0" />
+        <package name="httpx" version=">=0.25.0" note="Already added for async HTTP calls" />
+      </python>
+      <external-apis>
+        <api name="XAI Grok-4 API" endpoint="https://api.x.ai/v1/chat/completions" auth="Bearer token via GROK_API_KEY" />
+        <api name="OpenAI ChatGPT-5 API" endpoint="https://api.openai.com/v1/chat/completions" auth="Bearer token via CHATGPT_API_KEY" />
+      </external-apis>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint>Use OpenAI-compatible API format for both Grok-4 and ChatGPT-5 endpoints</constraint>
+    <constraint>Provider failover must complete within 2 seconds (p95 performance requirement)</constraint>
+    <constraint>Use httpx.AsyncClient for async HTTP calls with configurable timeout</constraint>
+    <constraint>Follow structured logging pattern: get_logger(__name__) with masked API keys</constraint>
+    <constraint>Use existing config.get_config() for environment variable access</constraint>
+    <constraint>Error messages must be user-friendly, not expose internal details</constraint>
+    <constraint>All API keys must be configurable via environment variables</constraint>
+    <constraint>Rate limit detection via HTTP 429 status code and retry-after header parsing</constraint>
+  </constraints>
+  <interfaces>
+    <interface>
+      <name>LLMClient.__init__</name>
+      <kind>constructor</kind>
+      <signature>def __init__(self) -> None</signature>
+      <path>backend/api/llm_client.py</path>
+      <description>Initialize LLM client with provider configuration from environment</description>
+    </interface>
+    <interface>
+      <name>LLMClient.chat_completion</name>
+      <kind>async method</kind>
+      <signature>async def chat_completion(self, messages: list) -> dict</signature>
+      <path>backend/api/llm_client.py</path>
+      <description>Send chat completion request to LLM provider with automatic failover</description>
+    </interface>
+    <interface>
+      <name>LLMClient.health_check</name>
+      <kind>method</kind>
+      <signature>def health_check(self) -> str</signature>
+      <path>backend/api/llm_client.py</path>
+      <description>Check primary provider availability, return "ok", "degraded", or "unavailable"</description>
+    </interface>
+    <interface>
+      <name>Grok-4 API Endpoint</name>
+      <kind>REST endpoint</kind>
+      <signature>POST https://api.x.ai/v1/chat/completions</signature>
+      <description>XAI Grok-4 chat completion endpoint (OpenAI-compatible)</description>
+    </interface>
+    <interface>
+      <name>ChatGPT-5 API Endpoint</name>
+      <kind>REST endpoint</kind>
+      <signature>POST https://api.openai.com/v1/chat/completions</signature>
+      <description>OpenAI ChatGPT-5 chat completion endpoint</description>
+    </interface>
+  </interfaces>
+  <tests>
+    <standards>Use pytest framework with asyncio support for async methods. Mock external LLM API calls using unittest.mock.AsyncMock and @patch decorator. Follow test pyramid: 60% unit tests (fast, isolated), 30% integration tests (with test API keys), 10% E2E tests. Target 80%+ code coverage. Tests should be behavior-focused, maintainable, and fast (unit tests &lt; 1s each). Use pytest fixtures for common setup.</standards>
+    <locations>
+      <location>backend/tests/unit/test_llm_client.py - Unit tests for LLM client</location>
+      <location>backend/tests/integration/test_llm_client.py - Integration tests with actual API calls</location>
+      <location>backend/tests/unit/test_main.py - Tests for health check endpoint updates</location>
+    </locations>
+    <ideas>
+      <idea ac="1">Test Grok-4 authentication with valid API key, verify successful initialization</idea>
+      <idea ac="2">Test provider selection logic (Grok-4 vs ChatGPT-5) based on LLM_PROVIDER config</idea>
+      <idea ac="3">Test automatic failover: mock Grok-4 failure, verify switch to ChatGPT-5 within 2s timeout</idea>
+      <idea ac="3">Test failover with different error types: network errors, API errors, timeouts, rate limits</idea>
+      <idea ac="4">Test both providers failing: verify user-friendly error message returned</idea>
+      <idea ac="5">Test error logging: verify provider failures logged with structured extra fields</idea>
+      <idea ac="6">Test rate limit handling: mock HTTP 429 response, verify retry-after header parsing</idea>
+      <idea ac="7">Test configuration via environment variables: GROK_API_KEY, CHATGPT_API_KEY, LLM_PROVIDER</idea>
+      <idea ac="1,2">Test chat_completion method with both providers using mocked responses</idea>
+      <idea ac="1,2">Test health_check method returns "ok", "degraded", or "unavailable" based on provider state</idea>
+    </ideas>
+  </tests>
+</story-context>
