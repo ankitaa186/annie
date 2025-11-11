@@ -2,12 +2,12 @@
 LLM Client Module
 
 Unified client for LLM providers (Grok-4 and ChatGPT-5) with automatic failover,
-error handling, rate limiting support, and streaming capabilities.
+error handling, rate limiting support, streaming capabilities, and function calling.
 """
 
 import json
 import time
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional, Union
 import httpx
 from api.config import get_config
 from api.logging import get_logger
@@ -105,6 +105,44 @@ class LLMClient:
             }
         )
 
+    @staticmethod
+    def convert_mcp_tools_to_functions(mcp_tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Convert MCP tool schemas to OpenAI function calling format.
+
+        Args:
+            mcp_tools: List of MCP tool schemas with 'name', 'description', 'inputSchema'
+
+        Returns:
+            List of function definitions in OpenAI format
+
+        Note:
+            Both Grok-4 and ChatGPT-5 use OpenAI-compatible function calling format.
+        """
+        functions = []
+
+        for tool in mcp_tools:
+            function = {
+                "type": "function",
+                "function": {
+                    "name": tool.get("name", ""),
+                    "description": tool.get("description", ""),
+                    "parameters": tool.get("inputSchema", {
+                        "type": "object",
+                        "properties": {},
+                        "required": []
+                    })
+                }
+            }
+            functions.append(function)
+
+        logger.debug(
+            "Converted MCP tools to function calling format",
+            extra={"tool_count": len(functions)}
+        )
+
+        return functions
+
     async def __aenter__(self):
         """Async context manager entry."""
         return self
@@ -167,8 +205,9 @@ class LLMClient:
     async def _call_provider(
         self,
         provider: str,
-        messages: List[Dict[str, str]],
-        timeout: Optional[float] = None
+        messages: List[Dict[str, Any]],
+        timeout: Optional[float] = None,
+        tools: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
         """
         Call a specific LLM provider.
@@ -177,6 +216,7 @@ class LLMClient:
             provider: Provider name ("grok-4" or "chatgpt-5")
             messages: List of message dictionaries with 'role' and 'content'
             timeout: Optional timeout override for this request
+            tools: Optional list of tools/functions in OpenAI format
 
         Returns:
             Response dictionary from provider
@@ -201,6 +241,14 @@ class LLMClient:
                 "model": "grok-4-0709" if provider == "grok-4" else "gpt-4",
                 "messages": messages
             }
+
+            # Add tools if provided
+            if tools:
+                payload["tools"] = tools
+                logger.debug(
+                    "Function calling enabled",
+                    extra={"provider": provider, "tool_count": len(tools)}
+                )
 
             # Make request with timeout
             request_timeout = timeout if timeout is not None else self.FAILOVER_TIMEOUT
@@ -293,16 +341,23 @@ class LLMClient:
             )
             raise ProviderError(provider, f"Unexpected error: {type(e).__name__}", e)
 
-    async def chat_completion(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
+    async def chat_completion(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None
+    ) -> Dict[str, Any]:
         """
         Send chat completion request with automatic provider failover.
 
         Args:
             messages: List of message dictionaries with 'role' and 'content'
                      Example: [{"role": "user", "content": "Hello"}]
+                     Supports 'tool' role for tool results
+            tools: Optional list of tools/functions in OpenAI format for function calling
 
         Returns:
             Response dictionary with 'choices', 'usage', etc.
+            May include 'tool_calls' in choices[0]['message'] if LLM requests function call
 
         Raises:
             LLMClientError: If all providers fail
@@ -316,13 +371,19 @@ class LLMClient:
             extra={
                 "primary_provider": provider,
                 "fallback_provider": fallback,
-                "message_count": len(messages)
+                "message_count": len(messages),
+                "tools_provided": len(tools) if tools else 0
             }
         )
 
         # Try primary provider
         try:
-            result = await self._call_provider(provider, messages, timeout=self.FAILOVER_TIMEOUT)
+            result = await self._call_provider(
+                provider,
+                messages,
+                timeout=self.FAILOVER_TIMEOUT,
+                tools=tools
+            )
             return result
 
         except RateLimitError as e:
@@ -374,7 +435,12 @@ class LLMClient:
                 "Attempting fallback provider",
                 extra={"fallback_provider": fallback}
             )
-            result = await self._call_provider(fallback, messages, timeout=self.FAILOVER_TIMEOUT)
+            result = await self._call_provider(
+                fallback,
+                messages,
+                timeout=self.FAILOVER_TIMEOUT,
+                tools=tools
+            )
 
             logger.info(
                 "Fallback successful",
@@ -405,8 +471,9 @@ class LLMClient:
     async def _call_provider_stream(
         self,
         provider: str,
-        messages: List[Dict[str, str]],
-        timeout: Optional[float] = None
+        messages: List[Dict[str, Any]],
+        timeout: Optional[float] = None,
+        tools: Optional[List[Dict[str, Any]]] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Call a specific LLM provider with streaming enabled.
@@ -415,6 +482,7 @@ class LLMClient:
             provider: Provider name ("grok-4" or "chatgpt-5")
             messages: List of message dictionaries with 'role' and 'content'
             timeout: Optional timeout override for this request
+            tools: Optional list of tools/functions in OpenAI format
 
         Yields:
             Stream event dictionaries in SSE format
@@ -440,6 +508,14 @@ class LLMClient:
                 "messages": messages,
                 "stream": True  # Enable streaming
             }
+
+            # Add tools if provided
+            if tools:
+                payload["tools"] = tools
+                logger.debug(
+                    "Function calling enabled for streaming",
+                    extra={"provider": provider, "tool_count": len(tools)}
+                )
 
             # Make streaming request
             request_timeout = timeout if timeout is not None else self.REQUEST_TIMEOUT
@@ -617,7 +693,8 @@ class LLMClient:
 
     async def chat_completion_stream(
         self,
-        messages: List[Dict[str, str]]
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Send streaming chat completion request with automatic provider failover.
@@ -625,6 +702,7 @@ class LLMClient:
         Args:
             messages: List of message dictionaries with 'role' and 'content'
                      Example: [{"role": "user", "content": "Hello"}]
+            tools: Optional list of tools/functions in OpenAI format for function calling
 
         Yields:
             Stream event dictionaries:
@@ -644,13 +722,19 @@ class LLMClient:
             extra={
                 "primary_provider": provider,
                 "fallback_provider": fallback,
-                "message_count": len(messages)
+                "message_count": len(messages),
+                "tools_provided": len(tools) if tools else 0
             }
         )
 
         # Try primary provider
         try:
-            async for event in self._call_provider_stream(provider, messages, timeout=self.FAILOVER_TIMEOUT):
+            async for event in self._call_provider_stream(
+                provider,
+                messages,
+                timeout=self.FAILOVER_TIMEOUT,
+                tools=tools
+            ):
                 yield event
             return  # Successfully completed streaming
 
@@ -709,7 +793,12 @@ class LLMClient:
                 extra={"fallback_provider": fallback}
             )
 
-            async for event in self._call_provider_stream(fallback, messages, timeout=self.FAILOVER_TIMEOUT):
+            async for event in self._call_provider_stream(
+                fallback,
+                messages,
+                timeout=self.FAILOVER_TIMEOUT,
+                tools=tools
+            ):
                 yield event
 
             logger.info(

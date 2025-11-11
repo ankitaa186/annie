@@ -54,18 +54,32 @@ class TestEndToEndStreaming:
         stream_url = chat_response["stream_url"]
 
         # Step 2: Connect to streaming endpoint
-        with patch('api.routes.stream.LLMClient') as MockLLMClient:
-            mock_client_instance = Mock()
-            MockLLMClient.return_value.__aenter__.return_value = mock_client_instance
+        with patch('api.routes.stream.LLMClient') as MockLLMClient, \
+             patch('api.routes.stream.MCPClient') as MockMCPClient:
+
+            # Mock LLM client
+            mock_llm_instance = Mock()
+            MockLLMClient.return_value.__aenter__.return_value = mock_llm_instance
+            mock_llm_instance.convert_mcp_tools_to_functions = Mock(return_value=[])
+
+            # Mock MCP client
+            mock_mcp_instance = AsyncMock()
+            MockMCPClient.return_value.__aenter__.return_value = mock_mcp_instance
+            mock_mcp_instance.list_tools = AsyncMock(return_value=[])
+
+            # Mock non-streaming call (returns no tool calls)
+            mock_llm_instance.chat_completion = AsyncMock(return_value={
+                "choices": [{"message": {"role": "assistant", "content": "test"}}]
+            })
 
             # Mock streaming response
-            async def mock_stream(messages):
+            async def mock_stream(messages, tools=None):
                 yield {"type": "token", "content": "I'm"}
                 yield {"type": "token", "content": " doing"}
                 yield {"type": "token", "content": " well!"}
                 yield {"type": "done", "tokens_used": {"prompt": 15, "completion": 3}}
 
-            mock_client_instance.chat_completion_stream = mock_stream
+            mock_llm_instance.chat_completion_stream = mock_stream
 
             # Make streaming request
             with client.stream("GET", stream_url) as stream_response:
@@ -112,15 +126,29 @@ class TestEndToEndStreaming:
             conversation_ids.append(conversation_id)
 
         # Mock LLM client for concurrent streams
-        with patch('api.routes.stream.LLMClient') as MockLLMClient:
-            mock_client_instance = Mock()
-            MockLLMClient.return_value.__aenter__.return_value = mock_client_instance
+        with patch('api.routes.stream.LLMClient') as MockLLMClient, \
+             patch('api.routes.stream.MCPClient') as MockMCPClient:
 
-            async def mock_stream(messages):
+            # Mock LLM client
+            mock_llm_instance = Mock()
+            MockLLMClient.return_value.__aenter__.return_value = mock_llm_instance
+            mock_llm_instance.convert_mcp_tools_to_functions = Mock(return_value=[])
+
+            # Mock MCP client
+            mock_mcp_instance = AsyncMock()
+            MockMCPClient.return_value.__aenter__.return_value = mock_mcp_instance
+            mock_mcp_instance.list_tools = AsyncMock(return_value=[])
+
+            # Mock non-streaming call (returns no tool calls)
+            mock_llm_instance.chat_completion = AsyncMock(return_value={
+                "choices": [{"message": {"role": "assistant", "content": "test"}}]
+            })
+
+            async def mock_stream(messages, tools=None):
                 yield {"type": "token", "content": "Response"}
                 yield {"type": "done", "tokens_used": {"prompt": 10, "completion": 1}}
 
-            mock_client_instance.chat_completion_stream = mock_stream
+            mock_llm_instance.chat_completion_stream = mock_stream
 
             # Test that all streams can be established concurrently
             # (Note: TestClient doesn't support true async, so we test sequentially)
@@ -152,17 +180,31 @@ class TestEndToEndStreaming:
 
         conversation_id = response.json()["conversation_id"]
 
-        with patch('api.routes.stream.LLMClient') as MockLLMClient:
-            mock_client_instance = Mock()
-            MockLLMClient.return_value.__aenter__.return_value = mock_client_instance
+        with patch('api.routes.stream.LLMClient') as MockLLMClient, \
+             patch('api.routes.stream.MCPClient') as MockMCPClient:
+
+            # Mock LLM client
+            mock_llm_instance = Mock()
+            MockLLMClient.return_value.__aenter__.return_value = mock_llm_instance
+            mock_llm_instance.convert_mcp_tools_to_functions = Mock(return_value=[])
+
+            # Mock MCP client
+            mock_mcp_instance = AsyncMock()
+            MockMCPClient.return_value.__aenter__.return_value = mock_mcp_instance
+            mock_mcp_instance.list_tools = AsyncMock(return_value=[])
+
+            # Mock non-streaming call (returns no tool calls)
+            mock_llm_instance.chat_completion = AsyncMock(return_value={
+                "choices": [{"message": {"role": "assistant", "content": "test"}}]
+            })
 
             # Mock streaming response with immediate first token
-            async def mock_stream(messages):
+            async def mock_stream(messages, tools=None):
                 # Simulate fast first token
                 yield {"type": "token", "content": "Fast"}
                 yield {"type": "done", "tokens_used": {"prompt": 5, "completion": 1}}
 
-            mock_client_instance.chat_completion_stream = mock_stream
+            mock_llm_instance.chat_completion_stream = mock_stream
 
             # Measure time to first token
             start_time = time.time()
@@ -201,12 +243,26 @@ class TestEndToEndStreaming:
 
         conversation_id = response.json()["conversation_id"]
 
-        with patch('api.routes.stream.LLMClient') as MockLLMClient:
-            mock_client_instance = Mock()
-            MockLLMClient.return_value.__aenter__.return_value = mock_client_instance
+        with patch('api.routes.stream.LLMClient') as MockLLMClient, \
+             patch('api.routes.stream.MCPClient') as MockMCPClient:
+
+            # Mock LLM client
+            mock_llm_instance = Mock()
+            MockLLMClient.return_value.__aenter__.return_value = mock_llm_instance
+            mock_llm_instance.convert_mcp_tools_to_functions = Mock(return_value=[])
+
+            # Mock MCP client
+            mock_mcp_instance = AsyncMock()
+            MockMCPClient.return_value.__aenter__.return_value = mock_mcp_instance
+            mock_mcp_instance.list_tools = AsyncMock(return_value=[])
+
+            # Mock non-streaming call (returns no tool calls)
+            mock_llm_instance.chat_completion = AsyncMock(return_value={
+                "choices": [{"message": {"role": "assistant", "content": "test"}}]
+            })
 
             # Mock streaming response with error
-            async def mock_stream(messages):
+            async def mock_stream(messages, tools=None):
                 yield {"type": "token", "content": "Start"}
                 # Simulate LLM error mid-stream
                 yield {
@@ -215,7 +271,7 @@ class TestEndToEndStreaming:
                     "code": "RATE_LIMIT_ERROR"
                 }
 
-            mock_client_instance.chat_completion_stream = mock_stream
+            mock_llm_instance.chat_completion_stream = mock_stream
 
             with client.stream("GET", f"/api/stream/{conversation_id}") as stream_response:
                 assert stream_response.status_code == 200
