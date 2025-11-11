@@ -60,8 +60,9 @@ class LLMClient:
     CHATGPT5_BASE_URL = "https://api.openai.com/v1"
 
     # Timeouts (in seconds)
-    REQUEST_TIMEOUT = 30.0  # Total timeout for request
-    FAILOVER_TIMEOUT = 2.0  # Max time before failing over to backup provider
+    REQUEST_TIMEOUT = 90.0  # Total timeout for request
+    FAILOVER_TIMEOUT = 30.0  # Max time before failing over to backup provider (non-streaming)
+    STREAMING_TIMEOUT = 45.0  # Timeout for streaming requests (longer to allow connection + first token)
 
     def __init__(self):
         """
@@ -525,7 +526,9 @@ class LLMClient:
                 extra={
                     "provider": provider,
                     "model": payload["model"],
-                    "message_count": len(messages)
+                    "message_count": len(messages),
+                    "timeout_seconds": request_timeout,
+                    "tool_count": len(tools) if tools else 0
                 }
             )
 
@@ -732,7 +735,7 @@ class LLMClient:
             async for event in self._call_provider_stream(
                 provider,
                 messages,
-                timeout=self.FAILOVER_TIMEOUT,
+                timeout=self.STREAMING_TIMEOUT,  # Use longer timeout for streaming
                 tools=tools
             ):
                 yield event
@@ -796,7 +799,7 @@ class LLMClient:
             async for event in self._call_provider_stream(
                 fallback,
                 messages,
-                timeout=self.FAILOVER_TIMEOUT,
+                timeout=self.STREAMING_TIMEOUT,  # Use longer timeout for streaming
                 tools=tools
             ):
                 yield event
