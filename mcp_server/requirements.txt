@@ -1,0 +1,12 @@
+# MCP Server Requirements
+# Python 3.12+ required
+
+# MCP Python SDK
+mcp>=0.1.0
+
+# HTTP client for external APIs
+requests>=2.31.0
+
+# Note: Additional tool-specific dependencies will be added in Epic 4:
+# - Brave Search API client (for internet access tool)
+# - Stock API client (for stock trading tool)

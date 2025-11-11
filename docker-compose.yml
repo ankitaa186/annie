@@ -1,0 +1,112 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: annie-backend
+    ports:
+      - "${BACKEND_PORT:-8001}:8000"
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - MCP_SERVER_NAME=mcp-server
+      - GROK_API_KEY=${GROK_API_KEY}
+      - CHATGPT_API_KEY=${CHATGPT_API_KEY}
+      - AGENTIC_MEMORIES_URL=${AGENTIC_MEMORIES_URL}
+    depends_on:
+      redis:
+        condition: service_healthy
+      mcp-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    volumes:
+      - ./backend:/app
+    networks:
+      - annie-network
+    restart: unless-stopped
+
+  mcp-server:
+    build:
+      context: ./mcp_server
+      dockerfile: Dockerfile
+    container_name: annie-mcp-server
+    stdin_open: true
+    tty: true
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - BRAVE_SEARCH_API_KEY=${BRAVE_SEARCH_API_KEY}
+      - STOCK_API_KEY=${STOCK_API_KEY}
+      - AGENTIC_MEMORIES_URL=${AGENTIC_MEMORIES_URL}
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'python.*mcp_server.server' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    volumes:
+      - ./mcp_server:/app/mcp_server
+      - /app/mcp_server/__pycache__
+    networks:
+      - annie-network
+    restart: unless-stopped
+
+  telegram-bot:
+    build:
+      context: ./telegram_bot
+      dockerfile: Dockerfile
+    container_name: annie-telegram-bot
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - BACKEND_URL=http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import telegram; print('ok')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    volumes:
+      - ./telegram_bot:/app
+    networks:
+      - annie-network
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: annie-redis
+    # External port 6380 to avoid conflict with other Redis containers on host
+    # Internal port remains 6379 for container-to-container communication
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    volumes:
+      - redis-data:/data
+    networks:
+      - annie-network
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+
+networks:
+  annie-network:
+    driver: bridge
+    name: annie-network
+
+volumes:
+  redis-data:
+    name: annie-redis-data

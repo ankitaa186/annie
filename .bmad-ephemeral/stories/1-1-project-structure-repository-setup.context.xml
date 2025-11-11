@@ -1,0 +1,203 @@
+<story-context id=".bmad/bmm/workflows/4-implementation/story-context/template" v="1.0">
+  <metadata>
+    <epicId>1</epicId>
+    <storyId>1</storyId>
+    <title>Project Structure & Repository Setup</title>
+    <status>drafted</status>
+    <generatedAt>2025-11-10T06:58:59Z</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>.bmad-ephemeral/stories/1-1-project-structure-repository-setup.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>developer</asA>
+    <iWant>a properly structured project repository</iWant>
+    <soThat>I can organize code efficiently and follow best practices</soThat>
+    <tasks>
+      <task id="1" ac="1">
+        <title>Create directory structure</title>
+        <subtasks>
+          <subtask>Create `backend/` directory</subtask>
+          <subtask>Create `mcp_server/` directory</subtask>
+          <subtask>Create `telegram_bot/` directory</subtask>
+          <subtask>Create `scripts/` directory</subtask>
+          <subtask>Verify `docs/` directory exists (may already exist)</subtask>
+          <subtask>Verify directory structure matches architecture requirements</subtask>
+        </subtasks>
+      </task>
+      <task id="2" ac="2">
+        <title>Create `.gitignore` file</title>
+        <subtasks>
+          <subtask>Add Python exclusions (`__pycache__/`, `*.pyc`, `*.pyo`, `*.pyd`, `.Python`, `*.so`, `*.egg`, `*.egg-info/`, `dist/`, `build/`)</subtask>
+          <subtask>Add virtual environment exclusions (`venv/`, `env/`, `.venv/`, `.env/`)</subtask>
+          <subtask>Add Docker exclusions (`.dockerignore` already handled separately)</subtask>
+          <subtask>Add IDE exclusions (`.vscode/`, `.idea/`, `*.swp`, `*.swo`, `*~`)</subtask>
+          <subtask>Add OS exclusions (`.DS_Store`, `Thumbs.db`)</subtask>
+          <subtask>Add environment file exclusion (`.env`)</subtask>
+          <subtask>Add test coverage exclusions (`.coverage`, `htmlcov/`, `.pytest_cache/`)</subtask>
+        </subtasks>
+      </task>
+      <task id="3" ac="3">
+        <title>Create `.dockerignore` file</title>
+        <subtasks>
+          <subtask>Exclude `.git/` directory</subtask>
+          <subtask>Exclude `docs/` directory (documentation not needed in containers)</subtask>
+          <subtask>Exclude `*.md` files (markdown files not needed in containers)</subtask>
+          <subtask>Exclude `.env` file (environment variables passed via Docker Compose)</subtask>
+          <subtask>Exclude test files (`tests/`, `*_test.py`, `test_*.py`)</subtask>
+          <subtask>Exclude development files (`.gitignore`, `.dockerignore`, `Makefile`)</subtask>
+        </subtasks>
+      </task>
+      <task id="4" ac="4">
+        <title>Define Python structure and requirements</title>
+        <subtasks>
+          <subtask>Create `backend/requirements.txt` placeholder (empty or with basic structure comment)</subtask>
+          <subtask>Create `mcp_server/requirements.txt` placeholder (empty or with basic structure comment)</subtask>
+          <subtask>Create `telegram_bot/requirements.txt` placeholder (empty or with basic structure comment)</subtask>
+          <subtask>Verify virtual environment directories are excluded in `.gitignore`</subtask>
+          <subtask>Document Python version requirement (3.12+) in README</subtask>
+        </subtasks>
+      </task>
+      <task id="5" ac="5">
+        <title>Create initial `README.md`</title>
+        <subtasks>
+          <subtask>Add project overview (Annie - Personal AI Companion)</subtask>
+          <subtask>Add project description referencing PRD</subtask>
+          <subtask>Add directory structure explanation</subtask>
+          <subtask>Add setup instructions (prerequisites: Docker, Docker Compose)</subtask>
+          <subtask>Add quick start guide (reference to `run_docker.sh` - will be created in Story 1.5)</subtask>
+          <subtask>Add links to key documentation (PRD, Architecture Plan)</subtask>
+          <subtask>Add project status badge or note (V1.0 MVP in development)</subtask>
+        </subtasks>
+      </task>
+    </tasks>
+  </story>
+
+  <acceptanceCriteria>
+    <criterion id="1">
+      <description>Given a fresh repository, when I check the directory structure, then it includes `backend/`, `mcp_server/`, `telegram_bot/`, `scripts/`, `docs/` directories</description>
+    </criterion>
+    <criterion id="2">
+      <description>Given the project structure, when I check the repository, then `.gitignore` exists with appropriate exclusions (Python, Docker, IDE files, `.env`, `__pycache__`, `*.pyc`)</description>
+    </criterion>
+    <criterion id="3">
+      <description>Given the project structure, when I check the repository, then `.dockerignore` exists with appropriate exclusions (`.git`, `docs`, `*.md`, `.env`)</description>
+    </criterion>
+    <criterion id="4">
+      <description>Given the repository, when I check Python structure, then virtual environment directories are excluded and `requirements.txt` structure is defined</description>
+    </criterion>
+    <criterion id="5">
+      <description>Given the repository, when I check documentation, then initial `README.md` exists with project overview and setup instructions</description>
+    </criterion>
+  </acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc>
+        <path>docs/01-product/PRODUCT_REQUIREMENTS.md</path>
+        <title>Product Requirements Document</title>
+        <section>Core Value Proposition, Technical Constraints</section>
+        <snippet>Annie is a personal AI companion chatbot designed to help friends and relatives make better decisions. Must run in Docker containers and support MCP protocol standards.</snippet>
+      </doc>
+      <doc>
+        <path>docs/02-architecture/ARCHITECTURE_PLAN.md</path>
+        <title>Architecture Plan</title>
+        <section>Service Architecture, High-Level Architecture</section>
+        <snippet>Defines service architecture with Backend API (FastAPI), MCP Server (Python MCP SDK), Telegram Bot (python-telegram-bot), and Redis. Services communicate via Docker network.</snippet>
+      </doc>
+      <doc>
+        <path>.bmad-ephemeral/stories/tech-spec-epic-1.md</path>
+        <title>Epic 1 Technical Specification</title>
+        <section>Services and Modules, Project Structure</section>
+        <snippet>Defines project structure requirements: backend/, mcp_server/, telegram_bot/, scripts/, docs/ directories. Specifies .gitignore and .dockerignore requirements for security and build optimization.</snippet>
+      </doc>
+      <doc>
+        <path>docs/epics-and-stories.md</path>
+        <title>Epic and Story Breakdown</title>
+        <section>Story 1.1: Project Structure & Repository Setup</section>
+        <snippet>Story 1.1 establishes foundational project structure with directory organization, .gitignore, .dockerignore, Python structure, and README.md. Maps to Tasks 1.1 (partial).</snippet>
+      </doc>
+      <doc>
+        <path>docs/04-implementation/V1_DETAILED_TASKS.md</path>
+        <title>V1.0 Detailed Task Breakdown</title>
+        <section>Task 1.1: Project Structure Setup</title>
+        <snippet>Task 1.1 specifies creating directory structure (backend/, mcp_server/, telegram_bot/, scripts/, docs/), initializing git repository, creating .gitignore and .dockerignore files, and creating initial README.md.</snippet>
+      </doc>
+    </docs>
+    <code>
+      <!-- No existing code artifacts - this is the first story -->
+    </code>
+    <dependencies>
+      <ecosystem name="python">
+        <requirement>Python 3.12+</requirement>
+        <note>Required for all Python services (Backend, MCP Server, Telegram Bot). Will be specified in Dockerfiles.</note>
+      </ecosystem>
+      <ecosystem name="docker">
+        <requirement>Docker 20.10+</requirement>
+        <note>Required for containerization. Will be validated by run_docker.sh script.</note>
+      </ecosystem>
+      <ecosystem name="docker-compose">
+        <requirement>Docker Compose 2.0+</requirement>
+        <note>Required for service orchestration. Will be validated by run_docker.sh script.</note>
+      </ecosystem>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint>
+      <type>Security</type>
+      <description>.env file must be excluded from both .gitignore and .dockerignore to prevent sensitive data exposure</description>
+      <source>.bmad-ephemeral/stories/tech-spec-epic-1.md#Security</source>
+    </constraint>
+    <constraint>
+      <type>Naming Convention</type>
+      <description>Use underscore for mcp_server directory (not kebab-case) for Python module compatibility</description>
+      <source>.bmad-ephemeral/stories/1-1-project-structure-repository-setup.md#Project-Structure-Notes</source>
+    </constraint>
+    <constraint>
+      <type>Structure</type>
+      <description>Directory structure must align with Architecture Plan service architecture (backend/, mcp_server/, telegram_bot/)</description>
+      <source>docs/02-architecture/ARCHITECTURE_PLAN.md#Service-Architecture</source>
+    </constraint>
+    <constraint>
+      <type>Documentation</type>
+      <description>README.md must reference PRD and Architecture Plan, include setup instructions and directory structure explanation</description>
+      <source>.bmad-ephemeral/stories/1-1-project-structure-repository-setup.md#Task-5</source>
+    </constraint>
+  </constraints>
+
+  <interfaces>
+    <!-- No existing interfaces - this is the first story establishing structure -->
+  </interfaces>
+
+  <tests>
+    <standards>
+      No automated tests required for this story. Manual verification: Check directory structure exists, verify .gitignore and .dockerignore files work correctly by creating test files matching ignore patterns and confirming they're excluded from git and Docker builds.
+    </standards>
+    <locations>
+      <!-- No test directories yet - will be created in future stories -->
+    </locations>
+    <ideas>
+      <test ac="1">
+        <description>Verify all required directories exist: backend/, mcp_server/, telegram_bot/, scripts/, docs/</description>
+        <type>Manual verification</type>
+      </test>
+      <test ac="2">
+        <description>Create test files matching .gitignore patterns (__pycache__/, *.pyc, .env, venv/) and verify they're excluded from git</description>
+        <type>Manual verification</type>
+      </test>
+      <test ac="3">
+        <description>Create test files matching .dockerignore patterns (.git/, docs/, *.md) and verify they're excluded from Docker build context</description>
+        <type>Manual verification</type>
+      </test>
+      <test ac="4">
+        <description>Verify requirements.txt files exist in backend/, mcp_server/, telegram_bot/ directories</description>
+        <type>Manual verification</type>
+      </test>
+      <test ac="5">
+        <description>Verify README.md exists with project overview, setup instructions, and directory structure explanation</description>
+        <type>Manual verification</type>
+      </test>
+    </ideas>
+  </tests>
+</story-context>

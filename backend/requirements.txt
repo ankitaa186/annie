@@ -1,0 +1,11 @@
+# Backend API Requirements
+# Python 3.12+ required
+
+# Web framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+
+# Core dependencies will be added in subsequent stories:
+# - Redis client (state management)
+# - HTTP client (for LLM APIs)
+# - SSE support (streaming responses)

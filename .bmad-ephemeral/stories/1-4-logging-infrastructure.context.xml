@@ -1,0 +1,329 @@
+<story-context id=".bmad/bmm/workflows/4-implementation/story-context/template" v="1.0">
+  <metadata>
+    <epicId>1</epicId>
+    <storyId>4</storyId>
+    <title>Logging Infrastructure</title>
+    <status>drafted</status>
+    <generatedAt>2025-11-10T08:00:00Z</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>.bmad-ephemeral/stories/1-4-logging-infrastructure.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>developer</asA>
+    <iWant>structured logging across all services</iWant>
+    <soThat>I can debug issues and monitor Annie's behavior effectively</soThat>
+    <tasks>
+      <task id="1" ac="1,2,4,6">
+        <title>Create shared logging utility module</title>
+        <subtasks>
+          <subtask>Create `backend/api/logging.py` module</subtask>
+          <subtask>Implement JSON formatter for production (ENVIRONMENT=prod)</subtask>
+          <subtask>Implement human-readable formatter for development (ENVIRONMENT=dev)</subtask>
+          <subtask>Add timestamp formatting (ISO 8601)</subtask>
+          <subtask>Add service name field (from environment or config)</subtask>
+          <subtask>Add log level support (DEBUG, INFO, WARNING, ERROR, CRITICAL)</subtask>
+          <subtask>Add context fields support (user_id, conversation_id, request_id)</subtask>
+          <subtask>Integrate with config.py to read LOG_LEVEL and ENVIRONMENT</subtask>
+          <subtask>Implement sensitive data masking (reuse mask_sensitive_value from config.py)</subtask>
+          <subtask>Create get_logger() function that returns configured logger</subtask>
+        </subtasks>
+      </task>
+      <task id="2" ac="1,2,4,6">
+        <title>Create MCP server logging module</title>
+        <subtasks>
+          <subtask>Create `mcp_server/logging.py` module</subtask>
+          <subtask>Reuse shared logging patterns from backend</subtask>
+          <subtask>Configure service name as "mcp-server"</subtask>
+          <subtask>Integrate with mcp_server/config.py for LOG_LEVEL and ENVIRONMENT</subtask>
+          <subtask>Test logging initialization</subtask>
+        </subtasks>
+      </task>
+      <task id="3" ac="1,2,4,6">
+        <title>Create Telegram bot logging module</title>
+        <subtasks>
+          <subtask>Create `telegram_bot/logging.py` module</subtask>
+          <subtask>Reuse shared logging patterns from backend</subtask>
+          <subtask>Configure service name as "telegram-bot"</subtask>
+          <subtask>Integrate with telegram_bot/config.py for LOG_LEVEL and ENVIRONMENT</subtask>
+          <subtask>Test logging initialization</subtask>
+        </subtasks>
+      </task>
+      <task id="4" ac="3">
+        <title>Implement error logging with stack traces</title>
+        <subtasks>
+          <subtask>Enhance error logging to include full stack traces</subtask>
+          <subtask>Add error code support (custom error codes for different error types)</subtask>
+          <subtask>Add relevant context (request_id, user_id, conversation_id) to error logs</subtask>
+          <subtask>Test error logging with exception handling</subtask>
+          <subtask>Verify stack traces appear in both JSON and human-readable formats</subtask>
+        </subtasks>
+      </task>
+      <task id="5" ac="7">
+        <title>Implement performance timing logging</title>
+        <subtasks>
+          <subtask>Create timing decorator/context manager for slow operations</subtask>
+          <subtask>Log operations that take >1 second with timing information</subtask>
+          <subtask>Include operation name, duration, and context in performance logs</subtask>
+          <subtask>Test performance logging with simulated slow operations</subtask>
+        </subtasks>
+      </task>
+      <task id="6" ac="1,4">
+        <title>Integrate logging into service startup</title>
+        <subtasks>
+          <subtask>Update backend service startup to initialize logging</subtask>
+          <subtask>Update MCP server startup to initialize logging</subtask>
+          <subtask>Update Telegram bot startup to initialize logging</subtask>
+          <subtask>Test log output format based on ENVIRONMENT variable</subtask>
+          <subtask>Test log level filtering based on LOG_LEVEL variable</subtask>
+        </subtasks>
+      </task>
+      <task id="7" ac="5">
+        <title>Test Docker logs integration</title>
+        <subtasks>
+          <subtask>Start all services via docker-compose</subtask>
+          <subtask>Verify logs are visible via `docker-compose logs`</subtask>
+          <subtask>Test service filtering: `docker-compose logs backend`</subtask>
+          <subtask>Test log format (JSON in prod, human-readable in dev)</subtask>
+          <subtask>Verify logs include service names for identification</subtask>
+        </subtasks>
+      </task>
+      <task id="8" ac="6">
+        <title>Test sensitive data masking in logs</title>
+        <subtasks>
+          <subtask>Test API keys are masked in logs</subtask>
+          <subtask>Test tokens are masked in logs</subtask>
+          <subtask>Test user personal data masking (if applicable)</subtask>
+          <subtask>Verify masking works in both JSON and human-readable formats</subtask>
+          <subtask>Test masking in error messages</subtask>
+        </subtasks>
+      </task>
+    </tasks>
+  </story>
+
+  <acceptanceCriteria>
+    <criterion id="1">
+      <description>Given any service, when it starts, then structured logging is configured with JSON format (for production) and human-readable format (for development)</description>
+    </criterion>
+    <criterion id="2">
+      <description>Given logging, when I check log output, then logs include timestamp, service name, log level, message, and context (user_id, conversation_id, request_id)</description>
+    </criterion>
+    <criterion id="3">
+      <description>Given logging, when errors occur, then error logs include stack traces, error codes, and relevant context for debugging</description>
+    </criterion>
+    <criterion id="4">
+      <description>Given logging, when I check log levels, then services support configurable log levels (DEBUG, INFO, WARNING, ERROR, CRITICAL) via environment variable</description>
+    </criterion>
+    <criterion id="5">
+      <description>Given logging, when I check Docker logs, then logs from all services are visible via `docker-compose logs` with service filtering</description>
+    </criterion>
+    <criterion id="6">
+      <description>Given logging, when sensitive data is logged, then API keys, tokens, and user personal data are masked/redacted in logs</description>
+    </criterion>
+    <criterion id="7">
+      <description>Given logging, when performance issues occur, then slow operations (>1s) are logged with timing information</description>
+    </criterion>
+  </acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc>
+        <path>docs/epics-and-stories.md</path>
+        <title>Epic and Story Breakdown</title>
+        <section>Story 1.4: Logging Infrastructure</section>
+        <snippet>As a developer, I want structured logging across all services, so that I can debug issues and monitor Annie's behavior effectively.</snippet>
+      </doc>
+      <doc>
+        <path>.bmad-ephemeral/stories/tech-spec-epic-1.md</path>
+        <title>Epic 1 Technical Specification</title>
+        <section>Logging Workflow</section>
+        <snippet>Service generates log event, logging module formats log with timestamp, service name, log level, context, masks sensitive data, outputs JSON (production) or human-readable (development) format to stdout.</snippet>
+      </doc>
+      <doc>
+        <path>docs/02-architecture/ARCHITECTURE_PLAN.md</path>
+        <title>Architecture Plan</title>
+        <section>Monitoring Architecture</section>
+        <snippet>Structured logging with JSON format, Docker logs for V1, sensitive data masking.</snippet>
+      </doc>
+      <doc>
+        <path>backend/api/config.py</path>
+        <title>Backend Config Module</title>
+        <section>Environment Configuration</section>
+        <snippet>Contains mask_sensitive_value function and config reading (LOG_LEVEL, ENVIRONMENT)</snippet>
+      </doc>
+      <doc>
+        <path>mcp_server/config.py</path>
+        <title>MCP Server Config Module</title>
+        <section>Environment Configuration</section>
+        <snippet>Contains config reading for MCP server (LOG_LEVEL, ENVIRONMENT)</snippet>
+      </doc>
+      <doc>
+        <path>telegram_bot/config.py</path>
+        <title>Telegram Bot Config Module</title>
+        <section>Environment Configuration</section>
+        <snippet>Contains config reading for Telegram bot (LOG_LEVEL, ENVIRONMENT)</snippet>
+      </doc>
+      <doc>
+        <path>.bmad-ephemeral/stories/1-3-environment-configuration-secrets-management.md</path>
+        <title>Story 1.3</title>
+        <section>Completed Tasks</section>
+        <snippet>Config modules created with mask_sensitive_value function, LOG_LEVEL and ENVIRONMENT variables available</snippet>
+      </doc>
+    </docs>
+    <code>
+      <artifact>
+        <path>backend/api/config.py</path>
+        <type>Python Module</type>
+        <description>Contains mask_sensitive_value function and config reading</description>
+      </artifact>
+      <artifact>
+        <path>mcp_server/config.py</path>
+        <type>Python Module</type>
+        <description>MCP server config with LOG_LEVEL and ENVIRONMENT</description>
+      </artifact>
+      <artifact>
+        <path>telegram_bot/config.py</path>
+        <type>Python Module</type>
+        <description>Telegram bot config with LOG_LEVEL and ENVIRONMENT</description>
+      </artifact>
+    </code>
+    <dependencies>
+      <ecosystem name="python">
+        <requirement>Python 3.12+</requirement>
+        <note>Required for logging module (standard library)</note>
+      </ecosystem>
+      <ecosystem name="python-logging">
+        <requirement>Python logging module (standard library)</requirement>
+        <note>No external dependencies - use built-in logging module</note>
+      </ecosystem>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint>
+      <type>Performance</type>
+      <description>Logging overhead must be &lt;1% of request processing time</description>
+      <impact>Use efficient logging patterns, avoid expensive operations in log formatting</impact>
+    </constraint>
+    <constraint>
+      <type>Format</type>
+      <description>Log format must be JSON for production (ENVIRONMENT=prod) and human-readable for development (ENVIRONMENT=dev)</description>
+      <impact>Need to create custom formatters based on ENVIRONMENT variable</impact>
+    </constraint>
+    <constraint>
+      <type>Security</type>
+      <description>Sensitive data (API keys, tokens, user personal data) must be masked in logs</description>
+      <impact>Reuse mask_sensitive_value from config.py, apply masking before formatting</impact>
+    </constraint>
+    <constraint>
+      <type>Docker Integration</type>
+      <description>Logs must be visible via docker-compose logs with service filtering</description>
+      <impact>Logs must go to stdout/stderr (standard Python logging behavior)</impact>
+    </constraint>
+    <constraint>
+      <type>No External Dependencies</type>
+      <description>Use Python standard library logging module only</description>
+      <impact>Cannot use structlog or other external logging libraries</impact>
+    </constraint>
+  </constraints>
+
+  <interfaces>
+    <!-- Logging Module Interface -->
+    <interface>
+      <name>backend/api/logging.py</name>
+      <kind>Python Module</kind>
+      <signature>
+import logging
+import json
+from datetime import datetime
+from typing import Optional, Dict, Any
+from .config import get_config, mask_sensitive_value
+
+def get_logger(name: str = None) -> logging.Logger:
+    """Get configured logger instance"""
+    # Returns logger with JSON or human-readable formatter
+    # Based on ENVIRONMENT variable
+    # Includes service name, timestamp, log level
+    # Supports context fields (user_id, conversation_id, request_id)
+
+class JSONFormatter(logging.Formatter):
+    """JSON formatter for production logs"""
+    # Formats logs as JSON with all fields
+
+class HumanReadableFormatter(logging.Formatter):
+    """Human-readable formatter for development logs"""
+    # Formats logs as readable text
+
+def log_performance(func):
+    """Decorator for logging slow operations (>1s)"""
+    # Logs operation name, duration, context
+      </signature>
+      <description>Backend logging module with JSON and human-readable formatters</description>
+    </interface>
+  </interfaces>
+
+  <testIdeas>
+    <test ac="1">
+      <description>Test log format based on ENVIRONMENT variable</description>
+      <steps>
+        <step>Set ENVIRONMENT=dev, start service</step>
+        <step>Verify logs are human-readable format</step>
+        <step>Set ENVIRONMENT=prod, start service</step>
+        <step>Verify logs are JSON format</step>
+      </steps>
+    </test>
+    <test ac="2">
+      <description>Test log fields include all required context</description>
+      <steps>
+        <step>Log a message with context (user_id, conversation_id, request_id)</step>
+        <step>Verify timestamp, service name, log level, message, and context appear</step>
+        <step>Test in both JSON and human-readable formats</step>
+      </steps>
+    </test>
+    <test ac="3">
+      <description>Test error logging includes stack traces</description>
+      <steps>
+        <step>Trigger an exception in code</step>
+        <step>Log the error</step>
+        <step>Verify stack trace appears in log</step>
+        <step>Verify error code and context are included</step>
+      </steps>
+    </test>
+    <test ac="4">
+      <description>Test log level filtering</description>
+      <steps>
+        <step>Set LOG_LEVEL=DEBUG, verify DEBUG logs appear</step>
+        <step>Set LOG_LEVEL=INFO, verify DEBUG logs are filtered</step>
+        <step>Set LOG_LEVEL=WARNING, verify INFO logs are filtered</step>
+      </steps>
+    </test>
+    <test ac="5">
+      <description>Test Docker logs integration</description>
+      <steps>
+        <step>Start services via docker-compose</step>
+        <step>Run docker-compose logs</step>
+        <step>Verify all service logs are visible</step>
+        <step>Run docker-compose logs backend</step>
+        <step>Verify only backend logs are shown</step>
+      </steps>
+    </test>
+    <test ac="6">
+      <description>Test sensitive data masking</description>
+      <steps>
+        <step>Log a message containing an API key</step>
+        <step>Verify API key is masked (shows only first 4 and last 4 chars)</step>
+        <step>Test with token</step>
+        <step>Verify masking works in both JSON and human-readable formats</step>
+      </steps>
+    </test>
+    <test ac="7">
+      <description>Test performance timing logging</description>
+      <steps>
+        <step>Create a slow operation (>1s)</step>
+        <step>Use @log_performance decorator</step>
+        <step>Verify operation duration is logged</step>
+        <step>Verify operation name and context are included</step>
+      </steps>
+    </test>
+  </testIdeas>
+</story-context>
