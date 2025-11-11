@@ -26,6 +26,8 @@ router = APIRouter(prefix="/api", tags=["streaming"])
 
 # Track active streams (in-memory for now, will use Redis in Story 2.5)
 active_streams: Dict[str, float] = {}  # conversation_id -> timestamp
+# Temporary message storage (will use Redis in Story 2.5)
+conversation_messages_store: Dict[str, List[Dict[str, Any]]] = {}  # conversation_id -> messages
 MAX_CONCURRENT_STREAMS = 100
 
 
@@ -137,6 +139,19 @@ async def stream_generator(
                 # Check if LLM wants to call a function
                 message = response.get("choices", [{}])[0].get("message", {})
                 tool_calls = message.get("tool_calls", [])
+
+                # Debug: Log the full response to understand why tool wasn't called
+                logger.debug(
+                    "LLM response analysis",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "has_tool_calls": bool(tool_calls),
+                        "tool_calls_count": len(tool_calls) if tool_calls else 0,
+                        "message_content": message.get("content", "")[:200] if message.get("content") else None,
+                        "finish_reason": response.get("choices", [{}])[0].get("finish_reason"),
+                        "tools_provided": len(tools) if tools else 0
+                    }
+                )
 
                 if not tool_calls:
                     # No tool calls - LLM returned final content
@@ -425,10 +440,22 @@ async def stream_response(conversation_id: str, request: Request):
     )
 
     # TODO (Story 2.5): Load conversation state from Redis
-    # For now, use a test message
-    messages = [
-        {"role": "user", "content": "Hello, how are you?"}
-    ]
+    # For now, load from temporary in-memory store
+    if conversation_id in conversation_messages_store:
+        messages = conversation_messages_store[conversation_id]
+        logger.info(
+            "Loaded conversation messages from store",
+            extra={"conversation_id": conversation_id, "message_count": len(messages)}
+        )
+    else:
+        # Fallback to default message if conversation not found
+        messages = [
+            {"role": "user", "content": "Hello, how are you?"}
+        ]
+        logger.warning(
+            "Conversation not found in store, using default message",
+            extra={"conversation_id": conversation_id}
+        )
 
     # Return SSE response
     return EventSourceResponse(

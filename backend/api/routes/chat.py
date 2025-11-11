@@ -18,6 +18,9 @@ logger = get_logger(__name__)
 # Create router
 router = APIRouter(prefix="/api", tags=["chat"])
 
+# Temporary message storage (will use Redis in Story 2.5)
+from api.routes.stream import conversation_messages_store
+
 
 class ChatRequest(BaseModel):
     """Request model for chat endpoint."""
@@ -91,7 +94,14 @@ async def create_chat(request: ChatRequest):
 
     # TODO (Story 2.5): Load conversation history from Redis
     # TODO (Story 2.5): Store new message in conversation state
-    # For now, we'll pass the message directly to the stream endpoint
+    # For now, store message temporarily in memory
+    conversation_messages_store[conversation_id] = [
+        {"role": "user", "content": request.message}
+    ]
+    logger.debug(
+        "Stored conversation message",
+        extra={"conversation_id": conversation_id, "message": request.message[:100]}
+    )
 
     # Build stream URL
     stream_url = f"/api/stream/{conversation_id}"

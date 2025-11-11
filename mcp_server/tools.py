@@ -63,7 +63,7 @@ def health_check_tool_handler() -> Dict[str, Any]:
 # Health check tool definition
 health_check_tool = {
     "name": "health_check",
-    "description": "Check MCP server health status",
+    "description": "Check the health status of the MCP (Model Context Protocol) server. Use this tool when asked about server health, status, or availability. Returns the current health status and timestamp.",
     "inputSchema": {
         "type": "object",
         "properties": {},

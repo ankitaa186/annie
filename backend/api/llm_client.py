@@ -246,9 +246,11 @@ class LLMClient:
             # Add tools if provided
             if tools:
                 payload["tools"] = tools
+                # For non-streaming requests, we can optionally force tool usage
+                # But for now, let the LLM decide when to use tools
                 logger.debug(
                     "Function calling enabled",
-                    extra={"provider": provider, "tool_count": len(tools)}
+                    extra={"provider": provider, "tool_count": len(tools), "tool_names": [t.get("function", {}).get("name", "") for t in tools]}
                 )
 
             # Make request with timeout
@@ -290,6 +292,22 @@ class LLMClient:
             result = response.json()
 
             duration_ms = int((time.time() - start_time) * 1000)
+            
+            # Debug: Log response structure to understand tool calling behavior
+            if tools:
+                message = result.get("choices", [{}])[0].get("message", {})
+                tool_calls = message.get("tool_calls", [])
+                logger.debug(
+                    "LLM response structure",
+                    extra={
+                        "provider": provider,
+                        "has_tool_calls": bool(tool_calls),
+                        "tool_calls_count": len(tool_calls) if tool_calls else 0,
+                        "finish_reason": result.get("choices", [{}])[0].get("finish_reason"),
+                        "has_content": bool(message.get("content"))
+                    }
+                )
+            
             logger.info(
                 "LLM request successful",
                 extra={
