@@ -55,7 +55,7 @@ class MCPClient:
 
     # Default configuration
     DEFAULT_MCP_URL = "http://mcp-server:8002"
-    DEFAULT_TIMEOUT = 5.0  # 5 seconds (p95 requirement)
+    DEFAULT_TIMEOUT = 60.0  # 60 seconds (generous timeout for memory operations which can take 7+ seconds)
     CACHE_TTL = 300  # 5 minutes for tool schema cache
 
     def __init__(self, mcp_server_url: Optional[str] = None, timeout: Optional[float] = None):
@@ -64,7 +64,7 @@ class MCPClient:
 
         Args:
             mcp_server_url: MCP server URL (default: from config or http://mcp-server:8002)
-            timeout: Request timeout in seconds (default: 5.0)
+            timeout: Request timeout in seconds (default: 60.0)
         """
         if mcp_server_url:
             self.mcp_server_url = mcp_server_url

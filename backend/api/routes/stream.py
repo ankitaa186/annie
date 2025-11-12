@@ -336,11 +336,23 @@ async def stream_generator(
                             tool_result = await mcp_client.call_tool(function_name, arguments)
 
                         # Add tool result to conversation
+                        tool_content = json.dumps(tool_result)
                         conversation_messages.append({
                             "role": "tool",
-                            "content": json.dumps(tool_result),
+                            "content": tool_content,
                             "tool_call_id": tool_call_id
                         })
+
+                        # DEBUG: Log tool result content (first 500 chars)
+                        logger.debug(
+                            f"Tool result added to conversation (content preview): {tool_content[:500]}",
+                            extra={
+                                "conversation_id": conversation_id,
+                                "tool_name": function_name,
+                                "tool_call_id": tool_call_id,
+                                "result_length": len(tool_content)
+                            }
+                        )
 
                         logger.info(
                             "Tool execution successful",

@@ -119,7 +119,7 @@ async def store_memory_tool_handler(
     max_retries = 3
     retry_delays = [1, 2, 4]  # Exponential backoff: 1s, 2s, 4s
 
-    async with httpx.AsyncClient(timeout=5.0) as client:
+    async with httpx.AsyncClient(timeout=180.0) as client:  # 3 minutes for LLM-based memory extraction and storage
         for attempt in range(max_retries):
             try:
                 logger.info(
@@ -255,7 +255,7 @@ store_memory_tool = {
             },
             "history": {
                 "type": "array",
-                "description": "List of conversation messages with role and content",
+                "description": "Recent conversation messages (2-3 messages) containing the information to store. Include only the relevant context needed for memory extraction.",
                 "items": {
                     "type": "object",
                     "properties": {
@@ -296,7 +296,7 @@ store_memory_tool = {
 async def retrieve_memories_tool_handler(
     user_id: str,
     query: str,
-    limit: int = 5,
+    limit: int = 50,
     persona: str = None
 ) -> Dict[str, Any]:
     """
@@ -309,7 +309,7 @@ async def retrieve_memories_tool_handler(
     Args:
         user_id: User identifier
         query: Search query describing the decision context (e.g., 'stock investment decisions', 'career choices')
-        limit: Maximum number of memories to retrieve (default: 5, max: 10)
+        limit: Maximum number of memories to retrieve (default: 50, max: 100)
         persona: Optional persona filter (e.g., 'stock_trader', 'career_advisor') to filter memories by decision-making context
 
     Returns:
@@ -326,9 +326,9 @@ async def retrieve_memories_tool_handler(
         memories_url = "http://host.docker.internal:8080"
 
     # Validate limit parameter
-    if limit < 1 or limit > 10:
-        logger.warning(f"Invalid limit {limit}, clamping to range [1, 10]")
-        limit = max(1, min(10, limit))
+    if limit < 50 or limit > 100:
+        logger.warning(f"Invalid limit {limit}, clamping to range [50, 100]")
+        limit = max(50, min(100, limit))
 
     try:
         logger.info(
@@ -344,9 +344,14 @@ async def retrieve_memories_tool_handler(
         # Build query parameters
         params = {
             "user_id": user_id,
-            "query": query,
             "limit": limit
         }
+        #Removing query parameter as it is not supported well by the agentic-memories service
+        # params = {
+        #     "user_id": user_id,
+        #     "query": query,
+        #     "limit": limit
+        # }
         if persona:
             params["persona"] = persona
 
@@ -361,7 +366,7 @@ async def retrieve_memories_tool_handler(
 
             if response.status_code == 200:
                 result = response.json()
-                memories = result.get("memories", [])
+                memories = result.get("results", [])  # API returns "results", not "memories"
 
                 # Log performance warning if exceeded target
                 if duration_ms > 300:
@@ -509,15 +514,10 @@ retrieve_memories_tool = {
             },
             "limit": {
                 "type": "integer",
-                "description": "Maximum number of memories to retrieve (default: 5, max: 10)",
-                "default": 5,
-                "minimum": 1,
-                "maximum": 10
-            },
-            "persona": {
-                "type": "string",
-                "description": "Optional persona filter (e.g., 'stock_trader', 'career_advisor') to filter memories by decision-making context. Leave empty for all memories.",
-                "default": None
+                "description": "Maximum number of memories to retrieve (default: 50, max: 100)",
+                "default": 50,
+                "minimum": 50,
+                "maximum": 100
             }
         },
         "required": ["user_id", "query"]
