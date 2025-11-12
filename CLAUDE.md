@@ -303,6 +303,24 @@ registry.register(my_new_tool, schema={
 - **agentic-memories**: Memory management service (must be running separately)
   - Default URL: `http://host.docker.internal:8080`
   - Used for storing and retrieving conversation memories
+  - **Memory Storage Integration** (Story 3.1 - Implemented):
+    - Conversations automatically stored when user sends farewell ("thanks", "bye", etc.)
+    - LLM-powered summarization extracts decisions, preferences, and topics
+    - Graceful degradation: Falls back to Redis queue if service unavailable
+    - Background retry worker processes failed storage attempts every 5 minutes
+    - Circuit breaker: Pauses after 5 consecutive failures for 15 minutes
+    - Memory Object includes:
+      - Conversation summary (2-3 sentences)
+      - Decisions made (with options considered and reasoning)
+      - User preferences (risk tolerance, priorities, constraints)
+      - Topics discussed
+      - Overall sentiment
+  - **Technical Details**:
+    - Backend module: `backend/api/memory.py` (MemoryManager)
+    - HTTP client: `backend/api/memory_client.py` (MemoryClient)
+    - MCP tool: `store_memory` in `mcp_server/tools.py`
+    - Redis fallback queue: `memory_queue:{user_id}` (24h TTL)
+    - Performance: <500ms p95 for storage operations
 - **Brave Search API**: Web search for internet access tool
 - **Stock API**: Portfolio data for stock trader tool
 - **Telegram Bot API**: Messaging interface

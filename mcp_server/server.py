@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 
 from mcp_server.config import get_config
 from mcp_server.logging import get_logger, log_performance
-from mcp_server.tools import ToolRegistry, health_check_tool
+from mcp_server.tools import ToolRegistry, health_check_tool, store_memory_tool
 
 logger = get_logger(__name__)
 config = get_config()
@@ -33,6 +33,7 @@ class MCPServer:
     def register_default_tools(self):
         """Register default tools."""
         self.tool_registry.register(health_check_tool)
+        self.tool_registry.register(store_memory_tool)
         logger.info(f"Registered {len(self.tool_registry.tools)} tools")
 
     def handle_request(self, request: Dict[str, Any]) -> Dict[str, Any]:

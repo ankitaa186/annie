@@ -61,9 +61,9 @@ development_status:
   epic-2-retrospective: optional
 
   # Epic 3: Memory & Persistence
-  epic-3: backlog
-  3-1-memory-storage-integration: backlog
-  3-2-memory-retrieval-decision-support: backlog
+  epic-3: contexted
+  3-1-memory-storage-integration: done
+  3-2-memory-retrieval-decision-support: done
   epic-3-retrospective: optional
 
   # Epic 4: Decision Support Tools
@@ -74,8 +74,8 @@ development_status:
   epic-4-retrospective: optional
 
   # Epic 5: Telegram Bot Interface
-  epic-5: backlog
-  5-1-telegram-bot-setup-message-reception: backlog
+  epic-5: contexted
+  5-1-telegram-bot-setup-message-reception: ready-for-dev
   5-2-streaming-response-delivery: backlog
   5-3-message-formatting-error-handling: backlog
   epic-5-retrospective: optional

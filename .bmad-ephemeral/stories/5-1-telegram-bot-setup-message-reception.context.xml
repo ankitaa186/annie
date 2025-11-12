@@ -1,0 +1,314 @@
+<story-context id=".bmad/bmm/workflows/4-implementation/story-context/template" v="1.0">
+  <metadata>
+    <epicId>5</epicId>
+    <storyId>1</storyId>
+    <title>Telegram Bot Setup & Message Reception</title>
+    <status>drafted</status>
+    <generatedAt>2025-11-11</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>.bmad-ephemeral/stories/5-1-telegram-bot-setup-message-reception.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>user</asA>
+    <iWant>to chat with Annie via Telegram</iWant>
+    <soThat>I can get decision support on my mobile device</soThat>
+    <tasks>
+      <task id="1" status="TODO">Setup Telegram Bot Service Docker Container</task>
+      <task id="2" status="TODO">Initialize Telegram Bot with Long Polling</task>
+      <task id="3" status="TODO">Implement User Authorization Module</task>
+      <task id="4" status="TODO">Implement Message Handler with Authorization</task>
+      <task id="5" status="TODO">Handle Different Message Types (Text, Voice)</task>
+      <task id="6" status="TODO">Integrate Backend API Client for Message Forwarding</task>
+      <task id="7" status="TODO">Logging Infrastructure for Telegram Bot</task>
+    </tasks>
+  </story>
+
+  <acceptanceCriteria>
+    <criterion id="AC#1">
+      <given>Telegram bot token is configured</given>
+      <when>the bot service starts</when>
+      <then>it connects to Telegram API successfully and starts polling for updates</then>
+      <mappedTasks>Task 1, Task 2</mappedTasks>
+    </criterion>
+    <criterion id="AC#1.1">
+      <given>AUTHORIZED_USER_IDS is configured in environment</given>
+      <when>the bot starts</when>
+      <then>the whitelist is loaded into memory for fast authorization checks (&lt;50ms)</then>
+      <mappedTasks>Task 3</mappedTasks>
+    </criterion>
+    <criterion id="AC#2">
+      <given>the bot is running and I am an authorized user</given>
+      <when>I send a message via Telegram</when>
+      <then>the bot receives and processes the message within 1 second</then>
+      <mappedTasks>Task 2, Task 4</mappedTasks>
+    </criterion>
+    <criterion id="AC#2.1">
+      <given>the bot is running and I am NOT an authorized user</given>
+      <when>I send a message via Telegram</when>
+      <then>the bot responds with "Sorry, you're not authorized to use Annie. Please contact the administrator for access." and does NOT forward to backend</then>
+      <mappedTasks>Task 3, Task 4</mappedTasks>
+    </criterion>
+    <criterion id="AC#3">
+      <given>a message is received from an authorized user</given>
+      <when>I check logs</when>
+      <then>user_id, message_text, timestamp, message_id are extracted correctly and authorization status is logged</then>
+      <mappedTasks>Task 4, Task 7</mappedTasks>
+    </criterion>
+    <criterion id="AC#4">
+      <given>different message types</given>
+      <when>I send text messages</when>
+      <then>the bot handles them correctly (after authorization check)</then>
+      <mappedTasks>Task 4, Task 5</mappedTasks>
+    </criterion>
+    <criterion id="AC#5">
+      <given>different message types</given>
+      <when>I send voice messages</when>
+      <then>the bot handles them appropriately (V1: return "Voice messages coming soon" or transcribe)</then>
+      <mappedTasks>Task 5</mappedTasks>
+    </criterion>
+    <criterion id="AC#6">
+      <given>the bot receives a message from an authorized user</given>
+      <when>I check processing</when>
+      <then>it forwards the message to backend API (POST /api/chat) with proper formatting</then>
+      <mappedTasks>Task 6</mappedTasks>
+    </criterion>
+    <criterion id="AC#7">
+      <given>the bot is running</given>
+      <when>connection failures occur</when>
+      <then>they are handled gracefully with retry logic and logging</then>
+      <mappedTasks>Task 2, Task 7</mappedTasks>
+    </criterion>
+    <criterion id="AC#7.1">
+      <given>unauthorized access attempts occur</given>
+      <when>I check logs</when>
+      <then>unauthorized user_ids are logged for security monitoring without exposing sensitive data</then>
+      <mappedTasks>Task 3, Task 7</mappedTasks>
+    </criterion>
+  </acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc path=".bmad-ephemeral/stories/tech-spec-epic-5.md" title="Epic 5 Technical Specification" section="Services and Modules">
+        Defines TelegramBotService, AuthenticationModule, MessageHandler, BackendClient, and StreamingHandler components with responsibilities, inputs, and outputs. Includes complete data models for User Message, Backend API Request/Response, and SSE Stream events.
+      </doc>
+      <doc path=".bmad-ephemeral/stories/tech-spec-epic-5.md" title="Epic 5 Technical Specification" section="Performance Requirements">
+        First token latency for thinking models: 10-30 seconds with "Annie is thinking" indicators. Message receipt: &lt;1s, Authorization check: &lt;50ms, Backend API call: &lt;10s timeout.
+      </doc>
+      <doc path=".bmad-ephemeral/stories/tech-spec-epic-5.md" title="Epic 5 Technical Specification" section="Security Requirements">
+        User authorization via AUTHORIZED_USER_IDS whitelist (comma-separated Telegram user IDs). Authorization check BEFORE backend forwarding (fail-fast pattern). Unauthorized attempts logged for security monitoring.
+      </doc>
+      <doc path=".bmad-ephemeral/stories/tech-spec-epic-5.md" title="Epic 5 Technical Specification" section="Workflows and Sequencing">
+        Message Processing Sequence: Telegram polling → message extract → authorization check → (if unauthorized: rejection, STOP) → (if authorized: typing indicator → backend forwarding → stream handling).
+      </doc>
+      <doc path="docs/01-product/PRODUCT_REQUIREMENTS.md" title="Product Requirements" section="Core User Stories">
+        Users want AI-powered decision support via Telegram bot with streaming responses, memory integration, and real-time information access. Target: help with 80% of day-to-day decisions with 80% user trust.
+      </doc>
+      <doc path="docs/02-architecture/ARCHITECTURE_PLAN.md" title="Architecture Plan" section="Telegram Bot Service">
+        Telegram Bot Service uses python-telegram-bot library, polls Telegram API, forwards messages to Backend API via HTTP, streams responses to users. Features: Long polling (V1), message splitting, error handling, retries.
+      </doc>
+      <doc path="CLAUDE.md" title="Project Instructions" section="Environment Configuration">
+        Required environment variables: TELEGRAM_BOT_TOKEN, AUTHORIZED_USER_IDS (comma-separated user IDs), BACKEND_URL (default: http://backend:8000), LOG_LEVEL, ENVIRONMENT.
+      </doc>
+      <doc path="CLAUDE.md" title="Project Instructions" section="Docker Compose Services">
+        Service dependencies: redis → mcp-server → backend → telegram-bot. All services have health checks and restart policies (unless-stopped).
+      </doc>
+    </docs>
+    <code>
+      <artifact path="backend/api/main.py" kind="service" symbol="FastAPI app" reason="Backend API entry point that telegram bot will call via POST /api/chat and GET /api/stream endpoints">
+      </artifact>
+      <artifact path="backend/api/routes/chat.py" kind="controller" symbol="chat routes" reason="Contains POST /api/chat endpoint for message processing and GET /api/stream for SSE streaming - telegram bot's primary integration points">
+      </artifact>
+      <artifact path="backend/api/config.py" kind="configuration" symbol="get_config" reason="Pattern for environment configuration loading and validation to replicate in telegram bot config.py">
+      </artifact>
+      <artifact path="backend/api/logging.py" kind="infrastructure" symbol="structured logging" reason="Logging patterns to follow in telegram bot - JSON format, masking sensitive data, structured extra fields">
+      </artifact>
+      <artifact path="backend/api/memory_client.py" kind="service" symbol="MemoryClient" reason="Example of async HTTP client with aiohttp - pattern to follow for BackendClient in telegram bot">
+      </artifact>
+      <artifact path="backend/api/memory.py" kind="service" symbol="MemoryManager" reason="Graceful degradation patterns (Redis fallback, circuit breaker) applicable to backend client error handling">
+      </artifact>
+      <artifact path="docker-compose.yml" kind="configuration" symbol="service definitions" lines="1-100" reason="Needs modification to add telegram-bot service with proper dependencies (depends_on: backend), health checks, and environment variables">
+      </artifact>
+      <artifact path="env.example" kind="configuration" symbol="environment template" reason="Needs update with TELEGRAM_BOT_TOKEN, AUTHORIZED_USER_IDS, and POLLING_TIMEOUT variables">
+      </artifact>
+      <artifact path="Makefile" kind="build" symbol="make targets" reason="Provides make start, make stop, make logs commands that should work with new telegram-bot service">
+      </artifact>
+    </code>
+    <dependencies>
+      <python>
+        <package name="python-telegram-bot" version="20.7" reason="Telegram Bot API client library (NEW)">
+        </package>
+        <package name="aiohttp" version="3.9.1" reason="Async HTTP client for backend API communication (NEW)">
+        </package>
+        <package name="python-dotenv" version="1.0.0" reason="Environment variable loading (NEW)">
+        </package>
+        <package name="pydantic" version="2.5.0" reason="Optional data validation (NEW)">
+        </package>
+        <package name="redis" version="5.0.0" reason="Redis client for future caching (EXISTING from Epic 2)">
+        </package>
+        <package name="httpx" version="0.25.0" reason="HTTP client used by MemoryClient - reference for async patterns (EXISTING from Epic 2)">
+        </package>
+        <package name="pytest-asyncio" version="0.21.0" reason="Async testing support (EXISTING from Epic 1)">
+        </package>
+      </python>
+      <docker>
+        <image name="python" version="3.12-slim" reason="Base image for telegram-bot container">
+        </image>
+      </docker>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint type="architecture" source="tech-spec-epic-5.md">
+      Telegram bot operates as isolated Docker container within annie-network, communicating exclusively with Backend API via HTTP. No direct access to Redis, MCP server, or LLM APIs.
+    </constraint>
+    <constraint type="architecture" source="tech-spec-epic-5.md">
+      Service communication flow: Telegram API → Long Polling → Telegram Bot → HTTP POST /api/chat → Backend API. Streaming handled in Story 5.2.
+    </constraint>
+    <constraint type="security" source="tech-spec-epic-5.md">
+      User authorization via AUTHORIZED_USER_IDS whitelist MUST occur BEFORE backend forwarding (fail-fast pattern). Authorization check target: &lt;50ms.
+    </constraint>
+    <constraint type="security" source="tech-spec-epic-5.md">
+      Unauthorized users receive rejection message: "Sorry, you're not authorized to use Annie. Please contact the administrator for access." Unauthorized attempts logged with user_id for security monitoring.
+    </constraint>
+    <constraint type="performance" source="tech-spec-epic-5.md">
+      Message receipt latency: &lt;1 second from Telegram API to bot processing. Backend API call timeout: 10 seconds. Long polling timeout: 30 seconds.
+    </constraint>
+    <constraint type="logging" source="tech-spec-epic-5.md">
+      Structured logging with JSON format (production). Required signals: message_received, authorization, backend_call, unauthorized_attempt. Mask sensitive data (message content, PII).
+    </constraint>
+    <constraint type="error-handling" source="tech-spec-epic-5.md">
+      Retry logic with exponential backoff (1s, 2s, 4s, max 3 retries). Graceful degradation when backend unavailable. User-friendly error messages (no technical jargon).
+    </constraint>
+    <constraint type="telegram-api" source="tech-spec-epic-5.md">
+      Long polling timeout: 30 seconds maximum. Rate limiting: 30 messages/second per bot. Message length limit: 4096 characters (Story 5.2 concern).
+    </constraint>
+    <constraint type="implementation" source="Story 3.2 learnings">
+      Use async/await patterns from Story 3.2 for HTTP client. Use aiohttp for backend communication (same as MemoryClient). Apply structured logging pattern with user context.
+    </constraint>
+    <constraint type="implementation" source="Story 3.2 learnings">
+      Follow graceful degradation patterns: continue core functionality when external services fail, return user-friendly error messages, log failures but don't crash.
+    </constraint>
+    <constraint type="testing" source="Story 3.2 learnings">
+      Test thoroughly - don't defer testing. Use pytest-asyncio for async tests, respx for mocking httpx/aiohttp. Target: &gt;80% code coverage.
+    </constraint>
+  </constraints>
+
+  <interfaces>
+    <interface name="POST /api/chat" kind="REST endpoint" path="backend/api/routes/chat.py">
+      <signature>
+        POST /api/chat
+        Request Body: {
+          "user_id": "telegram_12345",    // Platform-prefixed user ID
+          "platform": "telegram",
+          "message": "Should I buy AAPL?",
+          "conversation_id": null          // Optional conversation ID
+        }
+        Response (200 OK): {
+          "conversation_id": "conv_abc123",
+          "status": "processing" | "completed" | "error",
+          "message": null                  // For synchronous responses
+        }
+        Errors: 400 (invalid input), 500 (internal error), 503 (service unavailable)
+      </signature>
+      <description>Backend endpoint for submitting user messages for processing. Telegram bot forwards authorized messages here.</description>
+    </interface>
+    <interface name="GET /api/stream/{conversation_id}" kind="REST endpoint (SSE)" path="backend/api/routes/chat.py">
+      <signature>
+        GET /api/stream/{conversation_id}
+        Response: SSE event stream
+        Event Types:
+          - {"type": "token", "content": "text"}     // Incremental text
+          - {"type": "done", "tokens_used": {...}}   // Completion
+          - {"type": "error", "message": "..."}      // Failure
+        Errors: 404 (conversation not found), 500 (streaming error)
+      </signature>
+      <description>SSE streaming endpoint for LLM responses. Story 5.2 will implement streaming handler to consume this.</description>
+    </interface>
+    <interface name="GET /health" kind="REST endpoint" path="backend/api/main.py">
+      <signature>
+        GET /health
+        Response (200 OK): {
+          "status": "ok",
+          "timestamp": "2025-11-11T..."
+        }
+        Errors: 503 (service unavailable)
+      </signature>
+      <description>Backend health check endpoint for verifying availability before forwarding messages.</description>
+    </interface>
+    <interface name="python-telegram-bot Application" kind="library API" path="telegram_bot/bot.py">
+      <signature>
+        from telegram.ext import Application, ApplicationBuilder, MessageHandler, filters
+
+        app = ApplicationBuilder().token(bot_token).build()
+        app.add_handler(MessageHandler(filters.TEXT, handle_message))
+        await app.run_polling(allowed_updates=["message"], timeout=30)
+      </signature>
+      <description>python-telegram-bot 20.7 async API for bot initialization, handler registration, and long polling.</description>
+    </interface>
+    <interface name="Telegram Update Object" kind="data model" path="telegram_bot/handlers/message.py">
+      <signature>
+        update.message.from_user.id        // Telegram user ID (int)
+        update.message.chat_id             // Telegram chat ID (int)
+        update.message.text                // Message text (str)
+        update.message.message_id          // Message ID (int)
+        update.message.date                // Timestamp (datetime)
+        update.message.from_user.username  // Username (str | None)
+        update.message.voice               // Voice message object (if voice)
+      </signature>
+      <description>Telegram Update object structure for extracting message data in message handlers.</description>
+    </interface>
+    <interface name="aiohttp.ClientSession" kind="library API" path="telegram_bot/backend_client.py">
+      <signature>
+        import aiohttp
+
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, json=payload) as response:
+                response.raise_for_status()
+                return await response.json()
+      </signature>
+      <description>aiohttp async HTTP client pattern for backend API communication. Follow MemoryClient patterns from Story 3.1.</description>
+    </interface>
+  </interfaces>
+
+  <tests>
+    <standards>
+      Follow testing patterns from Story 3.2: Use pytest-asyncio for async tests, respx for mocking aiohttp requests, AsyncMock for mocking async methods. Test both success and failure paths. Target &gt;80% code coverage. Unit tests should be fast (&lt;1s per test) and deterministic with all external services mocked. Integration tests use mocked backend API or Docker backend. Performance tests validate latency targets (&lt;1s message receipt, &lt;50ms auth check).
+    </standards>
+    <locations>
+      <location>telegram_bot/tests/unit/</location>
+      <location>telegram_bot/tests/integration/</location>
+      <location>telegram_bot/tests/conftest.py</location>
+    </locations>
+    <ideas>
+      <idea ac="AC#1" description="Test bot connects to Telegram API successfully - mock telegram.ext.Application.run_polling, verify called with correct parameters (allowed_updates, timeout)">
+      </idea>
+      <idea ac="AC#1.1" description="Test AuthenticationModule.load_whitelist - valid comma-separated user IDs loaded into set, invalid IDs logged as errors, verify &lt;50ms lookup performance with timeit">
+      </idea>
+      <idea ac="AC#2" description="Test authorized user message processing - mock telegram Update with authorized user_id, verify message handled within 1s, backend client called">
+      </idea>
+      <idea ac="AC#2.1" description="Test unauthorized user rejection - mock Update with unauthorized user_id, verify rejection message sent via reply_text, backend NOT called, attempt logged">
+      </idea>
+      <idea ac="AC#3" description="Test message data extraction - mock Update, verify user_id, message_text, timestamp, message_id extracted correctly, structured log entry contains all fields">
+      </idea>
+      <idea ac="AC#4" description="Test text message handling - mock Update with text message, authorized user, verify handle_message called, typing indicator sent, backend forwarding triggered">
+      </idea>
+      <idea ac="AC#5" description="Test voice message handling - mock Update with voice message, verify 'Voice messages coming soon' reply sent, voice duration logged">
+      </idea>
+      <idea ac="AC#6" description="Test backend API forwarding - mock BackendClient.send_message, verify POST /api/chat called with correct payload (user_id prefixed 'telegram_', platform, message, conversation_id)">
+      </idea>
+      <idea ac="AC#7" description="Test connection failure retry - mock backend connection error, verify retry logic with exponential backoff (1s, 2s, 4s), max 3 attempts, user error message on final failure">
+      </idea>
+      <idea ac="AC#7.1" description="Test unauthorized attempt logging - mock unauthorized user_id, verify log entry contains user_id, authorized:false, no message content (privacy), event:unauthorized_attempt">
+      </idea>
+      <idea description="Integration test: Full message flow - authorized user → message handler → authorization check → backend forwarding → response, verify end-to-end latency &lt;1s">
+      </idea>
+      <idea description="Integration test: Backend unavailable - stop backend, send message, verify graceful degradation, user-friendly error, logs backend failure">
+      </idea>
+      <idea description="Performance test: Authorization check latency - measure is_authorized with 100 users in whitelist, verify &lt;50ms p95">
+      </idea>
+      <idea description="Security test: SQL injection in user message - send message with SQL injection patterns, verify sanitized before backend forwarding, no errors">
+      </idea>
+    </ideas>
+  </tests>
+</story-context>
