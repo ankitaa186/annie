@@ -56,6 +56,7 @@ def get_env_var(name: str, default: Optional[str] = None, required: bool = False
 # Required environment variables for Telegram Bot service
 REQUIRED_VARS = [
     "TELEGRAM_BOT_TOKEN",
+    "AUTHORIZED_USER_IDS",
 ]
 
 # Optional environment variables with defaults
@@ -63,11 +64,14 @@ OPTIONAL_VARS = {
     "LOG_LEVEL": "INFO",
     "BACKEND_URL": "http://backend:8000",
     "ENVIRONMENT": "dev",
+    "POLLING_TIMEOUT": "30",
+    "MAX_RETRIES": "3",
 }
 
 # Sensitive variables that should be masked in logs
 SENSITIVE_VARS = [
     "TELEGRAM_BOT_TOKEN",
+    "AUTHORIZED_USER_IDS",  # Contains user IDs - privacy concern
 ]
 
 

@@ -75,7 +75,7 @@ development_status:
 
   # Epic 5: Telegram Bot Interface
   epic-5: contexted
-  5-1-telegram-bot-setup-message-reception: ready-for-dev
+  5-1-telegram-bot-setup-message-reception: in-progress
   5-2-streaming-response-delivery: backlog
   5-3-message-formatting-error-handling: backlog
   epic-5-retrospective: optional

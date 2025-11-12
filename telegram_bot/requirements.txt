@@ -1,7 +1,17 @@
 # Telegram Bot Requirements
 # Python 3.12+ required
-#
-# Core dependencies will be added in subsequent stories:
-# - python-telegram-bot (Telegram Bot API)
-# - HTTP client (for backend API communication)
-# - SSE client (for streaming responses)
+
+# Telegram Bot API
+python-telegram-bot==20.7
+
+# Async HTTP client for backend communication
+aiohttp==3.9.1
+
+# Environment configuration
+python-dotenv==1.0.0
+
+# Data validation (optional)
+pydantic==2.5.0
+
+# Redis client (for future caching)
+redis==5.0.0

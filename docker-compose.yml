@@ -60,30 +60,33 @@ services:
       - annie-network
     restart: unless-stopped
 
-  # Telegram bot disabled until Epic 5 implementation
-  # telegram-bot:
-  #   build:
-  #     context: ./telegram_bot
-  #     dockerfile: Dockerfile
-  #   container_name: annie-telegram-bot
-  #   environment:
-  #     - LOG_LEVEL=${LOG_LEVEL:-INFO}
-  #     - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-  #     - BACKEND_URL=http://backend:8000
-  #   depends_on:
-  #     backend:
-  #       condition: service_healthy
-  #   healthcheck:
-  #     test: ["CMD", "python", "-c", "import telegram; print('ok')"]
-  #     interval: 30s
-  #     timeout: 10s
-  #     retries: 3
-  #     start_period: 30s
-  #   volumes:
-  #     - ./telegram_bot:/app
-  #   networks:
-  #     - annie-network
-  #   restart: unless-stopped
+  telegram-bot:
+    build:
+      context: ./telegram_bot
+      dockerfile: Dockerfile
+    container_name: annie-telegram-bot
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENVIRONMENT=${ENVIRONMENT:-dev}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - AUTHORIZED_USER_IDS=${AUTHORIZED_USER_IDS}
+      - BACKEND_URL=http://backend:8000
+      - POLLING_TIMEOUT=${POLLING_TIMEOUT:-30}
+      - MAX_RETRIES=${MAX_RETRIES:-3}
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import telegram_bot; import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    volumes:
+      - ./telegram_bot:/app/telegram_bot
+    networks:
+      - annie-network
+    restart: unless-stopped
 
   redis:
     image: redis:7.2-alpine
