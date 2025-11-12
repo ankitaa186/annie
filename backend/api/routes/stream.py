@@ -2,13 +2,13 @@
 Streaming Route Handler
 
 Handles SSE (Server-Sent Events) streaming for real-time LLM responses
-with function calling and tool orchestration support.
+with function calling, tool orchestration, and Redis-based conversation state.
 """
 
 import asyncio
 import json
 import time
-from typing import AsyncGenerator, Dict, Any, List
+from typing import AsyncGenerator, Dict, Any, List, Optional
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request, HTTPException
@@ -17,6 +17,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from api.llm_client import LLMClient, LLMClientError
 from api.mcp_client import MCPClient, MCPClientError, MCPToolError, MCPNetworkError
+from api.state import StateManager, StateError
 from api.logging import get_logger
 
 logger = get_logger(__name__)
@@ -24,17 +25,16 @@ logger = get_logger(__name__)
 # Create router
 router = APIRouter(prefix="/api", tags=["streaming"])
 
-# Track active streams (in-memory for now, will use Redis in Story 2.5)
+# Track active streams (streaming-specific, separate from session state)
 active_streams: Dict[str, float] = {}  # conversation_id -> timestamp
-# Temporary message storage (will use Redis in Story 2.5)
-conversation_messages_store: Dict[str, List[Dict[str, Any]]] = {}  # conversation_id -> messages
 MAX_CONCURRENT_STREAMS = 100
 
 
 async def stream_generator(
     conversation_id: str,
     messages: List[Dict[str, Any]],
-    request: Request
+    request: Request,
+    state_manager: Optional[StateManager] = None
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Generate SSE events from LLM streaming response with tool orchestration.
@@ -45,11 +45,13 @@ async def stream_generator(
     - Tool execution via MCP client
     - Multi-step tool calling (max 5 iterations)
     - Error handling for tool failures
+    - Storing assistant response in Redis after completion
 
     Args:
         conversation_id: Unique conversation identifier
         messages: List of chat messages to send to LLM
         request: FastAPI request object for disconnection detection
+        state_manager: Optional StateManager for storing assistant response
 
     Yields:
         SSE event dictionaries with type, data, and optional event fields
@@ -57,6 +59,7 @@ async def stream_generator(
     start_time = time.time()
     first_token_sent = False
     max_tool_iterations = 5
+    assistant_response_content = []  # Accumulate assistant response for storage
 
     try:
         # Create clients
@@ -192,6 +195,10 @@ async def stream_generator(
                             )
                             first_token_sent = True
 
+                        # Accumulate assistant response content
+                        if event.get("type") == "token":
+                            assistant_response_content.append(event.get("content", ""))
+
                         # Yield SSE event
                         yield {
                             "event": "message",
@@ -211,6 +218,31 @@ async def stream_generator(
                                         "tokens": event.get("tokens_used", {})
                                     }
                                 )
+
+                                # Store assistant response in Redis
+                                if state_manager and assistant_response_content:
+                                    full_response = "".join(assistant_response_content)
+                                    assistant_message = {
+                                        "role": "assistant",
+                                        "content": full_response
+                                    }
+                                    try:
+                                        await state_manager.add_message(conversation_id, assistant_message)
+                                        logger.info(
+                                            "Assistant response stored in Redis",
+                                            extra={
+                                                "conversation_id": conversation_id,
+                                                "response_length": len(full_response)
+                                            }
+                                        )
+                                    except StateError as e:
+                                        logger.error(
+                                            "Failed to store assistant response",
+                                            extra={
+                                                "conversation_id": conversation_id,
+                                                "error": str(e)
+                                            }
+                                        )
                             break
 
                     # Exit tool orchestration loop
@@ -310,11 +342,42 @@ async def stream_generator(
                     async for event in llm_client.chat_completion_stream(conversation_messages, tools=tools):
                         if await request.is_disconnected():
                             break
+
+                        # Accumulate assistant response content
+                        if event.get("type") == "token":
+                            assistant_response_content.append(event.get("content", ""))
+
                         yield {
                             "event": "message",
                             "data": json.dumps(event)
                         }
+
                         if event.get("type") in ["error", "done"]:
+                            if event.get("type") == "done":
+                                # Store assistant response in Redis
+                                if state_manager and assistant_response_content:
+                                    full_response = "".join(assistant_response_content)
+                                    assistant_message = {
+                                        "role": "assistant",
+                                        "content": full_response
+                                    }
+                                    try:
+                                        await state_manager.add_message(conversation_id, assistant_message)
+                                        logger.info(
+                                            "Assistant response stored in Redis (max iterations)",
+                                            extra={
+                                                "conversation_id": conversation_id,
+                                                "response_length": len(full_response)
+                                            }
+                                        )
+                                    except StateError as e:
+                                        logger.error(
+                                            "Failed to store assistant response (max iterations)",
+                                            extra={
+                                                "conversation_id": conversation_id,
+                                                "error": str(e)
+                                            }
+                                        )
                             break
                     break
 
@@ -392,8 +455,9 @@ async def stream_response(conversation_id: str, request: Request):
     """
     Stream LLM response via Server-Sent Events (SSE).
 
-    This endpoint establishes an SSE connection and streams tokens from the LLM
-    in real-time. The stream continues until completion, error, or client disconnection.
+    This endpoint establishes an SSE connection, loads conversation context from Redis,
+    and streams tokens from the LLM in real-time. After streaming completes, stores
+    the assistant's response in conversation history.
 
     Args:
         conversation_id: Unique conversation identifier
@@ -404,7 +468,7 @@ async def stream_response(conversation_id: str, request: Request):
 
     Raises:
         HTTPException: 503 if concurrent stream limit exceeded
-        HTTPException: 404 if conversation not found (future: when using Redis)
+        HTTPException: 500 if state management fails
 
     SSE Event Format:
         Token event: {"type":"token","content":"text chunk"}
@@ -439,31 +503,62 @@ async def stream_response(conversation_id: str, request: Request):
         }
     )
 
-    # TODO (Story 2.5): Load conversation state from Redis
-    # For now, load from temporary in-memory store
-    if conversation_id in conversation_messages_store:
-        messages = conversation_messages_store[conversation_id]
+    try:
+        # Create StateManager to load conversation context
+        state_manager = StateManager()
+
+        # Load conversation history from Redis
+        messages = await state_manager.build_llm_context(conversation_id)
+
+        if not messages:
+            # No conversation history found - this might be a new conversation
+            # or the first message hasn't been added yet
+            logger.warning(
+                "No conversation history found, starting with empty context",
+                extra={"conversation_id": conversation_id}
+            )
+            messages = []
+
         logger.info(
-            "Loaded conversation messages from store",
-            extra={"conversation_id": conversation_id, "message_count": len(messages)}
+            "Loaded conversation context from Redis",
+            extra={
+                "conversation_id": conversation_id,
+                "message_count": len(messages)
+            }
         )
-    else:
-        # Fallback to default message if conversation not found
-        messages = [
-            {"role": "user", "content": "Hello, how are you?"}
-        ]
+
+        # Return SSE response with state manager passed to generator
+        return EventSourceResponse(
+            stream_generator(conversation_id, messages, request, state_manager),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"  # Disable nginx buffering
+            }
+        )
+
+    except StateError as e:
+        logger.error(
+            "State management error in stream endpoint",
+            extra={
+                "conversation_id": conversation_id,
+                "error": str(e)
+            }
+        )
+
+        # Graceful degradation: continue with empty messages
         logger.warning(
-            "Conversation not found in store, using default message",
+            "Continuing with empty context due to state error (degraded mode)",
             extra={"conversation_id": conversation_id}
         )
 
-    # Return SSE response
-    return EventSourceResponse(
-        stream_generator(conversation_id, messages, request),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"  # Disable nginx buffering
-        }
-    )
+        return EventSourceResponse(
+            stream_generator(conversation_id, [], request, None),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"
+            }
+        )

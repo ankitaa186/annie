@@ -56,7 +56,7 @@ development_status:
   2-2-llm-client-setup-provider-management: done
   2-3-sse-streaming-support: done
   2-4-function-calling-mcp-tools: done
-  2-5-conversation-state-management: backlog
+  2-5-conversation-state-management: done
   2-6-error-handling-patterns: backlog
   epic-2-retrospective: optional
 

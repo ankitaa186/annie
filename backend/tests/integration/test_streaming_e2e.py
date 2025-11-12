@@ -338,23 +338,22 @@ class TestChatEndpoint:
         assert response.status_code == 422  # Validation error
 
     def test_chat_endpoint_generates_unique_ids(self, client):
-        """Test that each chat request generates a unique conversation ID."""
-        chat_request = {
-            "user_id": "test_user",
-            "platform": "telegram",
-            "message": "Test message",
-            "context": {}
-        }
-
-        # Make multiple requests
+        """Test that different users get unique conversation IDs (Story 2.5: same user should get same conversation ID)."""
         conversation_ids = set()
 
-        for _ in range(5):
+        # Make requests with different user_ids
+        for i in range(5):
+            chat_request = {
+                "user_id": f"test_user_{i}",
+                "platform": "telegram",
+                "message": "Test message",
+                "context": {}
+            }
             response = client.post("/api/chat", json=chat_request)
             assert response.status_code == 200
 
             conversation_id = response.json()["conversation_id"]
             conversation_ids.add(conversation_id)
 
-        # All IDs should be unique
+        # Different users should get unique conversation IDs
         assert len(conversation_ids) == 5

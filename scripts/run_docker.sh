@@ -142,9 +142,16 @@ start_services() {
     echo ""
     echo -e "${GREEN}Starting Annie services...${NC}"
     echo ""
-    
-    # Run docker-compose up
-    $COMPOSE_CMD up --build "$@"
+
+    # Run docker-compose up in detached mode
+    $COMPOSE_CMD up --build -d "$@"
+
+    echo ""
+    echo -e "${GREEN}✓ Services started in detached mode${NC}"
+    echo ""
+    echo "Use 'docker compose logs -f' to view logs"
+    echo "Use 'docker compose ps' to check service status"
+    echo "Use 'docker compose down' to stop services"
 }
 
 # Main execution

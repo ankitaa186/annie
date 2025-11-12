@@ -15,5 +15,5 @@ sse-starlette>=1.6.5
 pytest>=7.4.0
 pytest-asyncio>=0.21.0
 
-# Core dependencies will be added in subsequent stories:
-# - Redis client (state management)
+# State management (Story 2.5)
+redis>=5.0.0
