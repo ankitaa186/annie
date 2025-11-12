@@ -1,0 +1,21 @@
+# MCP Server Requirements
+# Python 3.12+ required
+
+# MCP Python SDK
+mcp>=0.1.0
+
+# FastAPI for HTTP server
+fastapi>=0.104.0
+uvicorn>=0.24.0
+
+# HTTP client for external APIs
+requests>=2.31.0
+httpx>=0.24.0  # For async HTTP requests
+
+# Testing
+pytest>=9.0.0
+pytest-asyncio>=1.3.0
+
+# Note: Additional tool-specific dependencies will be added in Epic 4:
+# - Brave Search API client (for internet access tool)
+# - Stock API client (for stock trading tool)

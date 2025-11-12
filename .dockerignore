@@ -1,0 +1,59 @@
+# Git
+.git/
+.gitignore
+
+# Documentation
+docs/
+*.md
+LICENSE
+
+# Environment files (passed via Docker Compose)
+.env
+.env.local
+.env.*.local
+
+# Python cache and build artifacts
+__pycache__/
+*.py[codz]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual environments (not needed in containers)
+venv/
+env/
+ENV/
+.venv
+
+# IDE files (not needed in containers)
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Test files (not needed in containers)
+tests/
+test_*.py
+*_test.py
+
+# Development files
+Makefile
+.dockerignore
+
+# CI/CD (not needed in containers)
+.github/
+.gitlab-ci.yml
+.travis.yml

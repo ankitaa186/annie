@@ -1,0 +1,257 @@
+<story-context id=".bmad/bmm/workflows/4-implementation/story-context/template" v="1.0">
+  <metadata>
+    <epicId>3</epicId>
+    <storyId>1</storyId>
+    <title>Memory Storage Integration</title>
+    <status>drafted</status>
+    <generatedAt>2025-11-11</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>.bmad-ephemeral/stories/3-1-memory-storage-integration.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>user</asA>
+    <iWant>Annie to remember our conversations and decisions</iWant>
+    <soThat>future advice is personalized based on my history</soThat>
+    <tasks>
+      <task id="1" status="TODO">Create agentic-memories HTTP Client Module</task>
+      <task id="2" status="TODO">Implement store_memory MCP Tool</task>
+      <task id="3" status="TODO">Implement Conversation Summarization Logic</task>
+      <task id="4" status="TODO">Add Graceful Degradation with Redis Fallback</task>
+      <task id="5" status="TODO">Integrate Memory Storage into Chat Flow</task>
+      <task id="6" status="TODO">Performance Optimization and Monitoring</task>
+      <task id="7" status="TODO">Unit and Integration Tests</task>
+      <task id="8" status="TODO">Documentation and Integration Updates</task>
+    </tasks>
+  </story>
+
+  <acceptanceCriteria>
+    <ac id="AC1">
+      <title>Conversation context stored when conversation ends</title>
+      <given>agentic-memories service is available</given>
+      <when>a conversation ends (user sends "thanks" or conversation times out)</when>
+      <then>conversation context is stored via store_memory tool with: user_id, conversation summary, key decisions made, user preferences expressed, timestamp</then>
+      <mappedTasks>1, 2, 3</mappedTasks>
+    </ac>
+    <ac id="AC2">
+      <title>Memory stored with proper structure in agentic-memories</title>
+      <given>memory storage is triggered</given>
+      <when>I check agentic-memories</when>
+      <then>the conversation is stored with proper structure and can be retrieved later</then>
+      <mappedTasks>1, 2</mappedTasks>
+    </ac>
+    <ac id="AC3">
+      <title>System continues when agentic-memories is down (graceful degradation)</title>
+      <given>agentic-memories service is down</given>
+      <when>a conversation ends</when>
+      <then>the system continues without error, logs the failure, and stores memory in Redis temporarily for retry</then>
+      <mappedTasks>4, 5</mappedTasks>
+    </ac>
+    <ac id="AC4">
+      <title>User informed when memory storage fails</title>
+      <given>memory storage fails</given>
+      <when>I send another message</when>
+      <then>Annie continues working without memory context but informs the user: "Note: I'm having trouble accessing your memory right now, but I can still help."</then>
+      <mappedTasks>4</mappedTasks>
+    </ac>
+    <ac id="AC5">
+      <title>Memory includes decision context, preferences, and outcomes</title>
+      <given>memory is stored</given>
+      <when>I check the stored data</when>
+      <then>it includes: Decision context (what decision was made, options considered), User preferences (risk tolerance, priorities), Conversation flow (key topics discussed), Outcomes (if user provides feedback)</then>
+      <mappedTasks>2, 3</mappedTasks>
+    </ac>
+    <ac id="AC6">
+      <title>Memory storage completes within 500ms (p95)</title>
+      <given>memory storage is triggered</given>
+      <when>I check performance</when>
+      <then>memory storage completes within 500ms (p95)</then>
+      <mappedTasks>6</mappedTasks>
+    </ac>
+  </acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc>
+        <path>.bmad-ephemeral/stories/tech-spec-epic-3.md</path>
+        <title>Epic 3: Memory & Persistence - Technical Specification</title>
+        <section>Overview, Data Flow, Memory Object Schema, agentic-memories API Contracts, store_memory MCP Tool Spec</section>
+        <snippet>Defines Memory Object schema with decisions, preferences, topics. Specifies agentic-memories HTTP API (POST /memories). Details store_memory MCP tool with JSON-RPC 2.0 format. Storage flow: conversation end → retrieve history → LLM summarization → HTTP POST with fallback to Redis. Performance: &lt;500ms p95 storage, &lt;300ms p95 retrieval.</snippet>
+      </doc>
+      <doc>
+        <path>docs/epics-and-stories.md</path>
+        <title>Epic and Story Breakdown</title>
+        <section>Story 3.1: Memory Storage Integration (lines 508-546)</section>
+        <snippet>User story: As a user, I want Annie to remember our conversations and decisions, so that future advice is personalized based on my history. Acceptance criteria for memory storage, graceful degradation, conversation end detection, and performance (&lt;500ms p95). Maps to Tasks 3.4, 3.5, 3.7.</snippet>
+      </doc>
+      <doc>
+        <path>docs/02-architecture/ARCHITECTURE_PLAN.md</path>
+        <title>System Architecture Plan</title>
+        <section>Backend API, MCP Integration, Memory Service Integration</section>
+        <snippet>Backend API service architecture with FastAPI. MCP-based tool integration via Docker exec with stdio transport. Memory integration with agentic-memories service via HTTP client. State management patterns with Redis for fallback. Async/non-blocking operations throughout.</snippet>
+      </doc>
+      <doc>
+        <path>CLAUDE.md</path>
+        <title>Project Instructions</title>
+        <section>Environment Configuration, MCP Server Communication, Development Workflow</section>
+        <snippet>agentic-memories service URL configuration (AGENTIC_MEMORIES_URL). Environment variables validated on startup. Structured logging standards with JSON format. Development workflow: validate .env first, service-by-service implementation, health checks required.</snippet>
+      </doc>
+      <doc>
+        <path>.bmad-ephemeral/stories/2-5-conversation-state-management.md</path>
+        <title>Story 2.5: Conversation State Management (Previous Story)</title>
+        <section>Dev Agent Record, Learnings from Previous Story</section>
+        <snippet>StateManager module with Redis patterns: async context managers, custom exception hierarchy (StateError, RedisConnectionError), Redis key patterns (session:{user_id}, conversation:{conversation_id}), TTL management. Use StateManager.get_conversation_history() to retrieve messages. Follow async/await patterns with redis.asyncio.Redis.</snippet>
+      </doc>
+    </docs>
+    <code>
+      <artifact>
+        <path>backend/api/state.py</path>
+        <kind>module</kind>
+        <symbol>StateManager</symbol>
+        <lines>1-632</lines>
+        <reason>Provides get_conversation_history() method to retrieve conversation messages for summarization. Demonstrates Redis patterns, async context manager, custom exceptions, and structured logging to replicate for MemoryClient.</reason>
+      </artifact>
+      <artifact>
+        <path>backend/api/llm_client.py</path>
+        <kind>module</kind>
+        <symbol>LLMClient</symbol>
+        <lines></lines>
+        <reason>Use for conversation summarization via chat_completion() method. Provides LLM access with proper error handling and logging patterns.</reason>
+      </artifact>
+      <artifact>
+        <path>backend/api/mcp_client.py</path>
+        <kind>module</kind>
+        <symbol>MCPClient</symbol>
+        <lines></lines>
+        <reason>Demonstrates async HTTP client patterns with httpx.AsyncClient, custom exception hierarchy (MCPClientError, MCPNetworkError, MCPToolError), retry logic with exponential backoff. Follow same patterns for MemoryClient.</reason>
+      </artifact>
+      <artifact>
+        <path>backend/api/config.py</path>
+        <kind>module</kind>
+        <symbol>get_config</symbol>
+        <lines></lines>
+        <reason>Add AGENTIC_MEMORIES_URL, MEMORY_STORAGE_ENABLED, MEMORY_RETRY_INTERVAL_SECONDS to configuration. Use existing config loading patterns.</reason>
+      </artifact>
+      <artifact>
+        <path>backend/api/logging.py</path>
+        <kind>module</kind>
+        <symbol>get_logger</symbol>
+        <lines></lines>
+        <reason>Use for structured logging in all memory modules. Follow established patterns: logger.info("event", extra={"key": "value", "duration_ms": ...})</reason>
+      </artifact>
+      <artifact>
+        <path>backend/api/routes/chat.py</path>
+        <kind>module</kind>
+        <symbol>POST /api/chat</symbol>
+        <lines></lines>
+        <reason>Integrate memory storage trigger on conversation end. Detect farewell keywords ("thanks", "bye", "goodbye") and timeout (30 min). Call MemoryManager.store_memory_with_fallback() in background task.</reason>
+      </artifact>
+      <artifact>
+        <path>mcp_server/tools.py</path>
+        <kind>module</kind>
+        <symbol>Tool Registry</symbol>
+        <lines></lines>
+        <reason>Add store_memory tool implementation. Define JSON-RPC 2.0 schema, implement function calling MemoryClient.store_memory(), add retry logic with exponential backoff, register with MCP server.</reason>
+      </artifact>
+      <artifact>
+        <path>backend/tests/unit/test_llm_client.py</path>
+        <kind>test</kind>
+        <symbol>TestLLMClient</symbol>
+        <lines></lines>
+        <reason>Reference for async test patterns with pytest-asyncio, AsyncMock usage, context manager mocking. Apply same patterns to test_memory_client.py and test_memory_manager.py.</reason>
+      </artifact>
+      <artifact>
+        <path>backend/tests/integration/test_streaming_e2e.py</path>
+        <kind>test</kind>
+        <symbol>TestEndToEndStreaming</symbol>
+        <lines></lines>
+        <reason>Reference for integration test patterns with mocked external services. Apply to test_memory_storage_e2e.py with mocked agentic-memories HTTP API.</reason>
+      </artifact>
+    </code>
+    <dependencies>
+      <python>
+        <package name="httpx" version=">=0.25.0" usage="Already added in Story 2.2. Reuse for MemoryClient HTTP requests to agentic-memories API." />
+        <package name="redis" version=">=5.0.0" usage="Already added in Story 2.5. Reuse for Redis fallback queue and retry worker." />
+        <package name="pytest-asyncio" version=">=0.21.0" usage="Already added for async testing. Use for memory module tests." />
+        <package name="respx" version=">=0.20.0" usage="Optional dev dependency for mocking httpx requests in tests. Cleaner than httpretty. Add to requirements-dev.txt." />
+      </python>
+      <external>
+        <service name="agentic-memories" url="${AGENTIC_MEMORIES_URL}" description="Persistent memory storage service with semantic search. Must be running for memory storage. Configure URL in .env file." />
+        <service name="Redis" url="redis:6379" description="Used for conversation history (Story 2.5) and fallback queue when agentic-memories unavailable." />
+      </external>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint>Use async/await patterns throughout. All memory operations must be non-blocking (asyncio.create_task for background storage).</constraint>
+    <constraint>Follow async context manager pattern (__aenter__, __aexit__) for MemoryClient resource cleanup (same as MCPClient and StateManager).</constraint>
+    <constraint>Custom exception hierarchy: MemoryClientError (base), MemoryNetworkError (network failures), MemoryAPIError (API errors). Follow MCPClient pattern.</constraint>
+    <constraint>Structured logging with duration tracking: logger.info("message", extra={"user_id": ..., "duration_ms": int((time.time() - start_time) * 1000)})</constraint>
+    <constraint>Performance target: &lt;500ms p95 end-to-end storage (summarization ~2s + HTTP POST ~300ms + processing ~200ms). Storage must be async/non-blocking.</constraint>
+    <constraint>Graceful degradation: Continue chat functionality when agentic-memories down. Store in Redis fallback queue with 24h TTL. Retry every 5 minutes. Circuit breaker after 5 failures.</constraint>
+    <constraint>Conversation end detection: Farewell keywords ("thanks", "thank you", "bye", "goodbye" case-insensitive) OR 30-minute timeout since last message.</constraint>
+    <constraint>Memory size limits: Max 50 messages for summarization, max 10KB memory size (compress if larger with gzip), max 500 char summary, max 10 topics, max 5 decisions.</constraint>
+    <constraint>Use redis.asyncio.Redis for all Redis operations. Set 5s timeout to prevent hanging. Handle redis.exceptions.ConnectionError gracefully.</constraint>
+    <constraint>Reuse StateManager.get_conversation_history() to retrieve messages. Reuse LLMClient.chat_completion() for summarization. Follow established patterns.</constraint>
+    <constraint>Test coverage: &gt;80% for memory modules (memory_client.py, memory.py, store_memory tool). Use pytest-asyncio, AsyncMock, respx for HTTP mocking.</constraint>
+    <constraint>Distributed lock (Redis) to prevent duplicate memory storage for same conversation_id. Use Redis SET with NX flag.</constraint>
+  </constraints>
+
+  <interfaces>
+    <interface>
+      <name>StateManager.get_conversation_history</name>
+      <kind>method</kind>
+      <signature>async def get_conversation_history(conversation_id: str, limit: int = 20) -> List[dict]</signature>
+      <path>backend/api/state.py</path>
+      <usage>Call to retrieve last N messages from Redis for conversation summarization. Returns list of message dicts with role, content, timestamp.</usage>
+    </interface>
+    <interface>
+      <name>LLMClient.chat_completion</name>
+      <kind>method</kind>
+      <signature>async def chat_completion(messages: List[dict], model: str = None) -> dict</signature>
+      <path>backend/api/llm_client.py</path>
+      <usage>Call with summarization prompt to generate Memory Object. Non-streaming call. Returns response dict with choices[0].message.content.</usage>
+    </interface>
+    <interface>
+      <name>MCPClient.call_tool</name>
+      <kind>method</kind>
+      <signature>async def call_tool(tool_name: str, parameters: dict) -> dict</signature>
+      <path>backend/api/mcp_client.py</path>
+      <usage>Reference for async tool calling patterns. store_memory tool will be called via MCP protocol (JSON-RPC 2.0) from backend.</usage>
+    </interface>
+    <interface>
+      <name>agentic-memories POST /memories</name>
+      <kind>HTTP API</kind>
+      <signature>POST /memories Request: {"user_id": str, "memory": {Memory Object}} Response: {"status": "success", "memory_id": str, "stored_at": str}</signature>
+      <path>External Service</path>
+      <usage>MemoryClient.store_memory() sends HTTP POST to agentic-memories. Handle success (200), network errors (connection timeout), API errors (4xx/5xx).</usage>
+    </interface>
+    <interface>
+      <name>store_memory MCP Tool</name>
+      <kind>MCP Tool (JSON-RPC 2.0)</kind>
+      <signature>{"name": "store_memory", "description": "Store conversation memory", "inputSchema": {"user_id": str, "conversation_summary": str, "decisions": array, "preferences": object, "topics": array, "sentiment": str}}</signature>
+      <path>mcp_server/tools.py</path>
+      <usage>LLM can call this tool via function calling. Tool calls MemoryClient.store_memory() and returns success/failure in JSON-RPC format.</usage>
+    </interface>
+  </interfaces>
+
+  <tests>
+    <standards>
+      Use pytest for all tests with pytest-asyncio for async support. Mock external services (agentic-memories HTTP API with respx, LLM with AsyncMock). Test both success and failure paths comprehensively. Follow patterns from existing tests (test_llm_client.py, test_streaming_e2e.py). Target >80% code coverage. Tests in backend/tests/unit/ for unit tests, backend/tests/integration/ for integration tests, mcp_server/tests/ for MCP tool tests.
+    </standards>
+    <locations>
+      <location>backend/tests/unit/test_memory_client.py</location>
+      <location>backend/tests/unit/test_memory_manager.py</location>
+      <location>backend/tests/integration/test_memory_storage_e2e.py</location>
+      <location>mcp_server/tests/test_store_memory_tool.py</location>
+    </locations>
+    <ideas>
+      <idea ac="AC1">Test MemoryClient.store_memory() with mocked httpx response (success 200). Test conversation end detection with farewell keywords and timeout. Test Memory Object creation from conversation history.</idea>
+      <idea ac="AC2">Test Memory Object schema validation (required fields, data types). Test agentic-memories HTTP API integration with respx mocking. Verify memory structure matches schema.</idea>
+      <idea ac="AC3">Test graceful degradation: mock httpx.NetworkError, verify Redis fallback queue stores memory. Test retry worker retrieves from queue and retries. Test circuit breaker after 5 failures.</idea>
+      <idea ac="AC4">Test user notification flag when memory storage fails. Verify chat continues without memory context. Test error logging includes user_id and context.</idea>
+      <idea ac="AC5">Test LLM summarization generates all required fields (decisions with options_considered/reasoning, preferences with risk_tolerance/priorities, topics, sentiment). Test fallback heuristic when LLM parsing fails.</idea>
+      <idea ac="AC6">Test performance: measure storage time with mocked agentic-memories (should be <500ms p95). Test async execution doesn't block chat response. Load test with 100 concurrent storage operations.</idea>
+    </ideas>
+  </tests>
+</story-context>

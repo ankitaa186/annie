@@ -1,0 +1,19 @@
+# Backend API Requirements
+# Python 3.12+ required
+
+# Web framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+
+# HTTP client for MCP server and LLM APIs
+httpx>=0.25.0
+
+# SSE support for streaming responses
+sse-starlette>=1.6.5
+
+# Testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+
+# State management (Story 2.5)
+redis>=5.0.0
