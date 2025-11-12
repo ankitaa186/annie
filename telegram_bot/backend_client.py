@@ -19,24 +19,32 @@ logger = get_logger(__name__)
 class BackendClient:
     """Client for communicating with Backend API service."""
 
-    def __init__(self, backend_url: Optional[str] = None, timeout: int = 30):
+    def __init__(self, backend_url: Optional[str] = None):
         """
         Initialize Backend API client.
 
         Args:
             backend_url: Backend API base URL (defaults to env var)
-            timeout: Request timeout in seconds (default: 30)
         """
         config = get_config()
         self.backend_url = backend_url or config.get("BACKEND_URL", "http://backend:8000")
-        self.timeout = aiohttp.ClientTimeout(total=timeout)
+
+        # Use different timeouts for different operations
+        # - connect: 10s to establish connection
+        # - sock_read: 180s for streaming (allows for thinking models + full response up to 3 mins)
+        self.timeout = aiohttp.ClientTimeout(
+            total=None,  # No total timeout for streaming
+            connect=10,  # 10s to connect
+            sock_read=180  # 180s between chunks (allows for 2-3 min LLM responses)
+        )
         self.session: Optional[aiohttp.ClientSession] = None
 
         logger.info(
             "Backend client initialized",
             extra={
                 "backend_url": self.backend_url,
-                "timeout_seconds": timeout,
+                "connect_timeout": 10,
+                "sock_read_timeout": 180,
                 "event": "backend_client_initialized"
             }
         )
@@ -258,6 +266,22 @@ class BackendClient:
                                     }
                                 )
                                 break
+                            elif chunk_type == "error":
+                                # Backend error - log and raise exception to trigger error handling
+                                error_message = chunk_data.get("message", "Unknown error")
+                                error_code = chunk_data.get("code", "UNKNOWN")
+                                logger.error(
+                                    "Backend stream error",
+                                    extra={
+                                        "user_id": user_id,
+                                        "conversation_id": conversation_id,
+                                        "error_message": error_message,
+                                        "error_code": error_code,
+                                        "event": "stream_error"
+                                    }
+                                )
+                                # Raise exception to trigger error handler and cancel typing
+                                raise Exception(f"Backend error: {error_message}")
 
                         except json.JSONDecodeError as e:
                             logger.warning(

@@ -7,6 +7,7 @@ Handles session creation, conversation history storage, and context building for
 Redis Key Patterns:
 - session:{user_id} -> Session data (JSON, TTL: 1 hour)
 - conversation:{conversation_id} -> Message list (JSON array, TTL: 30 min)
+- conversation_mapping:{conversation_id} -> user_id (String, TTL: 30 min) - Reverse lookup for memory tools
 """
 
 import json
@@ -246,6 +247,14 @@ class StateManager:
                 json.dumps(session)
             )
 
+            # Store reverse mapping: conversation_id -> user_id for tool calls
+            mapping_key = f"conversation_mapping:{conversation_id}"
+            await self.redis_client.setex(
+                mapping_key,
+                self.CONVERSATION_TTL,
+                user_id
+            )
+
             duration_ms = int((time.time() - start_time) * 1000)
 
             logger.info(
@@ -391,6 +400,16 @@ class StateManager:
                 self.SESSION_TTL,
                 json.dumps(session)
             )
+
+            # Refresh conversation_mapping TTL
+            conversation_id = session.get("conversation_id")
+            if conversation_id:
+                mapping_key = f"conversation_mapping:{conversation_id}"
+                await self.redis_client.setex(
+                    mapping_key,
+                    self.CONVERSATION_TTL,
+                    user_id
+                )
 
             duration_ms = int((time.time() - start_time) * 1000)
 
@@ -703,3 +722,65 @@ class StateManager:
                 "total_messages": 0,
                 "status": "degraded"
             }
+
+    async def get_user_id_for_conversation(
+        self,
+        conversation_id: str
+    ) -> Optional[str]:
+        """
+        Get user_id associated with a conversation.
+
+        This uses the reverse mapping stored in Redis to look up
+        which user owns a conversation. Used by the stream endpoint
+        to inject user_id into system message for tool calls.
+
+        Args:
+            conversation_id: Unique conversation identifier
+
+        Returns:
+            user_id string if found, None otherwise
+        """
+        if not conversation_id or not conversation_id.strip():
+            raise StateValidationError("conversation_id cannot be empty", field="conversation_id")
+
+        if not self._is_healthy:
+            logger.warning(
+                "Redis unavailable, cannot retrieve user_id (degraded mode)",
+                extra={"conversation_id": conversation_id}
+            )
+            return None
+
+        try:
+            mapping_key = f"conversation_mapping:{conversation_id}"
+            user_id = await self.redis_client.get(mapping_key)
+
+            if user_id:
+                # Redis returns bytes, decode to string
+                user_id = user_id.decode("utf-8") if isinstance(user_id, bytes) else user_id
+
+                logger.debug(
+                    "User ID retrieved for conversation",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "user_id": user_id
+                    }
+                )
+                return user_id
+            else:
+                logger.warning(
+                    "No user_id mapping found for conversation",
+                    extra={"conversation_id": conversation_id}
+                )
+                return None
+
+        except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError) as e:
+            logger.error(
+                "Failed to retrieve user_id mapping",
+                extra={
+                    "conversation_id": conversation_id,
+                    "error": str(e)
+                }
+            )
+
+            self._is_healthy = False
+            return None

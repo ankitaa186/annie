@@ -350,8 +350,8 @@ async def retrieve_memories_tool_handler(
         if persona:
             params["persona"] = persona
 
-        # Make HTTP request to agentic-memories with 300ms timeout
-        async with httpx.AsyncClient(timeout=0.3) as client:
+        # Make HTTP request to agentic-memories with 30 second timeout
+        async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(
                 f"{memories_url}/v1/retrieve",
                 params=params

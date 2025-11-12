@@ -4,7 +4,8 @@ Message Handler with Authorization
 This module handles incoming Telegram messages with authorization checks.
 """
 
-from telegram import Update
+import asyncio
+from telegram import Update, Message as TelegramMessage
 from telegram.ext import ContextTypes, MessageHandler, filters
 
 from telegram_bot.auth import AuthenticationModule
@@ -16,6 +17,160 @@ logger = get_logger(__name__)
 
 # Global auth module (initialized once)
 auth_module = None
+
+# Telegram message length limit (use 4000 for safety, actual limit is 4096)
+MAX_MESSAGE_LENGTH = 4000
+
+
+async def keep_typing_indicator(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
+    """
+    Keep sending typing indicator every 4 seconds until cancelled.
+
+    Args:
+        context: Bot context
+        chat_id: Chat ID to send typing indicator to
+    """
+    try:
+        while True:
+            await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+            await asyncio.sleep(4)  # Send every 4 seconds (indicator lasts ~5 seconds)
+    except asyncio.CancelledError:
+        # Task was cancelled, stop sending typing indicator
+        logger.debug(
+            "Typing indicator task cancelled",
+            extra={"chat_id": chat_id, "event": "typing_indicator_cancelled"}
+        )
+        raise
+
+
+async def stream_response_to_telegram(
+    backend_client,
+    conversation_id: str,
+    user_id: int,
+    message: TelegramMessage,
+    typing_task: asyncio.Task
+):
+    """
+    Stream LLM response to Telegram with chunked updates and message splitting.
+
+    Args:
+        backend_client: Backend client instance
+        conversation_id: Conversation ID from backend
+        user_id: Telegram user ID
+        message: Original Telegram message to reply to
+        typing_task: Typing indicator task to cancel when first message is sent
+
+    Returns:
+        Total length of response sent
+    """
+    response_buffer = []
+    sent_messages = []  # Track all messages (for multi-message responses)
+    chunk_count = 0
+
+    async for chunk in backend_client.stream_response(conversation_id, user_id):
+        response_buffer.append(chunk)
+        chunk_count += 1
+        current_text = "".join(response_buffer)
+
+        # Check if we need to split into a new message
+        if len(current_text) > MAX_MESSAGE_LENGTH and len(sent_messages) > 0:
+            # Current message is getting too long, split it
+            # Find a good break point (end of sentence near the limit)
+            split_point = MAX_MESSAGE_LENGTH
+            for i in range(MAX_MESSAGE_LENGTH - 200, min(MAX_MESSAGE_LENGTH, len(current_text))):
+                if current_text[i] in '.!?\n':
+                    split_point = i + 1
+                    break
+
+            # Send current message part as final edit
+            current_part = current_text[:split_point]
+            try:
+                await sent_messages[-1].edit_text(current_part)
+            except Exception:
+                pass  # Ignore edit failures on split
+
+            # Start new message with remainder
+            remaining_text = current_text[split_point:]
+            new_message = await message.reply_text(remaining_text)
+            sent_messages.append(new_message)
+
+            # Reset buffer to only contain the new message's text
+            response_buffer = [remaining_text]
+
+            logger.info(
+                "Split response into new message",
+                extra={
+                    "user_id": user_id,
+                    "message_number": len(sent_messages),
+                    "split_at": split_point,
+                    "event": "message_split"
+                }
+            )
+            continue
+
+        # Update message every 5 chunks or on first chunk
+        if chunk_count == 1 or chunk_count % 5 == 0:
+            if len(sent_messages) == 0:
+                # Send first message and stop typing indicator
+                sent_messages.append(await message.reply_text(current_text))
+
+                # Cancel typing indicator once first message is sent
+                typing_task.cancel()
+                try:
+                    await typing_task
+                except asyncio.CancelledError:
+                    pass
+
+                logger.debug(
+                    "Typing indicator stopped (first message sent)",
+                    extra={
+                        "user_id": user_id,
+                        "chat_id": message.chat_id,
+                        "event": "typing_indicator_stopped"
+                    }
+                )
+            else:
+                # Edit last message
+                try:
+                    await sent_messages[-1].edit_text(current_text)
+                except Exception as edit_error:
+                    # Telegram rate limits on edits, just continue
+                    logger.debug(
+                        "Message edit skipped",
+                        extra={
+                            "user_id": user_id,
+                            "error": str(edit_error)[:100],
+                            "event": "message_edit_skipped"
+                        }
+                    )
+
+    # Final update with complete response
+    final_text = "".join(response_buffer)
+    if len(sent_messages) > 0 and final_text:
+        try:
+            await sent_messages[-1].edit_text(final_text)
+            logger.info(
+                "Final message update successful",
+                extra={
+                    "user_id": user_id,
+                    "total_messages": len(sent_messages),
+                    "final_length": len(final_text),
+                    "event": "final_edit_success"
+                }
+            )
+        except Exception as e:
+            logger.warning(
+                "Final edit failed, message may be incomplete",
+                extra={
+                    "user_id": user_id,
+                    "error": str(e)[:100],
+                    "event": "final_edit_failed"
+                }
+            )
+
+    # Calculate total response length across all messages
+    total_length = sum(len(msg.text or "") for msg in sent_messages)
+    return total_length
 
 
 def setup_message_handlers(application):
@@ -129,15 +284,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
     )
 
-    # Send typing indicator
-    await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+    # Start typing indicator task (keeps showing until response arrives)
+    typing_task = asyncio.create_task(keep_typing_indicator(context, chat_id))
 
     logger.debug(
-        "Typing indicator sent",
+        "Typing indicator task started",
         extra={
             "user_id": user_id,
             "chat_id": chat_id,
-            "event": "typing_indicator_sent"
+            "event": "typing_indicator_started"
         }
     )
 
@@ -165,44 +320,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         # Stream response back to user
-        response_buffer = []
-        sent_message = None
-        update_interval = 0  # Update every chunk for smooth streaming
-
-        async for chunk in backend_client.stream_response(conversation_id, user_id):
-            response_buffer.append(chunk)
-
-            # Update message periodically (every N chunks or first chunk)
-            if len(response_buffer) == 1 or update_interval % 3 == 0:
-                current_text = "".join(response_buffer)
-
-                if sent_message is None:
-                    # Send first message
-                    sent_message = await message.reply_text(current_text)
-                else:
-                    # Edit existing message
-                    try:
-                        await sent_message.edit_text(current_text)
-                    except Exception as edit_error:
-                        # Telegram has rate limits on edits, log and continue
-                        logger.debug(
-                            "Message edit failed (rate limit or no change)",
-                            extra={
-                                "user_id": user_id,
-                                "error": str(edit_error),
-                                "event": "message_edit_failed"
-                            }
-                        )
-
-            update_interval += 1
-
-        # Final update with complete response
-        final_text = "".join(response_buffer)
-        if sent_message and final_text:
-            try:
-                await sent_message.edit_text(final_text)
-            except Exception:
-                pass  # Final edit failed, message already has content
+        response_length = await stream_response_to_telegram(
+            backend_client,
+            conversation_id,
+            user_id,
+            message,
+            typing_task
+        )
 
         logger.info(
             "Message processing complete",
@@ -210,12 +334,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "user_id": user_id,
                 "message_id": message_id,
                 "conversation_id": conversation_id,
-                "response_length": len(final_text),
+                "response_length": response_length,
                 "event": "message_processed"
             }
         )
 
     except Exception as e:
+        # Cancel typing indicator on error
+        typing_task.cancel()
+        try:
+            await typing_task
+        except asyncio.CancelledError:
+            pass
+
         # Backend error - send user-friendly error message
         logger.error(
             "Failed to process message via backend",
@@ -314,15 +445,15 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
         }
     )
 
-    # Send typing indicator
-    await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+    # Start typing indicator task (keeps showing until response arrives)
+    typing_task = asyncio.create_task(keep_typing_indicator(context, chat_id))
 
     logger.debug(
-        "Typing indicator sent",
+        "Typing indicator task started",
         extra={
             "user_id": user_id,
             "chat_id": chat_id,
-            "event": "typing_indicator_sent"
+            "event": "typing_indicator_started"
         }
     )
 
@@ -376,43 +507,13 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
         )
 
         # Stream response back to user
-        response_buffer = []
-        sent_message = None
-        update_interval = 0
-
-        async for chunk in backend_client.stream_response(conversation_id, user_id):
-            response_buffer.append(chunk)
-
-            # Update message periodically
-            if len(response_buffer) == 1 or update_interval % 3 == 0:
-                current_text = "".join(response_buffer)
-
-                if sent_message is None:
-                    # Send first message
-                    sent_message = await message.reply_text(current_text)
-                else:
-                    # Edit existing message
-                    try:
-                        await sent_message.edit_text(current_text)
-                    except Exception as edit_error:
-                        logger.debug(
-                            "Message edit failed (rate limit or no change)",
-                            extra={
-                                "user_id": user_id,
-                                "error": str(edit_error),
-                                "event": "message_edit_failed"
-                            }
-                        )
-
-            update_interval += 1
-
-        # Final update with complete response
-        final_text = "".join(response_buffer)
-        if sent_message and final_text:
-            try:
-                await sent_message.edit_text(final_text)
-            except Exception:
-                pass  # Final edit failed, message already has content
+        response_length = await stream_response_to_telegram(
+            backend_client,
+            conversation_id,
+            user_id,
+            message,
+            typing_task
+        )
 
         logger.info(
             "Voice message processing complete",
@@ -421,12 +522,19 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 "message_id": message_id,
                 "conversation_id": conversation_id,
                 "voice_duration": voice.duration,
-                "response_length": len(final_text),
+                "response_length": response_length,
                 "event": "voice_message_processed"
             }
         )
 
     except Exception as e:
+        # Cancel typing indicator on error
+        typing_task.cancel()
+        try:
+            await typing_task
+        except asyncio.CancelledError:
+            pass
+
         # Backend error - send user-friendly error message
         logger.error(
             "Failed to process voice message via backend",

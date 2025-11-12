@@ -5,6 +5,8 @@ Implements MCP (Model Context Protocol) server with HTTP transport
 and JSON-RPC 2.0 protocol support.
 """
 
+import asyncio
+import inspect
 import json
 import time
 from datetime import datetime
@@ -15,7 +17,7 @@ from fastapi.responses import JSONResponse
 
 from mcp_server.config import get_config
 from mcp_server.logging import get_logger, log_performance
-from mcp_server.tools import ToolRegistry, health_check_tool, store_memory_tool
+from mcp_server.tools import ToolRegistry, health_check_tool, store_memory_tool, retrieve_memories_tool
 
 logger = get_logger(__name__)
 config = get_config()
@@ -34,9 +36,10 @@ class MCPServer:
         """Register default tools."""
         self.tool_registry.register(health_check_tool)
         self.tool_registry.register(store_memory_tool)
+        self.tool_registry.register(retrieve_memories_tool)
         logger.info(f"Registered {len(self.tool_registry.tools)} tools")
 
-    def handle_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def handle_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle JSON-RPC 2.0 request.
 
@@ -59,7 +62,7 @@ class MCPServer:
             if method == "tools/list":
                 return self.handle_tools_list(request_id)
             elif method == "tools/call":
-                return self.handle_tool_call(request_id, params)
+                return await self.handle_tool_call(request_id, params)
             else:
                 return self.create_error_response(
                     request_id,
@@ -105,7 +108,7 @@ class MCPServer:
         }
 
     @log_performance("tool_call")
-    def handle_tool_call(self, request_id: Optional[Any], params: Dict[str, Any]) -> Dict[str, Any]:
+    async def handle_tool_call(self, request_id: Optional[Any], params: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle tools/call request.
 
@@ -149,7 +152,13 @@ class MCPServer:
         # Execute tool
         try:
             tool_handler = tool_info["handler"]
-            result = tool_handler(**arguments)
+
+            # Check if handler is async and await if needed
+            if inspect.iscoroutinefunction(tool_handler):
+                result = await tool_handler(**arguments)
+            else:
+                result = tool_handler(**arguments)
+
             duration_ms = int((time.time() - start_time) * 1000)
 
             logger.info(
@@ -258,7 +267,7 @@ async def list_tools():
         "id": "http-list"
     }
 
-    response = mcp_server.handle_request(request_data)
+    response = await mcp_server.handle_request(request_data)
     return JSONResponse(content=response)
 
 
@@ -295,7 +304,7 @@ async def call_tool(request: Request):
                 }
             )
 
-        response = mcp_server.handle_request(request_data)
+        response = await mcp_server.handle_request(request_data)
         return JSONResponse(content=response)
 
     except json.JSONDecodeError as e:

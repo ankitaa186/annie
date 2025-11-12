@@ -287,7 +287,53 @@ async def stream_generator(
 
                     # Execute tool via MCP client
                     try:
-                        tool_result = await mcp_client.call_tool(function_name, arguments)
+                        # Fire-and-forget for store_memory (non-blocking)
+                        if function_name == "store_memory":
+                            # Create background task with exception handling
+                            async def _store_memory_background():
+                                try:
+                                    await mcp_client.call_tool(function_name, arguments)
+                                    logger.info(
+                                        "Background memory storage completed successfully",
+                                        extra={
+                                            "conversation_id": conversation_id,
+                                            "tool_name": function_name,
+                                            "tool_call_id": tool_call_id
+                                        }
+                                    )
+                                except Exception as e:
+                                    logger.error(
+                                        "Background memory storage failed (will retry via queue)",
+                                        extra={
+                                            "conversation_id": conversation_id,
+                                            "tool_name": function_name,
+                                            "tool_call_id": tool_call_id,
+                                            "error": str(e),
+                                            "error_type": type(e).__name__
+                                        },
+                                        exc_info=True
+                                    )
+
+                            # Launch background task
+                            asyncio.create_task(_store_memory_background())
+
+                            # Return immediate success response
+                            tool_result = {
+                                "status": "queued",
+                                "message": "Memory storage initiated in background"
+                            }
+
+                            logger.info(
+                                "Memory storage queued (fire-and-forget)",
+                                extra={
+                                    "conversation_id": conversation_id,
+                                    "tool_name": function_name,
+                                    "tool_call_id": tool_call_id
+                                }
+                            )
+                        else:
+                            # All other tools: await completion
+                            tool_result = await mcp_client.call_tool(function_name, arguments)
 
                         # Add tool result to conversation
                         conversation_messages.append({
@@ -507,8 +553,25 @@ async def stream_response(conversation_id: str, request: Request):
         # Create StateManager to load conversation context
         state_manager = StateManager()
 
-        # Load conversation history from Redis
-        messages = await state_manager.build_llm_context(conversation_id)
+        # Get user_id for this conversation (needed for memory tool calls)
+        user_id = await state_manager.get_user_id_for_conversation(conversation_id)
+
+        # Build system message with user_id for memory tools
+        system_message = None
+        if user_id:
+            system_message = (
+                f"You are Annie, a personal AI companion that provides intelligent decision-making support. "
+                f"Current user ID: {user_id}\n\n"
+                f"IMPORTANT: When using memory tools (store_memory, retrieve_memories), ALWAYS use this exact user_id: {user_id}\n"
+                f"Never use generic IDs like 'anonymous_user' - the user_id is provided above."
+            )
+            logger.debug(
+                "System message built with user_id",
+                extra={"conversation_id": conversation_id, "user_id": user_id}
+            )
+
+        # Load conversation history from Redis with system message
+        messages = await state_manager.build_llm_context(conversation_id, system_message)
 
         if not messages:
             # No conversation history found - this might be a new conversation
@@ -523,7 +586,8 @@ async def stream_response(conversation_id: str, request: Request):
             "Loaded conversation context from Redis",
             extra={
                 "conversation_id": conversation_id,
-                "message_count": len(messages)
+                "message_count": len(messages),
+                "has_user_id": user_id is not None
             }
         )
 

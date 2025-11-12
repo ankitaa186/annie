@@ -60,9 +60,9 @@ class LLMClient:
     CHATGPT5_BASE_URL = "https://api.openai.com/v1"
 
     # Timeouts (in seconds)
-    REQUEST_TIMEOUT = 90.0  # Total timeout for request
-    FAILOVER_TIMEOUT = 30.0  # Max time before failing over to backup provider (non-streaming)
-    STREAMING_TIMEOUT = 45.0  # Timeout for streaming requests (longer to allow connection + first token)
+    REQUEST_TIMEOUT = 180.0  # Total timeout for request (3 minutes for thinking models)
+    FAILOVER_TIMEOUT = 60.0  # Max time before failing over to backup provider (non-streaming)
+    STREAMING_TIMEOUT = 180.0  # Timeout for streaming requests (allows 2-3 min LLM responses)
 
     def __init__(self):
         """
