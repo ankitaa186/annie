@@ -57,7 +57,7 @@ development_status:
   2-3-sse-streaming-support: done
   2-4-function-calling-mcp-tools: done
   2-5-conversation-state-management: done
-  2-6-error-handling-patterns: backlog
+  2-6-error-handling-patterns: done
   epic-2-retrospective: optional
 
   # Epic 3: Memory & Persistence
@@ -76,7 +76,7 @@ development_status:
   # Epic 5: Telegram Bot Interface
   epic-5: contexted
   5-1-telegram-bot-setup-message-reception: done
-  5-2-streaming-response-delivery: review
+  5-2-streaming-response-delivery: done
   5-3-message-formatting-error-handling: backlog
   epic-5-retrospective: optional
 

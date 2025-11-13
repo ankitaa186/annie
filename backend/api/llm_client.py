@@ -61,7 +61,7 @@ class LLMClient:
 
     # Timeouts (in seconds)
     REQUEST_TIMEOUT = 180.0  # Total timeout for request (3 minutes for thinking models)
-    FAILOVER_TIMEOUT = 60.0  # Max time before failing over to backup provider (non-streaming)
+    FAILOVER_TIMEOUT = 180.0  # Max time before failing over to backup provider (3 minutes for thinking models)
     STREAMING_TIMEOUT = 180.0  # Timeout for streaming requests (allows 2-3 min LLM responses)
 
     def __init__(self):

@@ -19,15 +19,17 @@ logger = get_logger(__name__)
 class BackendClient:
     """Client for communicating with Backend API service."""
 
-    def __init__(self, backend_url: Optional[str] = None):
+    def __init__(self, backend_url: Optional[str] = None, first_token_timeout: int = 120):
         """
         Initialize Backend API client.
 
         Args:
             backend_url: Backend API base URL (defaults to env var)
+            first_token_timeout: Timeout in seconds for receiving first token (default: 120s/2min)
         """
         config = get_config()
         self.backend_url = backend_url or config.get("BACKEND_URL", "http://backend:8000")
+        self.first_token_timeout = first_token_timeout  # AC #7: First token timeout (2 min allowance)
 
         # Use different timeouts for different operations
         # - connect: 10s to establish connection
@@ -45,6 +47,7 @@ class BackendClient:
                 "backend_url": self.backend_url,
                 "connect_timeout": 10,
                 "sock_read_timeout": 180,
+                "first_token_timeout": first_token_timeout,
                 "event": "backend_client_initialized"
             }
         )
@@ -177,6 +180,9 @@ class BackendClient:
         """
         Stream LLM response from backend using Server-Sent Events (SSE).
 
+        Enforces first-token timeout (AC #7) to ensure user receives response
+        within reasonable time frame.
+
         Args:
             conversation_id: Conversation ID from chat endpoint
             user_id: Telegram user ID (for logging)
@@ -185,6 +191,7 @@ class BackendClient:
             Response chunks as they arrive
 
         Raises:
+            asyncio.TimeoutError: If first token not received within timeout
             Exception: If streaming fails
         """
         await self._ensure_session()
@@ -197,6 +204,7 @@ class BackendClient:
                 "user_id": user_id,
                 "conversation_id": conversation_id,
                 "endpoint": endpoint,
+                "first_token_timeout_sec": self.first_token_timeout,
                 "event": "stream_started"
             }
         )
@@ -206,6 +214,7 @@ class BackendClient:
                 response.raise_for_status()
 
                 chunk_count = 0
+                first_token_received = False
                 async for line in response.content:
                     decoded_line = line.decode("utf-8").strip()
 
@@ -240,6 +249,19 @@ class BackendClient:
                                 content = chunk_data.get("content", "")
                                 if content:
                                     chunk_count += 1
+
+                                    # Track first token reception for timeout monitoring
+                                    if not first_token_received:
+                                        first_token_received = True
+                                        logger.info(
+                                            "First token received",
+                                            extra={
+                                                "user_id": user_id,
+                                                "conversation_id": conversation_id,
+                                                "event": "first_token_received"
+                                            }
+                                        )
+
                                     yield content
 
                                     logger.debug(

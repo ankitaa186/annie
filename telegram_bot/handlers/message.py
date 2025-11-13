@@ -5,8 +5,10 @@ This module handles incoming Telegram messages with authorization checks.
 """
 
 import asyncio
+import time
 from telegram import Update, Message as TelegramMessage
 from telegram.ext import ContextTypes, MessageHandler, filters
+from telegram.error import RetryAfter, TelegramError
 
 from telegram_bot.auth import AuthenticationModule
 from telegram_bot.backend_client import get_backend_client
@@ -20,6 +22,10 @@ auth_module = None
 
 # Telegram message length limit (use 4000 for safety, actual limit is 4096)
 MAX_MESSAGE_LENGTH = 4000
+
+# Update frequency for streaming (milliseconds) - AC #2 specifies 100-500ms
+# Using 200ms as a good balance between responsiveness and rate limiting
+MIN_UPDATE_INTERVAL_MS = 500  # Update every 500ms (2x per second) to avoid Telegram rate limits
 
 
 async def keep_typing_indicator(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
@@ -51,7 +57,9 @@ async def stream_response_to_telegram(
     typing_task: asyncio.Task
 ):
     """
-    Stream LLM response to Telegram with chunked updates and message splitting.
+    Stream LLM response to Telegram with time-based updates and message splitting.
+
+    Enforces first-token timeout (AC #7) by wrapping the initial streaming call.
 
     Args:
         backend_client: Backend client instance
@@ -62,15 +70,74 @@ async def stream_response_to_telegram(
 
     Returns:
         Total length of response sent
+
+    Raises:
+        asyncio.TimeoutError: If first token not received within timeout
     """
     response_buffer = []
     sent_messages = []  # Track all messages (for multi-message responses)
     chunk_count = 0
+    last_update_time = 0  # Track time of last message update (milliseconds)
+    rate_limit_until = 0  # Timestamp (ms) when Telegram rate limit expires
+    is_first_chunk = True
 
-    async for chunk in backend_client.stream_response(conversation_id, user_id):
+    # Get the stream generator
+    stream = backend_client.stream_response(conversation_id, user_id)
+
+    # Enforce first-token timeout by wrapping first iteration with wait_for
+    first_token_timeout = backend_client.first_token_timeout
+    try:
+        # Wait for first chunk with timeout
+        first_chunk = await asyncio.wait_for(
+            stream.__anext__(),
+            timeout=first_token_timeout
+        )
+
+        # Process first chunk
+        response_buffer.append(first_chunk)
+        chunk_count += 1
+        current_text = "".join(response_buffer)
+        current_time_ms = time.time() * 1000
+
+        # Send first message immediately
+        sent_messages.append(await message.reply_text(current_text))
+        last_update_time = current_time_ms
+        is_first_chunk = False
+
+        # Cancel typing indicator once first message is sent
+        typing_task.cancel()
+        try:
+            await typing_task
+        except asyncio.CancelledError:
+            pass
+
+        logger.debug(
+            "Typing indicator stopped (first message sent)",
+            extra={
+                "user_id": user_id,
+                "chat_id": message.chat_id,
+                "event": "typing_indicator_stopped"
+            }
+        )
+
+    except asyncio.TimeoutError:
+        logger.error(
+            f"First token timeout after {first_token_timeout}s",
+            extra={
+                "user_id": user_id,
+                "conversation_id": conversation_id,
+                "timeout_seconds": first_token_timeout,
+                "event": "first_token_timeout"
+            }
+        )
+        raise  # Re-raise to be handled by caller
+
+    # Continue streaming remaining chunks
+    async for chunk in stream:
         response_buffer.append(chunk)
         chunk_count += 1
         current_text = "".join(response_buffer)
+        current_time_ms = time.time() * 1000  # Current time in milliseconds
 
         # Check if we need to split into a new message
         if len(current_text) > MAX_MESSAGE_LENGTH and len(sent_messages) > 0:
@@ -97,6 +164,9 @@ async def stream_response_to_telegram(
             # Reset buffer to only contain the new message's text
             response_buffer = [remaining_text]
 
+            # Reset update timer for new message
+            last_update_time = current_time_ms
+
             logger.info(
                 "Split response into new message",
                 extra={
@@ -108,65 +178,165 @@ async def stream_response_to_telegram(
             )
             continue
 
-        # Update message every 5 chunks or on first chunk
-        if chunk_count == 1 or chunk_count % 5 == 0:
-            if len(sent_messages) == 0:
-                # Send first message and stop typing indicator
-                sent_messages.append(await message.reply_text(current_text))
+        # Time-based update logic (AC #2: updates every 100-500ms)
+        # Update if MIN_UPDATE_INTERVAL_MS has passed since last update
+        time_since_last_update = current_time_ms - last_update_time
+        should_update = time_since_last_update >= MIN_UPDATE_INTERVAL_MS
 
-                # Cancel typing indicator once first message is sent
-                typing_task.cancel()
-                try:
-                    await typing_task
-                except asyncio.CancelledError:
-                    pass
+        # Check if we're still rate-limited by Telegram
+        is_rate_limited = current_time_ms < rate_limit_until
+
+        if is_rate_limited and should_update:
+            # Skip this edit - we're still rate-limited
+            logger.debug(
+                "Skipping edit (rate-limited)",
+                extra={
+                    "user_id": user_id,
+                    "wait_remaining_ms": int(rate_limit_until - current_time_ms),
+                    "event": "edit_skipped_rate_limit"
+                }
+            )
+
+        if should_update and not is_rate_limited:
+            # Edit last message (time-throttled)
+            try:
+                await sent_messages[-1].edit_text(current_text)
+                last_update_time = current_time_ms
 
                 logger.debug(
-                    "Typing indicator stopped (first message sent)",
+                    "Message updated (time-throttled)",
                     extra={
                         "user_id": user_id,
-                        "chat_id": message.chat_id,
-                        "event": "typing_indicator_stopped"
+                        "time_since_last_update_ms": int(time_since_last_update),
+                        "event": "message_updated"
                     }
                 )
-            else:
-                # Edit last message
-                try:
-                    await sent_messages[-1].edit_text(current_text)
-                except Exception as edit_error:
-                    # Telegram rate limits on edits, just continue
-                    logger.debug(
-                        "Message edit skipped",
+            except RetryAfter as retry_error:
+                # Telegram rate limit - calculate when we can edit again
+                rate_limit_until = current_time_ms + (retry_error.retry_after * 1000)
+
+                logger.warning(
+                    "Message edit rate limited by Telegram",
+                    extra={
+                        "user_id": user_id,
+                        "retry_after_seconds": retry_error.retry_after,
+                        "paused_until": rate_limit_until,
+                        "event": "telegram_rate_limited"
+                    }
+                )
+                # Don't update last_update_time - we'll retry after rate limit expires
+            except TelegramError as tg_error:
+                # Other Telegram API errors (e.g., message too old to edit)
+                logger.debug(
+                    "Message edit failed (Telegram API error)",
+                    extra={
+                        "user_id": user_id,
+                        "error": str(tg_error)[:100],
+                        "error_type": type(tg_error).__name__,
+                        "event": "telegram_edit_failed"
+                    }
+                )
+            except Exception as edit_error:
+                # Unexpected errors
+                logger.warning(
+                    "Message edit failed (unexpected error)",
+                    extra={
+                        "user_id": user_id,
+                        "error": str(edit_error)[:100],
+                        "error_type": type(edit_error).__name__,
+                        "event": "message_edit_error"
+                    }
+                )
+
+    # Final update with complete response (with rate limit retry)
+    final_text = "".join(response_buffer)
+    if len(sent_messages) > 0 and final_text:
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # If we're rate-limited, wait before retrying (with max 60s cap)
+                current_time_ms = time.time() * 1000
+                if current_time_ms < rate_limit_until:
+                    wait_ms = min(rate_limit_until - current_time_ms, 60000)  # Cap at 60 seconds
+                    wait_seconds = wait_ms / 1000
+                    logger.info(
+                        f"Waiting {wait_seconds:.1f}s for rate limit before final edit (attempt {attempt + 1})",
                         extra={
                             "user_id": user_id,
-                            "error": str(edit_error)[:100],
-                            "event": "message_edit_skipped"
+                            "wait_seconds": wait_seconds,
+                            "attempt": attempt + 1,
+                            "event": "final_edit_waiting"
+                        }
+                    )
+                    await asyncio.sleep(wait_seconds)
+
+                # Try final edit with 30s timeout to prevent indefinite hang
+                logger.debug(
+                    f"Attempting final edit (attempt {attempt + 1}, length {len(final_text)})",
+                    extra={"user_id": user_id, "final_length": len(final_text)}
+                )
+                await asyncio.wait_for(
+                    sent_messages[-1].edit_text(final_text),
+                    timeout=30.0
+                )
+                logger.info(
+                    "Final message update successful",
+                    extra={
+                        "user_id": user_id,
+                        "total_messages": len(sent_messages),
+                        "final_length": len(final_text),
+                        "attempt": attempt + 1,
+                        "event": "final_edit_success"
+                    }
+                )
+                break  # Success - exit retry loop
+
+            except asyncio.TimeoutError:
+                logger.error(
+                    f"Final edit timed out after 30s (attempt {attempt + 1})",
+                    extra={
+                        "user_id": user_id,
+                        "final_length": len(final_text),
+                        "attempt": attempt + 1,
+                        "event": "final_edit_timeout"
+                    }
+                )
+                break  # Don't retry on timeout
+
+            except RetryAfter as retry_error:
+                # Update rate limit and retry
+                rate_limit_until = time.time() * 1000 + (retry_error.retry_after * 1000)
+                logger.warning(
+                    f"Final edit rate-limited (wait {retry_error.retry_after}s), attempt {attempt + 1}/{max_retries}",
+                    extra={
+                        "user_id": user_id,
+                        "retry_after_seconds": retry_error.retry_after,
+                        "attempt": attempt + 1,
+                        "event": "final_edit_rate_limited"
+                    }
+                )
+                if attempt == max_retries - 1:
+                    logger.error(
+                        "Final edit failed after all retries (rate limit)",
+                        extra={
+                            "user_id": user_id,
+                            "final_length": len(final_text),
+                            "event": "final_edit_exhausted"
                         }
                     )
 
-    # Final update with complete response
-    final_text = "".join(response_buffer)
-    if len(sent_messages) > 0 and final_text:
-        try:
-            await sent_messages[-1].edit_text(final_text)
-            logger.info(
-                "Final message update successful",
-                extra={
-                    "user_id": user_id,
-                    "total_messages": len(sent_messages),
-                    "final_length": len(final_text),
-                    "event": "final_edit_success"
-                }
-            )
-        except Exception as e:
-            logger.warning(
-                "Final edit failed, message may be incomplete",
-                extra={
-                    "user_id": user_id,
-                    "error": str(e)[:100],
-                    "event": "final_edit_failed"
-                }
-            )
+            except Exception as e:
+                logger.warning(
+                    "Final edit failed",
+                    extra={
+                        "user_id": user_id,
+                        "error": str(e)[:100],
+                        "error_type": type(e).__name__,
+                        "attempt": attempt + 1,
+                        "event": "final_edit_failed"
+                    }
+                )
+                break  # Don't retry on non-rate-limit errors
 
     # Calculate total response length across all messages
     total_length = sum(len(msg.text or "") for msg in sent_messages)
@@ -319,14 +489,37 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             }
         )
 
-        # Stream response back to user
-        response_length = await stream_response_to_telegram(
-            backend_client,
-            conversation_id,
-            user_id,
-            message,
-            typing_task
-        )
+        # Stream response back to user (with first-token timeout enforcement)
+        try:
+            response_length = await stream_response_to_telegram(
+                backend_client,
+                conversation_id,
+                user_id,
+                message,
+                typing_task
+            )
+        except asyncio.TimeoutError:
+            # First token timeout - cancel typing and inform user
+            typing_task.cancel()
+            try:
+                await typing_task
+            except asyncio.CancelledError:
+                pass
+
+            logger.error(
+                "First token timeout exceeded",
+                extra={
+                    "user_id": user_id,
+                    "conversation_id": conversation_id,
+                    "event": "first_token_timeout"
+                }
+            )
+
+            await message.reply_text(
+                "Sorry, the response is taking longer than expected. "
+                "Please try again or rephrase your question."
+            )
+            return
 
         logger.info(
             "Message processing complete",
@@ -506,14 +699,37 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
             }
         )
 
-        # Stream response back to user
-        response_length = await stream_response_to_telegram(
-            backend_client,
-            conversation_id,
-            user_id,
-            message,
-            typing_task
-        )
+        # Stream response back to user (with first-token timeout enforcement)
+        try:
+            response_length = await stream_response_to_telegram(
+                backend_client,
+                conversation_id,
+                user_id,
+                message,
+                typing_task
+            )
+        except asyncio.TimeoutError:
+            # First token timeout - cancel typing and inform user
+            typing_task.cancel()
+            try:
+                await typing_task
+            except asyncio.CancelledError:
+                pass
+
+            logger.error(
+                "First token timeout exceeded",
+                extra={
+                    "user_id": user_id,
+                    "conversation_id": conversation_id,
+                    "event": "first_token_timeout"
+                }
+            )
+
+            await message.reply_text(
+                "Sorry, the response is taking longer than expected. "
+                "Please try again or rephrase your question."
+            )
+            return
 
         logger.info(
             "Voice message processing complete",

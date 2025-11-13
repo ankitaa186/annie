@@ -127,7 +127,8 @@ async def stream_generator(
                             "conversation_id": conversation_id,
                             "iteration": iteration,
                             "error": str(e)
-                        }
+                        },
+                        exc_info=True
                     )
                     yield {
                         "event": "message",
@@ -241,7 +242,8 @@ async def stream_generator(
                                             extra={
                                                 "conversation_id": conversation_id,
                                                 "error": str(e)
-                                            }
+                                            },
+                                            exc_info=True
                                         )
                             break
 
@@ -383,7 +385,8 @@ async def stream_generator(
                                 "tool_name": function_name,
                                 "tool_call_id": tool_call_id,
                                 "error": str(e)
-                            }
+                            },
+                            exc_info=True
                         )
 
                 # Check if we've exceeded max iterations
@@ -434,7 +437,8 @@ async def stream_generator(
                                             extra={
                                                 "conversation_id": conversation_id,
                                                 "error": str(e)
-                                            }
+                                            },
+                                            exc_info=True
                                         )
                             break
                     break
@@ -446,7 +450,8 @@ async def stream_generator(
             extra={
                 "conversation_id": conversation_id,
                 "error": str(e)
-            }
+            },
+            exc_info=True
         )
 
         yield {
@@ -466,7 +471,8 @@ async def stream_generator(
                 "conversation_id": conversation_id,
                 "error_type": type(e).__name__,
                 "error": str(e)
-            }
+            },
+            exc_info=True
         )
 
         yield {
@@ -620,7 +626,8 @@ async def stream_response(conversation_id: str, request: Request):
             extra={
                 "conversation_id": conversation_id,
                 "error": str(e)
-            }
+            },
+            exc_info=True
         )
 
         # Graceful degradation: continue with empty messages
