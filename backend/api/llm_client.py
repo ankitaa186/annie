@@ -81,6 +81,14 @@ class LLMClient:
         self.failover_timeout = float(config.get("LLM_FAILOVER_TIMEOUT", "180.0"))
         self.streaming_timeout = float(config.get("LLM_STREAMING_TIMEOUT", "180.0"))
 
+        # Load Grok-4 Live Search configuration from environment
+        # Mode: "auto" (LLM decides), "on" (always search), "off" (never search)
+        self.grok_live_search_mode = config.get("GROK_LIVE_SEARCH_MODE", "auto")
+        # Max results: 1-50, higher = more context but higher cost ($0.025 per source)
+        self.grok_live_search_max_results = int(config.get("GROK_LIVE_SEARCH_MAX_RESULTS", "10"))
+        # Cost alert threshold in USD per month
+        self.grok_live_search_cost_alert = int(config.get("GROK_LIVE_SEARCH_COST_ALERT_THRESHOLD", "800"))
+
         # Validate provider configuration
         if self.primary_provider not in ["grok-4", "chatgpt-5"]:
             logger.warning(
@@ -106,7 +114,10 @@ class LLMClient:
                 "chatgpt5_available": self.providers_available["chatgpt-5"],
                 "request_timeout": self.request_timeout,
                 "failover_timeout": self.failover_timeout,
-                "streaming_timeout": self.streaming_timeout
+                "streaming_timeout": self.streaming_timeout,
+                "grok_live_search_mode": self.grok_live_search_mode,
+                "grok_live_search_max_results": self.grok_live_search_max_results,
+                "grok_live_search_cost_alert": self.grok_live_search_cost_alert
             }
         )
 
@@ -247,6 +258,13 @@ class LLMClient:
                 "messages": messages
             }
 
+            # Add Grok-4 Live Search if provider is grok-4
+            if provider == "grok-4":
+                payload["search_parameters"] = {
+                    "mode": self.grok_live_search_mode,
+                    "return_citations": True
+                }
+
             # Add tools if provided
             if tools:
                 payload["tools"] = tools
@@ -296,7 +314,7 @@ class LLMClient:
             result = response.json()
 
             duration_ms = int((time.time() - start_time) * 1000)
-            
+
             # Debug: Log response structure to understand tool calling behavior
             if tools:
                 message = result.get("choices", [{}])[0].get("message", {})
@@ -311,7 +329,30 @@ class LLMClient:
                         "has_content": bool(message.get("content"))
                     }
                 )
-            
+
+            # Log Grok-4 Live Search usage if search was activated
+            # Citations appear in result, and num_sources_used appears in usage
+            usage = result.get("usage", {})
+            sources_used = usage.get("num_sources_used", 0)
+
+            if provider == "grok-4" and sources_used > 0:
+                citations = result.get("citations", [])
+                cost_estimate = sources_used * 0.025  # $0.025 per source
+
+                logger.info(
+                    "Grok-4 Live Search activated",
+                    extra={
+                        "provider": provider,
+                        "search_activated": True,
+                        "sources_accessed": sources_used,
+                        "citations_count": len(citations),
+                        "citations": citations[:5] if len(citations) > 5 else citations,  # Log first 5 URLs
+                        "cost_estimate_usd": round(cost_estimate, 4),
+                        "duration_ms": duration_ms,
+                        "event": "live_search_used"
+                    }
+                )
+
             logger.info(
                 "LLM request successful",
                 extra={
@@ -532,6 +573,13 @@ class LLMClient:
                 "stream": True  # Enable streaming
             }
 
+            # Add Grok-4 Live Search if provider is grok-4
+            if provider == "grok-4":
+                payload["search_parameters"] = {
+                    "mode": self.grok_live_search_mode,
+                    "return_citations": True
+                }
+
             # Add tools if provided
             if tools:
                 payload["tools"] = tools
@@ -645,6 +693,29 @@ class LLMClient:
                                     usage = chunk.get("usage", {})
 
                                     duration_ms = int((time.time() - start_time) * 1000)
+
+                                    # Log Grok-4 Live Search usage if search was activated
+                                    # Citations appear only in last chunk, num_sources_used in usage
+                                    sources_used = usage.get("num_sources_used", 0)
+
+                                    if provider == "grok-4" and sources_used > 0:
+                                        citations = chunk.get("citations", [])
+                                        cost_estimate = sources_used * 0.025  # $0.025 per source
+
+                                        logger.info(
+                                            "Grok-4 Live Search activated (streaming)",
+                                            extra={
+                                                "provider": provider,
+                                                "search_activated": True,
+                                                "sources_accessed": sources_used,
+                                                "citations_count": len(citations),
+                                                "citations": citations[:5] if len(citations) > 5 else citations,  # Log first 5 URLs
+                                                "cost_estimate_usd": round(cost_estimate, 4),
+                                                "duration_ms": duration_ms,
+                                                "event": "live_search_used"
+                                            }
+                                        )
+
                                     logger.info(
                                         "Streaming completed",
                                         extra={

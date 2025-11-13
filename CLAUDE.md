@@ -138,6 +138,9 @@ make clean
 - `LOG_LEVEL` - Logging level: `DEBUG`, `INFO` (default), `WARNING`, `ERROR`, `CRITICAL`
 - `BACKEND_PORT` - Backend API port (default: `8000`)
 - `REDIS_HOST` / `REDIS_PORT` - Redis connection (defaults: `redis:6379`)
+- `GROK_LIVE_SEARCH_MODE` - Grok-4 Live Search mode: `auto` (default), `on`, `off`
+- `GROK_LIVE_SEARCH_MAX_RESULTS` - Max search results per query (default: `10`, range: 1-50)
+- `GROK_LIVE_SEARCH_COST_ALERT_THRESHOLD` - Monthly cost alert threshold in USD (default: `800`)
 
 ### Security
 - API keys and tokens are automatically masked in logs (shows only first 4 and last 4 characters)
@@ -325,3 +328,11 @@ registry.register(my_new_tool, schema={
 - **Stock API**: Portfolio data for stock trader tool
 - **Telegram Bot API**: Messaging interface
 - **Grok-4 / ChatGPT-5 APIs**: LLM providers for chat generation
+  - **Grok-4 Live Search** (Story 4.1 - Implemented):
+    - Real-time internet access for time-sensitive queries
+    - Auto mode: LLM intelligently decides when to search
+    - Cost: $25 per 1,000 sources accessed ($0.025 per source)
+    - FREE until November 21, 2025 (promotional period)
+    - Projected costs: $56-562/month depending on usage (10-100 users)
+    - Logged metrics: search activation, sources accessed, cost per request
+    - Monitoring: Use `event="live_search_used"` to filter logs for cost tracking

@@ -525,3 +525,192 @@ class TestErrorLogging:
                 # Verify failover was logged
                 warning_calls = [call for call in mock_logger.warning.call_args_list]
                 assert any("fallback" in str(call).lower() for call in warning_calls)
+
+
+class TestGrokLiveSearch:
+    """Test Grok-4 Live Search integration (Story 4.1)."""
+
+    @pytest.fixture
+    def mock_config_with_live_search(self):
+        """Mock configuration with Live Search settings."""
+        return {
+            "LLM_PROVIDER": "grok-4",
+            "GROK_API_KEY": "test-grok-key-12345",
+            "CHATGPT_API_KEY": "test-chatgpt-key-12345",
+            "GROK_LIVE_SEARCH_MODE": "auto",
+            "GROK_LIVE_SEARCH_MAX_RESULTS": "10",
+            "GROK_LIVE_SEARCH_COST_ALERT_THRESHOLD": "800"
+        }
+
+    @patch('api.llm_client.get_config')
+    def test_live_search_config_loading(self, mock_get_config, mock_config_with_live_search):
+        """Test Live Search configuration is loaded correctly."""
+        mock_get_config.return_value = mock_config_with_live_search
+
+        client = LLMClient()
+
+        assert client.grok_live_search_mode == "auto"
+        assert client.grok_live_search_max_results == 10
+        assert client.grok_live_search_cost_alert == 800
+
+    @pytest.mark.asyncio
+    @patch('api.llm_client.get_config')
+    async def test_live_search_parameter_in_request(self, mock_get_config, mock_config_with_live_search):
+        """Test live_search parameter is included in Grok-4 API requests."""
+        mock_get_config.return_value = mock_config_with_live_search
+
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": "Response with search"}}]
+        }
+
+        with patch.object(httpx.AsyncClient, 'post', new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = mock_response
+
+            async with LLMClient() as client:
+                messages = [{"role": "user", "content": "What's the weather today?"}]
+                await client.chat_completion(messages)
+
+                # Verify API call includes live_search parameter
+                call_args = mock_post.call_args
+                payload = call_args[1]['json']
+                assert 'live_search' in payload
+                assert payload['live_search'] == 'auto'
+                assert 'search' in payload
+                assert payload['search']['max_results'] == 10
+
+    @pytest.mark.asyncio
+    @patch('api.llm_client.get_config')
+    async def test_live_search_not_added_for_chatgpt(self, mock_get_config):
+        """Test live_search parameter is NOT added for ChatGPT requests."""
+        config = {
+            "LLM_PROVIDER": "chatgpt-5",
+            "GROK_API_KEY": "test-grok-key",
+            "CHATGPT_API_KEY": "test-chatgpt-key",
+            "GROK_LIVE_SEARCH_MODE": "auto"
+        }
+        mock_get_config.return_value = config
+
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": "ChatGPT response"}}]
+        }
+
+        with patch.object(httpx.AsyncClient, 'post', new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = mock_response
+
+            async with LLMClient() as client:
+                messages = [{"role": "user", "content": "Hello"}]
+                await client.chat_completion(messages)
+
+                # Verify API call does NOT include live_search
+                call_args = mock_post.call_args
+                payload = call_args[1]['json']
+                assert 'live_search' not in payload
+
+    @pytest.mark.asyncio
+    @patch('api.llm_client.get_config')
+    @patch('api.llm_client.logger')
+    async def test_search_usage_logging(self, mock_logger, mock_get_config, mock_config_with_live_search):
+        """Test search usage is logged when search_results present in response."""
+        mock_get_config.return_value = mock_config_with_live_search
+
+        # Mock response with search results
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": "Weather info from search"}}],
+            "search_results": [
+                {"url": "https://weather.com", "title": "Weather"},
+                {"url": "https://forecast.com", "title": "Forecast"}
+            ],
+            "search_queries": ["current weather"]
+        }
+
+        with patch.object(httpx.AsyncClient, 'post', new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = mock_response
+
+            async with LLMClient() as client:
+                messages = [{"role": "user", "content": "What's the weather?"}]
+                await client.chat_completion(messages)
+
+                # Verify search logging was called
+                info_calls = [call for call in mock_logger.info.call_args_list]
+                search_log = next(
+                    (call for call in info_calls 
+                     if "Grok-4 Live Search activated" in str(call[0])),
+                    None
+                )
+                assert search_log is not None
+
+                # Verify log includes search metadata
+                log_extras = search_log[1]['extra']
+                assert log_extras['search_activated'] is True
+                assert log_extras['sources_accessed'] == 2
+                assert log_extras['search_queries'] == ["current weather"]
+                assert 'cost_estimate_usd' in log_extras
+                assert log_extras['event'] == 'live_search_used'
+
+    @pytest.mark.asyncio
+    @patch('api.llm_client.get_config')
+    @patch('api.llm_client.logger')
+    async def test_cost_calculation(self, mock_logger, mock_get_config, mock_config_with_live_search):
+        """Test cost estimate is calculated correctly ($0.025 per source)."""
+        mock_get_config.return_value = mock_config_with_live_search
+
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": "Response"}}],
+            "search_results": [{"url": "url1"}, {"url": "url2"}, {"url": "url3"}],
+            "search_queries": ["test query"]
+        }
+
+        with patch.object(httpx.AsyncClient, 'post', new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = mock_response
+
+            async with LLMClient() as client:
+                messages = [{"role": "user", "content": "test"}]
+                await client.chat_completion(messages)
+
+                # Find search log entry
+                info_calls = [call for call in mock_logger.info.call_args_list]
+                search_log = next(
+                    (call for call in info_calls 
+                     if "Grok-4 Live Search activated" in str(call[0])),
+                    None
+                )
+
+                # Verify cost: 3 sources * $0.025 = $0.075
+                log_extras = search_log[1]['extra']
+                assert log_extras['cost_estimate_usd'] == round(3 * 0.025, 4)
+                assert log_extras['cost_estimate_usd'] == 0.075
+
+    @pytest.mark.asyncio
+    @patch('api.llm_client.get_config')
+    @patch('api.llm_client.logger')
+    async def test_no_logging_when_search_not_used(self, mock_logger, mock_get_config, mock_config_with_live_search):
+        """Test no search logging when search_results not in response."""
+        mock_get_config.return_value = mock_config_with_live_search
+
+        # Response without search_results (LLM answered from knowledge)
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": "General knowledge response"}}]
+        }
+
+        with patch.object(httpx.AsyncClient, 'post', new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = mock_response
+
+            async with LLMClient() as client:
+                messages = [{"role": "user", "content": "What is 2+2?"}]
+                await client.chat_completion(messages)
+
+                # Verify NO search logging
+                info_calls = [call for call in mock_logger.info.call_args_list]
+                search_logs = [call for call in info_calls 
+                              if "Grok-4 Live Search activated" in str(call[0])]
+                assert len(search_logs) == 0
