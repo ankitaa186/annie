@@ -254,7 +254,7 @@ class LLMClient:
                 "Content-Type": "application/json"
             }
             payload = {
-                "model": "grok-4-0709" if provider == "grok-4" else "gpt-4",
+                "model": "grok-4-fast" if provider == "grok-4" else "gpt-4",
                 "messages": messages
             }
 
@@ -568,7 +568,7 @@ class LLMClient:
                 "Content-Type": "application/json"
             }
             payload = {
-                "model": "grok-4-0709" if provider == "grok-4" else "gpt-4",
+                "model": "grok-4-fast" if provider == "grok-4" else "gpt-4",
                 "messages": messages,
                 "stream": True  # Enable streaming
             }
