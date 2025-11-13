@@ -431,7 +431,8 @@ async def create_chat(request: ChatRequest, background_tasks: BackgroundTasks):
             extra={
                 "user_id": request.user_id,
                 "error": str(e)
-            }
+            },
+            exc_info=True
         )
         raise HTTPException(
             status_code=500,
@@ -445,7 +446,8 @@ async def create_chat(request: ChatRequest, background_tasks: BackgroundTasks):
                 "user_id": request.user_id,
                 "error_type": type(e).__name__,
                 "error": str(e)
-            }
+            },
+            exc_info=True
         )
         raise HTTPException(
             status_code=500,
@@ -597,7 +599,8 @@ async def get_conversation_history(
             extra={
                 "user_id": user_id,
                 "error": str(e)
-            }
+            },
+            exc_info=True
         )
         raise HTTPException(
             status_code=500,
@@ -611,7 +614,8 @@ async def get_conversation_history(
                 "user_id": user_id,
                 "error_type": type(e).__name__,
                 "error": str(e)
-            }
+            },
+            exc_info=True
         )
         raise HTTPException(
             status_code=500,

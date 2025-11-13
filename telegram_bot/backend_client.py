@@ -19,23 +19,32 @@ logger = get_logger(__name__)
 class BackendClient:
     """Client for communicating with Backend API service."""
 
-    def __init__(self, backend_url: Optional[str] = None):
+    def __init__(self, backend_url: Optional[str] = None, first_token_timeout: Optional[int] = None):
         """
         Initialize Backend API client.
 
         Args:
             backend_url: Backend API base URL (defaults to env var)
+            first_token_timeout: Timeout in seconds for receiving first token (defaults to env var or 120s)
         """
         config = get_config()
         self.backend_url = backend_url or config.get("BACKEND_URL", "http://backend:8000")
 
+        # Load timeout configuration from environment with sensible defaults
+        # All timeouts in seconds
+        self.first_token_timeout = first_token_timeout or int(
+            config.get("TELEGRAM_FIRST_TOKEN_TIMEOUT", "120")
+        )
+        connect_timeout = int(config.get("BACKEND_CONNECT_TIMEOUT", "10"))
+        sock_read_timeout = int(config.get("BACKEND_SOCK_READ_TIMEOUT", "180"))
+
         # Use different timeouts for different operations
-        # - connect: 10s to establish connection
-        # - sock_read: 180s for streaming (allows for thinking models + full response up to 3 mins)
+        # - connect: Connection establishment timeout
+        # - sock_read: Socket read timeout for streaming (allows for thinking models + full response)
         self.timeout = aiohttp.ClientTimeout(
             total=None,  # No total timeout for streaming
-            connect=10,  # 10s to connect
-            sock_read=180  # 180s between chunks (allows for 2-3 min LLM responses)
+            connect=connect_timeout,
+            sock_read=sock_read_timeout
         )
         self.session: Optional[aiohttp.ClientSession] = None
 
@@ -43,8 +52,9 @@ class BackendClient:
             "Backend client initialized",
             extra={
                 "backend_url": self.backend_url,
-                "connect_timeout": 10,
-                "sock_read_timeout": 180,
+                "connect_timeout": connect_timeout,
+                "sock_read_timeout": sock_read_timeout,
+                "first_token_timeout": self.first_token_timeout,
                 "event": "backend_client_initialized"
             }
         )
@@ -177,6 +187,9 @@ class BackendClient:
         """
         Stream LLM response from backend using Server-Sent Events (SSE).
 
+        Enforces first-token timeout (AC #7) to ensure user receives response
+        within reasonable time frame.
+
         Args:
             conversation_id: Conversation ID from chat endpoint
             user_id: Telegram user ID (for logging)
@@ -185,6 +198,7 @@ class BackendClient:
             Response chunks as they arrive
 
         Raises:
+            asyncio.TimeoutError: If first token not received within timeout
             Exception: If streaming fails
         """
         await self._ensure_session()
@@ -197,6 +211,7 @@ class BackendClient:
                 "user_id": user_id,
                 "conversation_id": conversation_id,
                 "endpoint": endpoint,
+                "first_token_timeout_sec": self.first_token_timeout,
                 "event": "stream_started"
             }
         )
@@ -206,6 +221,7 @@ class BackendClient:
                 response.raise_for_status()
 
                 chunk_count = 0
+                first_token_received = False
                 async for line in response.content:
                     decoded_line = line.decode("utf-8").strip()
 
@@ -240,6 +256,19 @@ class BackendClient:
                                 content = chunk_data.get("content", "")
                                 if content:
                                     chunk_count += 1
+
+                                    # Track first token reception for timeout monitoring
+                                    if not first_token_received:
+                                        first_token_received = True
+                                        logger.info(
+                                            "First token received",
+                                            extra={
+                                                "user_id": user_id,
+                                                "conversation_id": conversation_id,
+                                                "event": "first_token_received"
+                                            }
+                                        )
+
                                     yield content
 
                                     logger.debug(

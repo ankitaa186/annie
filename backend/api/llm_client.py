@@ -59,11 +59,6 @@ class LLMClient:
     GROK4_BASE_URL = "https://api.x.ai/v1"
     CHATGPT5_BASE_URL = "https://api.openai.com/v1"
 
-    # Timeouts (in seconds)
-    REQUEST_TIMEOUT = 180.0  # Total timeout for request (3 minutes for thinking models)
-    FAILOVER_TIMEOUT = 60.0  # Max time before failing over to backup provider (non-streaming)
-    STREAMING_TIMEOUT = 180.0  # Timeout for streaming requests (allows 2-3 min LLM responses)
-
     def __init__(self):
         """
         Initialize LLM client with provider configuration from environment.
@@ -80,6 +75,12 @@ class LLMClient:
         self.grok_api_key = config.get("GROK_API_KEY")
         self.chatgpt_api_key = config.get("CHATGPT_API_KEY")
 
+        # Load timeout configuration from environment with sensible defaults
+        # All timeouts in seconds, loaded as floats
+        self.request_timeout = float(config.get("LLM_REQUEST_TIMEOUT", "180.0"))
+        self.failover_timeout = float(config.get("LLM_FAILOVER_TIMEOUT", "180.0"))
+        self.streaming_timeout = float(config.get("LLM_STREAMING_TIMEOUT", "180.0"))
+
         # Validate provider configuration
         if self.primary_provider not in ["grok-4", "chatgpt-5"]:
             logger.warning(
@@ -89,7 +90,7 @@ class LLMClient:
             self.primary_provider = "grok-4"
 
         # Initialize HTTP client with timeout
-        self.client = httpx.AsyncClient(timeout=self.REQUEST_TIMEOUT)
+        self.client = httpx.AsyncClient(timeout=self.request_timeout)
 
         # Track which providers are available
         self.providers_available = {
@@ -102,7 +103,10 @@ class LLMClient:
             extra={
                 "primary_provider": self.primary_provider,
                 "grok4_available": self.providers_available["grok-4"],
-                "chatgpt5_available": self.providers_available["chatgpt-5"]
+                "chatgpt5_available": self.providers_available["chatgpt-5"],
+                "request_timeout": self.request_timeout,
+                "failover_timeout": self.failover_timeout,
+                "streaming_timeout": self.streaming_timeout
             }
         )
 
@@ -254,7 +258,7 @@ class LLMClient:
                 )
 
             # Make request with timeout
-            request_timeout = timeout if timeout is not None else self.FAILOVER_TIMEOUT
+            request_timeout = timeout if timeout is not None else self.failover_timeout
             response = await self.client.post(
                 url,
                 headers=headers,
@@ -400,7 +404,7 @@ class LLMClient:
             result = await self._call_provider(
                 provider,
                 messages,
-                timeout=self.FAILOVER_TIMEOUT,
+                timeout=self.failover_timeout,
                 tools=tools
             )
             return result
@@ -457,7 +461,7 @@ class LLMClient:
             result = await self._call_provider(
                 fallback,
                 messages,
-                timeout=self.FAILOVER_TIMEOUT,
+                timeout=self.failover_timeout,
                 tools=tools
             )
 
@@ -537,7 +541,7 @@ class LLMClient:
                 )
 
             # Make streaming request
-            request_timeout = timeout if timeout is not None else self.REQUEST_TIMEOUT
+            request_timeout = timeout if timeout is not None else self.request_timeout
 
             logger.info(
                 "Starting streaming request",
@@ -753,7 +757,7 @@ class LLMClient:
             async for event in self._call_provider_stream(
                 provider,
                 messages,
-                timeout=self.STREAMING_TIMEOUT,  # Use longer timeout for streaming
+                timeout=self.streaming_timeout,  # Use longer timeout for streaming
                 tools=tools
             ):
                 yield event
@@ -817,7 +821,7 @@ class LLMClient:
             async for event in self._call_provider_stream(
                 fallback,
                 messages,
-                timeout=self.STREAMING_TIMEOUT,  # Use longer timeout for streaming
+                timeout=self.streaming_timeout,  # Use longer timeout for streaming
                 tools=tools
             ):
                 yield event

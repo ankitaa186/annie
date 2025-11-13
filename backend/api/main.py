@@ -11,6 +11,7 @@ from typing import Dict, Any
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 
 from api.config import get_config
 from api.logging import get_logger
@@ -47,25 +48,112 @@ async def log_requests(request: Request, call_next):
     """Log all HTTP requests with method, path, status code, and response time."""
     start_time = time.time()
 
-    # Process request
-    response = await call_next(request)
+    try:
+        # Process request
+        response = await call_next(request)
 
-    # Calculate duration
-    duration_ms = int((time.time() - start_time) * 1000)
+        # Calculate duration
+        duration_ms = int((time.time() - start_time) * 1000)
 
-    # Log request details
-    logger.info(
-        f"{request.method} {request.url.path} - {response.status_code} - {duration_ms}ms",
+        # Log request details
+        logger.info(
+            f"{request.method} {request.url.path} - {response.status_code} - {duration_ms}ms",
+            extra={
+                "method": request.method,
+                "path": request.url.path,
+                "status_code": response.status_code,
+                "duration_ms": duration_ms,
+                "client_host": request.client.host if request.client else None
+            }
+        )
+
+        return response
+
+    except Exception as e:
+        # Calculate duration even on error
+        duration_ms = int((time.time() - start_time) * 1000)
+
+        # Log error with full context
+        logger.error(
+            f"{request.method} {request.url.path} - ERROR - {duration_ms}ms",
+            extra={
+                "method": request.method,
+                "path": request.url.path,
+                "duration_ms": duration_ms,
+                "error_type": type(e).__name__,
+                "error": str(e),
+                "client_host": request.client.host if request.client else None
+            },
+            exc_info=True  # Include full stack trace
+        )
+
+        # Re-raise to let FastAPI's exception handlers deal with it
+        raise
+
+
+# Global exception handlers
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """
+    Global exception handler for all unhandled exceptions.
+
+    Ensures user-friendly error messages and comprehensive logging.
+    Catches any exception that wasn't handled by route-specific handlers.
+    """
+    logger.error(
+        "Unhandled exception",
         extra={
             "method": request.method,
             "path": request.url.path,
-            "status_code": response.status_code,
-            "duration_ms": duration_ms,
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+            "client_host": request.client.host if request.client else None
+        },
+        exc_info=True  # Include full stack trace
+    )
+
+    # Return user-friendly error
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": {
+                "code": "INTERNAL_ERROR",
+                "message": "An unexpected error occurred. Please try again.",
+                "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            }
+        }
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """
+    Handle Pydantic validation errors with clear, user-friendly messages.
+
+    Provides detailed validation error information for debugging while
+    maintaining security (no internal implementation details exposed).
+    """
+    logger.warning(
+        "Request validation failed",
+        extra={
+            "method": request.method,
+            "path": request.url.path,
+            "errors": exc.errors(),
             "client_host": request.client.host if request.client else None
         }
     )
 
-    return response
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": {
+                "code": "VALIDATION_ERROR",
+                "message": "Invalid request data. Please check your input.",
+                "details": exc.errors(),
+                "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            }
+        }
+    )
 
 
 def check_mcp_server_health() -> str:
@@ -77,8 +165,24 @@ def check_mcp_server_health() -> str:
                 return "ok"
             else:
                 return "degraded"
+    except MCPClientError as e:
+        logger.warning(
+            "MCP server health check failed",
+            extra={
+                "error": str(e),
+                "error_type": type(e).__name__
+            }
+        )
+        return "unavailable"
     except Exception as e:
-        logger.warning(f"MCP server health check failed: {str(e)}")
+        logger.error(
+            "Unexpected error in MCP health check",
+            extra={
+                "error": str(e),
+                "error_type": type(e).__name__
+            },
+            exc_info=True
+        )
         return "unavailable"
 
 
@@ -96,8 +200,25 @@ def check_llm_api_health() -> str:
         client = LLMClient()
         status = client.health_check()
         return status
+    except (ValueError, KeyError) as e:
+        # Configuration errors (missing API keys, invalid provider, etc.)
+        logger.warning(
+            "LLM health check failed due to configuration error",
+            extra={
+                "error": str(e),
+                "error_type": type(e).__name__
+            }
+        )
+        return "unavailable"
     except Exception as e:
-        logger.error(f"LLM health check failed: {str(e)}")
+        logger.error(
+            "Unexpected error in LLM health check",
+            extra={
+                "error": str(e),
+                "error_type": type(e).__name__
+            },
+            exc_info=True
+        )
         return "unavailable"
 
 
