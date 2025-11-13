@@ -489,6 +489,50 @@ This document provides the complete epic and story breakdown for annie, decompos
 
 ---
 
+### Story 2.7: Move Timeout Configuration to Environment Variables (Technical Debt)
+
+**As a** developer/operator,
+**I want** timeout values configurable via environment variables instead of hardcoded,
+**So that** I can adjust timeouts for different environments without code changes.
+
+**Acceptance Criteria:**
+
+**AC #1:** Given `env.example`, when I check timeout configuration, then it includes environment variables:
+  - `LLM_REQUEST_TIMEOUT` (default: 180)
+  - `LLM_FAILOVER_TIMEOUT` (default: 180)
+  - `LLM_STREAMING_TIMEOUT` (default: 180)
+  - `BACKEND_CONNECT_TIMEOUT` (default: 10)
+  - `BACKEND_SOCK_READ_TIMEOUT` (default: 180)
+  - `TELEGRAM_FIRST_TOKEN_TIMEOUT` (default: 120)
+
+**AC #2:** Given `backend/api/llm_client.py`, when I check the LLMClient class, then hardcoded timeout class variables are replaced with instance variables loaded from environment config with sensible defaults
+
+**AC #3:** Given `telegram_bot/backend_client.py`, when I check the BackendClient class, then hardcoded timeout values are replaced with environment variable loading with fallback defaults
+
+**AC #4:** Given environment variables are not set, when services start, then they use documented default values without errors
+
+**AC #5:** Given timeout environment variables are set, when I restart services, then new timeout values are applied and logged at startup
+
+**AC #6:** Given timeout configuration changes, when I update `.env` file and restart, then no code changes are required to adjust timeout behavior
+
+**AC #7:** Given the implementation, when I check logging, then timeout values are logged at service initialization showing which values are being used (env vs defaults)
+
+**Prerequisites:** Story 2.2, Story 2.3
+
+**Technical Notes:**
+- Technical debt - improves operational flexibility
+- Affected files:
+  - `env.example` - add new timeout variables
+  - `backend/api/llm_client.py` - convert class vars to instance vars loaded from config
+  - `telegram_bot/backend_client.py` - load timeouts from environment
+- No behavioral changes - just configuration externalization
+- Enables different timeout tuning for dev/staging/prod
+- Backward compatible via sensible defaults
+
+**Estimated Effort:** 2 points (1 day)
+
+---
+
 ## Epic 3: Memory & Persistence
 
 **Goal:** Integrate agentic-memories service to enable persistent memory of past decisions, outcomes, and user preferences.

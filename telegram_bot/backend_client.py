@@ -19,25 +19,32 @@ logger = get_logger(__name__)
 class BackendClient:
     """Client for communicating with Backend API service."""
 
-    def __init__(self, backend_url: Optional[str] = None, first_token_timeout: int = 120):
+    def __init__(self, backend_url: Optional[str] = None, first_token_timeout: Optional[int] = None):
         """
         Initialize Backend API client.
 
         Args:
             backend_url: Backend API base URL (defaults to env var)
-            first_token_timeout: Timeout in seconds for receiving first token (default: 120s/2min)
+            first_token_timeout: Timeout in seconds for receiving first token (defaults to env var or 120s)
         """
         config = get_config()
         self.backend_url = backend_url or config.get("BACKEND_URL", "http://backend:8000")
-        self.first_token_timeout = first_token_timeout  # AC #7: First token timeout (2 min allowance)
+
+        # Load timeout configuration from environment with sensible defaults
+        # All timeouts in seconds
+        self.first_token_timeout = first_token_timeout or int(
+            config.get("TELEGRAM_FIRST_TOKEN_TIMEOUT", "120")
+        )
+        connect_timeout = int(config.get("BACKEND_CONNECT_TIMEOUT", "10"))
+        sock_read_timeout = int(config.get("BACKEND_SOCK_READ_TIMEOUT", "180"))
 
         # Use different timeouts for different operations
-        # - connect: 10s to establish connection
-        # - sock_read: 180s for streaming (allows for thinking models + full response up to 3 mins)
+        # - connect: Connection establishment timeout
+        # - sock_read: Socket read timeout for streaming (allows for thinking models + full response)
         self.timeout = aiohttp.ClientTimeout(
             total=None,  # No total timeout for streaming
-            connect=10,  # 10s to connect
-            sock_read=180  # 180s between chunks (allows for 2-3 min LLM responses)
+            connect=connect_timeout,
+            sock_read=sock_read_timeout
         )
         self.session: Optional[aiohttp.ClientSession] = None
 
@@ -45,9 +52,9 @@ class BackendClient:
             "Backend client initialized",
             extra={
                 "backend_url": self.backend_url,
-                "connect_timeout": 10,
-                "sock_read_timeout": 180,
-                "first_token_timeout": first_token_timeout,
+                "connect_timeout": connect_timeout,
+                "sock_read_timeout": sock_read_timeout,
+                "first_token_timeout": self.first_token_timeout,
                 "event": "backend_client_initialized"
             }
         )
