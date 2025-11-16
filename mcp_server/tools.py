@@ -342,16 +342,16 @@ async def retrieve_memories_tool_handler(
         )
 
         # Build query parameters
-        params = {
-            "user_id": user_id,
-            "limit": limit
-        }
-        #Removing query parameter as it is not supported well by the agentic-memories service
         # params = {
         #     "user_id": user_id,
-        #     "query": query,
         #     "limit": limit
         # }
+        # Removing query parameter as it is not supported well by the agentic-memories service
+        params = {
+            "user_id": user_id,
+            "query": query,
+            "limit": limit
+        }
         if persona:
             params["persona"] = persona
 

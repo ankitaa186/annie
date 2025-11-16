@@ -388,10 +388,12 @@ class MemoryManager:
             Use this history to personalize your recommendations and reference past decisions when relevant.
             ```
         """
-        if not memories:
-            return "No past decision history available for this user."
+        from api.prompts import MEMORY_CONTEXT_HEADER, MEMORY_CONTEXT_FOOTER, NO_MEMORY_CONTEXT
 
-        context_parts = ["Here is the user's past decision history (ordered by relevance):"]
+        if not memories:
+            return NO_MEMORY_CONTEXT
+
+        context_parts = [MEMORY_CONTEXT_HEADER]
 
         for i, memory in enumerate(memories, 1):
             # Get metadata
@@ -493,7 +495,7 @@ class MemoryManager:
                     context_parts.append(f"   (From conversation on {timestamp})")
 
         # Add instruction for LLM to use this context
-        context_parts.append("\nUse this history to personalize your recommendations and reference past decisions when relevant.")
+        context_parts.append(f"\n{MEMORY_CONTEXT_FOOTER}")
 
         formatted_context = "\n".join(context_parts)
 

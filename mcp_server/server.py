@@ -8,6 +8,7 @@ and JSON-RPC 2.0 protocol support.
 import asyncio
 import inspect
 import json
+import os
 import time
 from datetime import datetime
 from typing import Any, Dict, Optional
@@ -21,6 +22,27 @@ from mcp_server.tools import ToolRegistry, health_check_tool, store_memory_tool,
 
 logger = get_logger(__name__)
 config = get_config()
+
+
+def setup_debugger():
+    """Initialize remote debugger automatically in dev environment."""
+    environment = os.getenv("ENVIRONMENT", "dev")
+    
+    # Only enable debugging in dev environment
+    if environment.lower() == "dev":
+        try:
+            import debugpy
+            debug_port = int(os.getenv("DEBUGGER_PORT", "5679"))
+            debugpy.listen(("0.0.0.0", debug_port))
+            logger.info(f"🔧 Remote debugger listening on port {debug_port} (dev mode)")
+        except ImportError:
+            logger.debug("debugpy not available - remote debugging disabled")
+        except Exception as e:
+            logger.warning(f"Failed to setup debugger: {e}")
+
+
+# Initialize debugger before creating app (dev only)
+setup_debugger()
 
 
 class MCPServer:

@@ -16,6 +16,9 @@ httpx>=0.24.0  # For async HTTP requests
 pytest>=9.0.0
 pytest-asyncio>=1.3.0
 
+# Debugging (dev environment only)
+debugpy>=1.8.0
+
 # Note: Additional tool-specific dependencies will be added in Epic 4:
 # - Brave Search API client (for internet access tool)
 # - Stock API client (for stock trading tool)
