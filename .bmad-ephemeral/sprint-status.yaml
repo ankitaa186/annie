@@ -82,10 +82,17 @@ development_status:
   5-3-message-formatting-error-handling: done
   epic-5-retrospective: optional
 
-  # Epic 6: Integration & Quality
+  # Epic 6: Integration & Quality (TODO - Critical for MVP launch)
   epic-6: backlog
   6-1-end-to-end-integration: backlog
   6-2-unit-integration-testing: backlog
   6-3-error-scenario-performance-testing: backlog
   6-4-documentation-deployment-readiness: backlog
   epic-6-retrospective: optional
+
+  # Epic 7: User Profile & Personalization (NEW - Critical for companion experience)
+  epic-7: backlog
+  7-1-basic-user-profile-name-timezone-preferences: backlog
+  7-2-onboarding-flow-profile-collection: backlog
+  7-3-rich-profile-integration-context-awareness: backlog
+  epic-7-retrospective: optional

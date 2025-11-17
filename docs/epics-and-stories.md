@@ -1171,6 +1171,144 @@ This document provides the complete epic and story breakdown for annie, decompos
 
 ---
 
+## Epic 7: User Profile & Personalization
+
+**Goal:** Enable Annie to know and remember who each user is, creating a personalized companion experience through user profiles with name, preferences, and context.
+
+**Scope:** Basic profile storage (name, timezone), onboarding flow, rich profile integration with agentic-memories.
+
+**Success Criteria:**
+- Users are greeted by name in every conversation
+- Onboarding flow collects basic profile information
+- Rich profile context is available for personalized advice
+- Profile load time <50ms (p95)
+- Profile updates are automatic and transparent
+
+**Dependencies:** Epic 1, Epic 2, Epic 3
+
+---
+
+### Story 7.1: Basic User Profile (Name, Timezone, Preferences)
+
+**As a** user,
+**I want** Annie to know my name and basic preferences,
+**So that** our conversations feel personal and tailored to me.
+
+**Acceptance Criteria:**
+
+**AC #1:** Given first-time user, when user messages Annie, then Annie proactively asks: "What should I call you?" and stores response in profile
+
+**AC #2:** Given user provides name, when stored in profile, then subsequent messages use name in greetings: "Hi Sarah!" instead of "Hi there!"
+
+**AC #3:** Given user profile, when I check Redis, then profile is stored at key `user:{user_id}:profile` with structure:
+```json
+{
+  "name": "Sarah",
+  "timezone": "US/Pacific",
+  "created_at": "2025-11-15T10:30:00Z",
+  "updated_at": "2025-11-15T10:30:00Z"
+}
+```
+
+**AC #4:** Given user profile exists, when conversation starts, then profile is loaded and injected into system prompt: "User's name: Sarah, Timezone: US/Pacific"
+
+**AC #5:** Given user wants to update profile, when user says "my name is X" or "call me X", then profile is updated
+
+**AC #6:** Given profile storage, when I check performance, then profile load completes within 50ms (p95)
+
+**Prerequisites:** Story 2.5 (Conversation State Management - Redis)
+
+**Technical Notes:**
+- Redis key pattern: `user:{user_id}:profile`
+- JSON storage for flexibility
+- Profile loaded on conversation init
+- Injected into system prompt
+
+**Estimated Effort:** 2 points (1.5 days)
+
+---
+
+### Story 7.2: Onboarding Flow & Profile Collection
+
+**As a** first-time user,
+**I want** a warm, friendly onboarding experience,
+**So that** I feel welcomed and understand how Annie can help me.
+
+**Acceptance Criteria:**
+
+**AC #1:** Given first-time user (no profile), when user sends first message, then Annie responds with welcoming onboarding message asking for name
+
+**AC #2:** Given user provides name in onboarding, when Annie responds, then Annie offers optional profile questions:
+- "What do you do?" (profession/role)
+- "What brings you here?" (goals/needs)
+- Option to skip: "Or we can dive right in!"
+
+**AC #3:** Given user shares profile info, when stored, then info is saved to both:
+- Redis profile (name, timezone)
+- agentic-memories as initial "profile memory" for semantic retrieval
+
+**AC #4:** Given user chooses to skip profile setup, when conversation continues, then Annie still collects name but allows immediate questions
+
+**AC #5:** Given returning user (has profile), when user messages Annie, then NO onboarding shown, conversation starts normally with personalized greeting
+
+**AC #6:** Given profile creation, when completed, then user sees confirmation: "Got it, Sarah! I'll remember that. How can I help you today?"
+
+**Prerequisites:** Story 7.1
+
+**Technical Notes:**
+- Profile check: Load from Redis on first message
+- Onboarding state tracked in conversation
+- Profile info stored as layer="profile" memories
+- Seamless transition to normal conversation
+
+**Estimated Effort:** 3 points (2.5 days)
+
+---
+
+### Story 7.3: Rich Profile Integration & Context Awareness
+
+**As a** user,
+**I want** Annie to remember my background, goals, and preferences,
+**So that** advice is deeply personalized to my situation.
+
+**Acceptance Criteria:**
+
+**AC #1:** Given user shares background info (job, goals, interests), when stored, then info is saved as structured profile memory in agentic-memories with metadata:
+```json
+{
+  "layer": "profile",
+  "type": "background",
+  "content": "User is a software engineer interested in AI and stock investing",
+  "metadata": {
+    "user_id": "123",
+    "category": "background",
+    "tags": ["profession", "interests"]
+  }
+}
+```
+
+**AC #2:** Given user profile exists, when Annie generates responses, then profile context is retrieved and included in system prompt alongside conversation memories
+
+**AC #3:** Given user asks for advice, when Annie responds, then responses reference user's background when relevant: "Given your background in software engineering..." or "Based on your interest in AI..."
+
+**AC #4:** Given user updates preferences in conversation, when detected, then profile memory is updated automatically (e.g., user says "I'm risk-averse" → profile updated)
+
+**AC #5:** Given profile memory retrieval, when checked, then profile memories are tagged with high importance and always retrieved first
+
+**AC #6:** Given user wants to view/update profile, when user asks "what do you know about me?", then Annie summarizes current profile from Redis + memories
+
+**Prerequisites:** Story 7.2, Story 3.2 (Memory Retrieval)
+
+**Technical Notes:**
+- Profile memories: layer="profile" for priority retrieval
+- Automatic profile extraction from conversation
+- Profile context injected into system prompt
+- Semantic retrieval ensures relevant profile info
+
+**Estimated Effort:** 3 points (2.5 days)
+
+---
+
 _This epic/story breakdown maps PRD requirements to implementable stories with clear acceptance criteria, enhanced with detailed ACs, missing stories, and improved sequencing._
 
 _For implementation: Use the `create-story` workflow to generate detailed story implementation plans from this breakdown._
