@@ -8,6 +8,7 @@ and JSON-RPC 2.0 protocol support.
 import asyncio
 import inspect
 import json
+import os
 import time
 from datetime import datetime
 from typing import Any, Dict, Optional
@@ -17,10 +18,31 @@ from fastapi.responses import JSONResponse
 
 from mcp_server.config import get_config
 from mcp_server.logging import get_logger, log_performance
-from mcp_server.tools import ToolRegistry, health_check_tool, store_memory_tool, retrieve_memories_tool
+from mcp_server.tools import ToolRegistry, health_check_tool, store_memory_tool, retrieve_memories_tool, get_user_profile_tool
 
 logger = get_logger(__name__)
 config = get_config()
+
+
+def setup_debugger():
+    """Initialize remote debugger automatically in dev environment."""
+    environment = os.getenv("ENVIRONMENT", "dev")
+    
+    # Only enable debugging in dev environment
+    if environment.lower() == "dev":
+        try:
+            import debugpy
+            debug_port = int(os.getenv("DEBUGGER_PORT", "5679"))
+            debugpy.listen(("0.0.0.0", debug_port))
+            logger.info(f"🔧 Remote debugger listening on port {debug_port} (dev mode)")
+        except ImportError:
+            logger.debug("debugpy not available - remote debugging disabled")
+        except Exception as e:
+            logger.warning(f"Failed to setup debugger: {e}")
+
+
+# Initialize debugger before creating app (dev only)
+setup_debugger()
 
 
 class MCPServer:
@@ -37,6 +59,7 @@ class MCPServer:
         self.tool_registry.register(health_check_tool)
         self.tool_registry.register(store_memory_tool)
         self.tool_registry.register(retrieve_memories_tool)
+        self.tool_registry.register(get_user_profile_tool)
         logger.info(f"Registered {len(self.tool_registry.tools)} tools")
 
     async def handle_request(self, request: Dict[str, Any]) -> Dict[str, Any]:

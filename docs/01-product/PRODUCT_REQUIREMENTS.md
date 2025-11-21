@@ -42,6 +42,9 @@ Annie is a personal AI companion chatbot inspired by Grok's Annie, designed to h
 ### V1 (MVP)
 
 **As a user, I want to:**
+- **Be recognized as an individual**: Annie knows my name and greets me personally
+- **Have a personalized companion**: Annie understands my background, goals, and preferences
+- **Receive context-aware advice**: Recommendations tailored to my profession, risk tolerance, and decision-making style
 - Get AI-powered recommendations for important decisions across all areas:
   - **Financial**: Stock trading, investments, budget planning, major purchases
   - **Career**: Job offers, career transitions, skill development, opportunities
@@ -53,6 +56,7 @@ Annie is a personal AI companion chatbot inspired by Grok's Annie, designed to h
 - Receive pros/cons analysis for complex decisions
 - Get personalized advice based on my history and preferences
 - Chat with Annie via Telegram bot with streaming responses
+- **Experience warm onboarding**: First-time setup that feels welcoming and establishes rapport
 
 **Decision-Making Process (Powered by agentic-memories):**
 - **Analysis**: Annie analyzes options and provides pros/cons using memory context
@@ -103,8 +107,10 @@ Annie is a personal AI companion chatbot inspired by Grok's Annie, designed to h
 2. ✅ MCP server with Internet Access and Memories tools
 3. ✅ LLM integration with streaming
 4. ✅ Persistent memory via agentic-memories (Redis-only)
-5. ✅ Stock Trader persona with market analysis
-6. ✅ Basic decision-making support (pros/cons analysis)
+5. ⏳ User Profile & Personalization (name, timezone, background, preferences)
+6. ⏳ Warm onboarding flow for first-time users
+7. ✅ Stock Trader persona with market analysis
+8. ✅ Basic decision-making support (pros/cons analysis)
 
 ### Medium-term (V1.1 - V1.2)
 1. Web interface with 3D avatar (V1.1)

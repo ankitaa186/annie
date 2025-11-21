@@ -8,8 +8,11 @@ services:
     container_name: annie-backend
     ports:
       - "${BACKEND_PORT:-8001}:8000"
+      - "${BACKEND_DEBUG_PORT:-5678}:5678"  # Debug port (dev only)
     environment:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENVIRONMENT=${ENVIRONMENT:-dev}
+      - DEBUGGER_PORT=5678
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - MCP_SERVER_URL=http://mcp-server:8002
@@ -49,8 +52,11 @@ services:
     container_name: annie-mcp-server
     ports:
       - "${MCP_SERVER_PORT:-8002}:8002"
+      - "${MCP_SERVER_DEBUG_PORT:-5679}:5679"  # Debug port (dev only)
     environment:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENVIRONMENT=${ENVIRONMENT:-dev}
+      - DEBUGGER_PORT=5679
       - MCP_SERVER_PORT=8002
       - BRAVE_SEARCH_API_KEY=${BRAVE_SEARCH_API_KEY}
       - STOCK_API_KEY=${STOCK_API_KEY}
@@ -75,9 +81,12 @@ services:
       context: ./telegram_bot
       dockerfile: Dockerfile
     container_name: annie-telegram-bot
+    ports:
+      - "${TELEGRAM_BOT_DEBUG_PORT:-5680}:5680"  # Debug port (dev only)
     environment:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - ENVIRONMENT=${ENVIRONMENT:-dev}
+      - DEBUGGER_PORT=5680
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - AUTHORIZED_USER_IDS=${AUTHORIZED_USER_IDS}
       - BACKEND_URL=http://backend:8000

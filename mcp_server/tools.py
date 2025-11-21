@@ -342,16 +342,16 @@ async def retrieve_memories_tool_handler(
         )
 
         # Build query parameters
-        params = {
-            "user_id": user_id,
-            "limit": limit
-        }
-        #Removing query parameter as it is not supported well by the agentic-memories service
         # params = {
         #     "user_id": user_id,
-        #     "query": query,
         #     "limit": limit
         # }
+        # Removing query parameter as it is not supported well by the agentic-memories service
+        params = {
+            "user_id": user_id,
+            "query": query,
+            "limit": limit
+        }
         if persona:
             params["persona"] = persona
 
@@ -523,4 +523,212 @@ retrieve_memories_tool = {
         "required": ["user_id", "query"]
     },
     "handler": retrieve_memories_tool_handler
+}
+
+
+async def get_user_profile_tool_handler(
+    user_id: str
+) -> Dict[str, Any]:
+    """
+    Retrieve user profile from agentic-memories service.
+
+    The profile includes 21 fields across 5 categories (basics, preferences, goals,
+    interests, background) that are automatically extracted from conversations.
+    Profile extraction happens during /v1/store calls.
+
+    Args:
+        user_id: User identifier
+
+    Returns:
+        dict: Profile object with all fields and completeness percentage
+
+    Example response:
+        {
+            "status": "success",
+            "user_id": "123456",
+            "completeness": 45,
+            "basics": {
+                "name": "Sarah",
+                "age": null,
+                "location": "San Francisco",
+                "occupation": "Software Engineer",
+                "timezone": "US/Pacific",
+                "gender": null,
+                "pronouns": null
+            },
+            "preferences": {
+                "communication_style": "direct",
+                "topics_of_interest": ["AI", "investing"],
+                "language": "English",
+                "accessibility_needs": null
+            },
+            "goals": {
+                "short_term_goals": ["Learn AI investing"],
+                "long_term_goals": ["Build wealth"],
+                "values": null
+            },
+            "interests": {
+                "hobbies": null,
+                "expertise_areas": ["software engineering"]
+            },
+            "background": {
+                "education": null,
+                "work_history": null,
+                "life_events": null,
+                "relationships": null,
+                "health_context": null
+            }
+        }
+    """
+    start_time = time.time()
+
+    config = get_config()
+    memories_url = config["AGENTIC_MEMORIES_URL"]
+
+    # Validate user_id
+    if not user_id or not isinstance(user_id, str):
+        logger.error(
+            "Invalid user_id for profile retrieval",
+            extra={"user_id": user_id, "error": "user_id must be non-empty string"}
+        )
+        return {
+            "status": "error",
+            "error": "Invalid user_id: must be non-empty string",
+            "user_id": user_id
+        }
+
+    try:
+        # Make GET request to agentic-memories profile endpoint
+        url = f"{memories_url}/v1/profile"
+        params = {"user_id": user_id}
+
+        logger.info(
+            "Retrieving user profile from agentic-memories",
+            extra={
+                "user_id": user_id,
+                "url": url,
+                "params": params
+            }
+        )
+
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(url, params=params)
+
+            # Handle HTTP errors
+            if response.status_code != 200:
+                error_msg = f"Profile retrieval failed with status {response.status_code}"
+                logger.error(
+                    error_msg,
+                    extra={
+                        "user_id": user_id,
+                        "status_code": response.status_code,
+                        "response_text": response.text[:200]
+                    }
+                )
+                return {
+                    "status": "error",
+                    "error": error_msg,
+                    "user_id": user_id,
+                    "status_code": response.status_code
+                }
+
+            # Parse response
+            profile_data = response.json()
+
+            # Calculate duration
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            # Extract completeness percentage (default to 0 if not present)
+            completeness = profile_data.get("completeness", 0)
+
+            logger.info(
+                "Profile retrieved successfully",
+                extra={
+                    "user_id": user_id,
+                    "completeness": completeness,
+                    "duration_ms": duration_ms
+                }
+            )
+
+            return {
+                "status": "success",
+                "user_id": user_id,
+                "completeness": completeness,
+                "basics": profile_data.get("basics", {}),
+                "preferences": profile_data.get("preferences", {}),
+                "goals": profile_data.get("goals", {}),
+                "interests": profile_data.get("interests", {}),
+                "background": profile_data.get("background", {})
+            }
+
+    except httpx.TimeoutException as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+        error_msg = f"Profile retrieval timed out after {duration_ms}ms"
+        logger.error(
+            error_msg,
+            extra={
+                "user_id": user_id,
+                "duration_ms": duration_ms,
+                "error": str(e)
+            }
+        )
+        return {
+            "status": "error",
+            "error": error_msg,
+            "user_id": user_id
+        }
+
+    except httpx.RequestError as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+        error_msg = f"Network error during profile retrieval: {str(e)}"
+        logger.error(
+            error_msg,
+            extra={
+                "user_id": user_id,
+                "duration_ms": duration_ms,
+                "error": str(e),
+                "error_type": type(e).__name__
+            }
+        )
+        return {
+            "status": "error",
+            "error": error_msg,
+            "user_id": user_id
+        }
+
+    except Exception as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+        error_msg = f"Unexpected error during profile retrieval: {str(e)}"
+        logger.error(
+            error_msg,
+            extra={
+                "user_id": user_id,
+                "duration_ms": duration_ms,
+                "error": str(e),
+                "error_type": type(e).__name__
+            },
+            exc_info=True
+        )
+        return {
+            "status": "error",
+            "error": error_msg,
+            "user_id": user_id
+        }
+
+
+# Get user profile tool definition
+get_user_profile_tool = {
+    "name": "get_user_profile",
+    "description": "Retrieve user profile from agentic-memories service. Returns 21 profile fields across 5 categories (basics, preferences, goals, interests, background) that are automatically extracted from conversations. Use this tool to get user context for personalized responses. Profile extraction happens automatically during conversation storage.",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "user_id": {
+                "type": "string",
+                "description": "User identifier"
+            }
+        },
+        "required": ["user_id"]
+    },
+    "handler": get_user_profile_tool_handler
 }

@@ -1171,6 +1171,174 @@ This document provides the complete epic and story breakdown for annie, decompos
 
 ---
 
+## Epic 7: User Profile & Personalization
+
+**Goal:** Enable Annie to know and remember who each user is by integrating agentic-memories' built-in profile system with smart Redis caching for instant access to user context.
+
+**Scope:** Profile retrieval via agentic-memories API, Redis caching with intelligent background refresh, system prompt injection, onboarding enhancement for incomplete profiles.
+
+**Success Criteria:**
+- Profile always available in system prompt (non-blocking)
+- Profile load time <10ms from Redis cache (p95)
+- Background refresh: every 5 messages OR 15 minutes
+- Onboarding prompts when profile incomplete (<30% completeness)
+- Profile updates automatic via agentic-memories extraction
+
+**Key Insight:** agentic-memories already provides complete profile system with 21 fields across 5 categories (basics, preferences, goals, interests, background). Profile extraction happens automatically during /v1/store calls. We just need to retrieve and cache it.
+
+**Dependencies:** Epic 1, Epic 2, Epic 3
+
+---
+
+### Story 7.1: Profile Integration & Smart Caching
+
+**As a** user,
+**I want** Annie to always know who I am and my preferences,
+**So that** every conversation feels personal and contextually aware.
+
+**Acceptance Criteria:**
+
+**AC #1: MCP Tool - get_user_profile**
+Given `get_user_profile` MCP tool, when called with user_id, then tool:
+- Makes HTTP GET to `{AGENTIC_MEMORIES_URL}/v1/profile?user_id={user_id}`
+- Returns profile object with all 21 fields across 5 categories:
+  - basics: name, age, location, occupation, timezone, gender, pronouns
+  - preferences: communication_style, topics_of_interest, language, accessibility_needs
+  - goals: short_term_goals, long_term_goals, values
+  - interests: hobbies, expertise_areas
+  - background: education, work_history, life_events, relationships, health_context
+- Returns completeness percentage (e.g., 45%)
+
+**AC #2: Redis Caching Layer**
+Given profile caching, when profile is retrieved, then system:
+- Checks Redis key `profile:{user_id}` (TTL: 900s = 15 min)
+- If cached → Returns immediately (non-blocking, <10ms)
+- If not cached → Triggers background fetch, uses empty profile for current request
+- Stores in Redis with structure:
+```json
+{
+  "user_id": "123456",
+  "completeness": 45,
+  "basics": {"name": "Sarah", "timezone": "US/Pacific", ...},
+  "preferences": {"communication_style": "direct", ...},
+  "goals": {...},
+  "interests": {...},
+  "background": {...},
+  "last_updated": "2025-11-15T10:30:00Z"
+}
+```
+
+**AC #3: Smart Background Refresh**
+Given profile refresh triggers, when chat request processed, then system:
+- Tracks metadata in Redis key `profile_meta:{user_id}`: `{message_count: 7, last_refresh: "2025-11-15T10:30:00Z"}`
+- Triggers background refresh if EITHER condition true:
+  - Message count mod 5 == 0 (every 5 messages)
+  - Current time - last_refresh > 15 minutes
+- Background task: Call get_user_profile → Update Redis cache → Update metadata
+- Never blocks chat response
+
+**AC #4: System Prompt Injection**
+Given profile in cache, when LLM request built, then system:
+- Loads profile from Redis (instant, <10ms)
+- Formats profile into system prompt section:
+```
+USER PROFILE:
+Name: Sarah
+Timezone: US/Pacific (current time: 10:30 AM)
+Occupation: Software Engineer
+Communication Style: Direct and concise
+Goals: Learn about AI investing, build wealth
+Interests: AI, stock market, technology
+Completeness: 45%
+
+[Rest of system prompt...]
+```
+- If profile empty/unavailable → Skip profile section, continue normally
+
+**AC #5: Graceful Degradation**
+Given agentic-memories unavailable, when profile retrieval fails, then system:
+- Uses cached profile if available (even if expired)
+- If no cache → Uses empty profile
+- Logs warning but continues chat
+- Retries on next background refresh trigger
+
+**AC #6: Performance Requirements**
+Given profile system, when measured, then:
+- Cache load: <10ms (p95)
+- Background refresh: <500ms total (doesn't block chat)
+- Cache hit rate: >90% after warmup
+- No impact on chat response time
+
+**Prerequisites:** Story 2.5 (Conversation State Management), Story 3.1 (Memory Storage Integration)
+
+**Technical Notes:**
+- MCP tool: `mcp_server/tools.py` - Add `get_user_profile_tool_handler()`
+- Backend: `backend/api/profile.py` - ProfileManager class
+- Redis keys: `profile:{user_id}` (TTL: 900s), `profile_meta:{user_id}` (TTL: 86400s)
+- Inject profile in: `backend/api/routes/stream.py` system prompt builder
+- agentic-memories API: GET /v1/profile?user_id={user_id}
+
+**Estimated Effort:** 2 points (1.5 days)
+
+---
+
+### Story 7.2: Onboarding Enhancement for Incomplete Profiles
+
+**As a** new user with incomplete profile,
+**I want** Annie to gently encourage me to share more about myself,
+**So that** Annie can provide better personalized advice.
+
+**Acceptance Criteria:**
+
+**AC #1: Profile Completeness Detection**
+Given user profile loaded, when completeness checked, then system:
+- Calculates completeness from agentic-memories (% of 21 fields populated)
+- Considers profile "incomplete" if completeness < 30%
+- Stores completeness in Redis cache
+
+**AC #2: Friendly Onboarding Prompts**
+Given incomplete profile (completeness < 30%), when user starts conversation, then Annie:
+- FIRST message: Warm greeting + gentle invitation: "By the way, I'd love to know more about you so I can help you better. What should I call you?"
+- Does NOT force profile completion
+- Allows user to skip: "Or feel free to ask me anything!"
+
+**AC #3: Natural Profile Collection**
+Given user shares info during conversation, when agentic-memories extracts profile, then:
+- Automatic extraction during /v1/store (already implemented)
+- Next background refresh picks up new profile data
+- Annie acknowledges: "Thanks for sharing that, Sarah!" (if name was shared)
+
+**AC #4: No Repeated Prompts**
+Given profile completeness >= 30%, when conversation starts, then:
+- NO onboarding prompts shown
+- Conversation starts normally with personalized greeting: "Hi Sarah! How can I help you today?"
+
+**AC #5: View Profile Command**
+Given user wants to see profile, when user asks "what do you know about me?", then Annie:
+- Loads profile from Redis cache
+- Summarizes in friendly format:
+```
+Here's what I know about you:
+- Name: Sarah
+- Location: San Francisco
+- Interests: AI, investing
+- Goals: Build wealth through smart investing
+
+Your profile is 45% complete. Feel free to share more as we chat!
+```
+
+**Prerequisites:** Story 7.1
+
+**Technical Notes:**
+- Profile prompts: Add to `backend/api/prompts.py`
+- Completeness threshold: 30% (configurable)
+- No separate onboarding state - just check completeness
+- Leverage agentic-memories automatic extraction
+
+**Estimated Effort:** 1 point (0.5 days)
+
+---
+
 _This epic/story breakdown maps PRD requirements to implementable stories with clear acceptance criteria, enhanced with detailed ACs, missing stories, and improved sequencing._
 
 _For implementation: Use the `create-story` workflow to generate detailed story implementation plans from this breakdown._

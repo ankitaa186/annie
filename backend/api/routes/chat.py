@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from api.logging import get_logger
 from api.memory import MemoryManager
 from api.mcp_client import MCPClient, MCPClientError, MCPNetworkError, MCPToolError
+from api.profile import ProfileManager
 from api.state import StateManager, StateError
 
 logger = get_logger(__name__)
@@ -131,12 +132,12 @@ async def store_conversation_memory_background(
             extra={"user_id": user_id, "conversation_id": conversation_id}
         )
 
-        # Get conversation history
+        # Get only the most recent conversation turn (last 2 messages: user + assistant)
+        # This stores each message incrementally instead of entire conversation history
         async with StateManager() as state:
-            # Get up to 50 messages for storage
             conversation_history = await state.get_conversation_history(
                 conversation_id,
-                limit=50
+                limit=2  # Only get last 2 messages (most recent turn)
             )
 
         if not conversation_history or len(conversation_history) < 2:
@@ -157,19 +158,22 @@ async def store_conversation_memory_background(
 
         if success:
             logger.info(
-                "Conversation memory stored successfully in background",
+                "Conversation memory stored successfully in background (fire-and-forget)",
                 extra={
                     "user_id": user_id,
                     "conversation_id": conversation_id,
-                    "memory_id": memory_data.get("memory_id")
+                    "message_count": len(conversation_history),
+                    "status": "stored"
                 }
             )
         else:
             logger.warning(
-                "Conversation memory queued for retry",
+                "Conversation memory queued for retry (agentic-memories unavailable)",
                 extra={
                     "user_id": user_id,
-                    "conversation_id": conversation_id
+                    "conversation_id": conversation_id,
+                    "message_count": len(conversation_history),
+                    "status": "queued_for_retry"
                 }
             )
 
@@ -178,6 +182,39 @@ async def store_conversation_memory_background(
             f"Error in background memory storage: {str(e)}",
             exc_info=True,
             extra={"user_id": user_id, "conversation_id": conversation_id}
+        )
+
+
+async def refresh_profile_background(user_id: str):
+    """
+    Background task to refresh user profile.
+
+    This runs asynchronously and doesn't block the chat response.
+
+    Args:
+        user_id: User identifier
+    """
+    try:
+        logger.info(
+            "Starting background profile refresh",
+            extra={"user_id": user_id}
+        )
+
+        # Create ProfileManager and refresh profile
+        async with StateManager() as state:
+            profile_manager = ProfileManager(redis_client=state.redis_client)
+            await profile_manager.refresh_profile_background(user_id)
+
+        logger.info(
+            "Profile refresh completed in background",
+            extra={"user_id": user_id}
+        )
+
+    except Exception as e:
+        logger.error(
+            f"Error in background profile refresh: {str(e)}",
+            exc_info=True,
+            extra={"user_id": user_id}
         )
 
 
@@ -294,6 +331,80 @@ async def create_chat(request: ChatRequest, background_tasks: BackgroundTasks):
             }
             await state.add_message(conversation_id, user_message)
 
+            # Load and manage user profile (non-blocking)
+            try:
+                profile_manager = ProfileManager(redis_client=state.redis_client)
+
+                # Load profile from cache (fast, <10ms)
+                profile = await profile_manager.load_profile_from_cache(request.user_id)
+
+                # Increment message count for trigger tracking
+                message_count = await profile_manager.increment_message_count(request.user_id)
+
+                # Check if profile refresh should be triggered
+                # Pass message_count to avoid race condition from re-reading Redis
+                should_refresh = await profile_manager.check_refresh_triggers(
+                    request.user_id,
+                    message_count=message_count
+                )
+
+                logger.info(
+                    "Profile loaded",
+                    extra={
+                        "user_id": request.user_id,
+                        "conversation_id": conversation_id,
+                        "cached": profile.get("cached", False),
+                        "completeness": profile.get("completeness", 0),
+                        "message_count": message_count,
+                        "refresh_triggered": should_refresh
+                    }
+                )
+
+                # Trigger background refresh if needed
+                if should_refresh:
+                    background_tasks.add_task(
+                        refresh_profile_background,
+                        request.user_id
+                    )
+                    logger.info(
+                        "Profile refresh queued",
+                        extra={
+                            "user_id": request.user_id,
+                            "message_count": message_count
+                        }
+                    )
+
+                # Store profile in Redis for streaming endpoint (TTL: 5 minutes)
+                # Only store if profile has data (completeness > 0)
+                if profile.get("completeness", 0) > 0:
+                    import json
+                    profile_key = f"profile_cache:{conversation_id}"
+                    await state.redis_client.setex(
+                        profile_key,
+                        300,  # 5 minutes TTL
+                        json.dumps(profile)
+                    )
+                    logger.info(
+                        "Profile cached for streaming endpoint",
+                        extra={
+                            "user_id": request.user_id,
+                            "conversation_id": conversation_id,
+                            "completeness": profile.get("completeness", 0)
+                        }
+                    )
+
+            except Exception as e:
+                # Graceful degradation: log error but continue without profile
+                logger.error(
+                    f"Profile loading failed, continuing without profile: {str(e)}",
+                    extra={
+                        "user_id": request.user_id,
+                        "conversation_id": conversation_id,
+                        "error_type": type(e).__name__
+                    },
+                    exc_info=True
+                )
+
             # Retrieve and format memory context if decision support is needed
             memory_context = None
             if needs_decision_support:
@@ -392,21 +503,23 @@ async def create_chat(request: ChatRequest, background_tasks: BackgroundTasks):
             # Build stream URL
             stream_url = f"/api/stream/{conversation_id}"
 
-            # Trigger background memory storage if conversation is ending
-            if conversation_is_ending:
-                logger.info(
-                    "Conversation ending detected, triggering memory storage",
-                    extra={
-                        "user_id": request.user_id,
-                        "conversation_id": conversation_id
-                    }
-                )
-                # Add background task (runs after response is sent)
-                background_tasks.add_task(
-                    store_conversation_memory_background,
-                    request.user_id,
-                    conversation_id
-                )
+            # Trigger background memory storage on EVERY message (fire-and-forget)
+            # This ensures comprehensive memory coverage for personalization
+            logger.info(
+                "Triggering automatic memory storage",
+                extra={
+                    "user_id": request.user_id,
+                    "conversation_id": conversation_id,
+                    "conversation_ending": conversation_is_ending
+                }
+            )
+
+            # Add background task (runs after response is sent)
+            background_tasks.add_task(
+                store_conversation_memory_background,
+                request.user_id,
+                conversation_id
+            )
 
             logger.info(
                 "Chat conversation initiated",
@@ -414,7 +527,7 @@ async def create_chat(request: ChatRequest, background_tasks: BackgroundTasks):
                     "conversation_id": conversation_id,
                     "user_id": request.user_id,
                     "stream_url": stream_url,
-                    "memory_storage_queued": conversation_is_ending
+                    "memory_storage_queued": True  # Now queued for every message
                 }
             )
 

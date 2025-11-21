@@ -17,3 +17,9 @@ pytest-asyncio>=0.21.0
 
 # State management (Story 2.5)
 redis>=5.0.0
+
+# Date/time utilities
+pytz>=2025.2
+
+# Debugging (dev environment only)
+debugpy>=1.8.0

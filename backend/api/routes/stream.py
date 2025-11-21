@@ -58,7 +58,7 @@ async def stream_generator(
     """
     start_time = time.time()
     first_token_sent = False
-    max_tool_iterations = 5
+    max_tool_iterations = 10
     assistant_response_content = []  # Accumulate assistant response for storage
 
     try:
@@ -574,19 +574,58 @@ async def stream_response(conversation_id: str, request: Request):
         # Get user_id for this conversation (needed for memory tool calls)
         user_id = await state_manager.get_user_id_for_conversation(conversation_id)
 
-        # Build system message with user_id for memory tools
-        system_message = None
+        # Get platform from session if available (for platform-specific formatting)
+        platform = "api"  # Default platform
         if user_id:
-            system_message = (
-                f"You are Annie, a personal AI companion that provides intelligent decision-making support. "
-                f"Current user ID: {user_id}\n\n"
-                f"IMPORTANT: When using memory tools (store_memory, retrieve_memories), ALWAYS use this exact user_id: {user_id}\n"
-                f"Never use generic IDs like 'anonymous_user' - the user_id is provided above."
-            )
-            logger.debug(
-                "System message built with user_id",
-                extra={"conversation_id": conversation_id, "user_id": user_id}
-            )
+            session = await state_manager.get_session(user_id)
+            if session:
+                platform = session.get("platform", "api")
+
+        # Load user profile from Redis cache (set by chat endpoint)
+        profile = None
+        if user_id:
+            try:
+                profile_key = f"profile_cache:{conversation_id}"
+                profile_data = await state_manager.redis_client.get(profile_key)
+                if profile_data:
+                    import json
+                    profile = json.loads(profile_data)
+                    logger.info(
+                        "Profile loaded for system prompt",
+                        extra={
+                            "conversation_id": conversation_id,
+                            "user_id": user_id,
+                            "completeness": profile.get("completeness", 0)
+                        }
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to load profile for system prompt, continuing without: {str(e)}",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "user_id": user_id
+                    }
+                )
+
+        # Build system message with user_id, profile, and platform-specific formatting
+        from api.prompts import build_system_prompt
+
+        system_message = build_system_prompt(
+            user_id=user_id,
+            platform=platform,
+            include_tool_instructions=True,
+            profile=profile
+        ) if user_id else None
+
+        logger.debug(
+            "System message built",
+            extra={
+                "conversation_id": conversation_id,
+                "user_id": user_id,
+                "platform": platform,
+                "has_system_message": system_message is not None
+            }
+        )
 
         # Load conversation history from Redis with system message
         messages = await state_manager.build_llm_context(conversation_id, system_message)
