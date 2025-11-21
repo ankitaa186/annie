@@ -288,7 +288,7 @@ class ProfileManager:
             )
             # Don't raise - this is a background task, failures should not block
 
-    async def check_refresh_triggers(self, user_id: str) -> bool:
+    async def check_refresh_triggers(self, user_id: str, message_count: Optional[int] = None) -> bool:
         """
         Check if profile refresh should be triggered.
 
@@ -298,25 +298,43 @@ class ProfileManager:
 
         Args:
             user_id: User identifier
+            message_count: Current message count (if already known, to avoid race condition)
 
         Returns:
             bool: True if refresh should be triggered, False otherwise
         """
         try:
             meta_key = f"profile_meta:{user_id}"
-            meta_data = await self.redis_client.get(meta_key)
 
-            if not meta_data:
-                # First time - should trigger refresh
-                logger.info(
-                    "Profile metadata not found - triggering first refresh",
-                    extra={"user_id": user_id}
-                )
-                return True
+            # If message_count not provided, read from Redis
+            if message_count is None:
+                meta_data = await self.redis_client.get(meta_key)
 
-            metadata = json.loads(meta_data)
-            message_count = metadata.get("message_count", 0)
-            last_refresh_str = metadata.get("last_refresh")
+                if not meta_data:
+                    # First time - should trigger refresh
+                    logger.info(
+                        "Profile metadata not found - triggering first refresh",
+                        extra={"user_id": user_id}
+                    )
+                    return True
+
+                metadata = json.loads(meta_data)
+                message_count = metadata.get("message_count", 0)
+                last_refresh_str = metadata.get("last_refresh")
+            else:
+                # Message count provided - read metadata only for time-based trigger
+                meta_data = await self.redis_client.get(meta_key)
+
+                if not meta_data:
+                    # First time - should trigger refresh
+                    logger.info(
+                        "Profile metadata not found - triggering first refresh",
+                        extra={"user_id": user_id}
+                    )
+                    return True
+
+                metadata = json.loads(meta_data)
+                last_refresh_str = metadata.get("last_refresh")
 
             # Check message count trigger
             if message_count > 0 and message_count % self.MESSAGE_COUNT_TRIGGER == 0:

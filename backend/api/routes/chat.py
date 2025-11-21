@@ -342,7 +342,11 @@ async def create_chat(request: ChatRequest, background_tasks: BackgroundTasks):
                 message_count = await profile_manager.increment_message_count(request.user_id)
 
                 # Check if profile refresh should be triggered
-                should_refresh = await profile_manager.check_refresh_triggers(request.user_id)
+                # Pass message_count to avoid race condition from re-reading Redis
+                should_refresh = await profile_manager.check_refresh_triggers(
+                    request.user_id,
+                    message_count=message_count
+                )
 
                 logger.info(
                     "Profile loaded",
