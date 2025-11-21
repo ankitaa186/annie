@@ -46,14 +46,14 @@ class MemoryClient:
     Features:
     - Memory storage via HTTP API
     - Health check endpoint
-    - Timeout handling (5 second default)
+    - Timeout handling (240 second default for long-running LLM extraction)
     - Structured error logging
     - Connection pooling with httpx.AsyncClient
     """
 
     # Default configuration
     DEFAULT_MEMORIES_URL = "http://host.docker.internal:8080"
-    DEFAULT_TIMEOUT = 5.0  # 5 seconds (p95 requirement)
+    DEFAULT_TIMEOUT = 240.0  # 4 minutes (long-running LLM extraction process)
 
     def __init__(self, memories_url: Optional[str] = None, timeout: Optional[float] = None):
         """
@@ -61,7 +61,7 @@ class MemoryClient:
 
         Args:
             memories_url: agentic-memories service URL (default: from config or http://host.docker.internal:8080)
-            timeout: Request timeout in seconds (default: 5.0)
+            timeout: Request timeout in seconds (default: 240.0 for long-running LLM extraction)
         """
         if memories_url:
             self.memories_url = memories_url

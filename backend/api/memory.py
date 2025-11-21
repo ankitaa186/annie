@@ -55,14 +55,16 @@ class MemoryManager:
         platform: str = "telegram"
     ) -> bool:
         """
-        Store conversation history in agentic-memories service.
+        Store conversation turn in agentic-memories service.
 
-        The service will automatically extract memories from the conversation.
+        Typically receives only the most recent turn (2 messages: user + assistant)
+        for incremental memory storage. The service will automatically extract
+        memories from the conversation turn.
 
         Args:
             user_id: User identifier
             conversation_id: Conversation identifier
-            conversation_history: List of message dicts with role, content
+            conversation_history: List of message dicts with role, content (typically 2 messages)
             platform: Platform identifier (default: telegram)
 
         Returns:
@@ -70,7 +72,7 @@ class MemoryManager:
         """
         start_time = time.time()
 
-        # Limit conversation history size
+        # Limit conversation history size (safety check, usually only 2 messages)
         if len(conversation_history) > self.MAX_MESSAGES_FOR_STORAGE:
             logger.warning(
                 f"Conversation history too long ({len(conversation_history)} messages), "
@@ -105,12 +107,14 @@ class MemoryManager:
             self._circuit_breaker_opened_at = None
 
             logger.info(
-                "Conversation memory stored successfully",
+                "Conversation memory stored successfully (fire-and-forget response logged)",
                 extra={
                     "user_id": user_id,
                     "conversation_id": conversation_id,
                     "memories_created": result.get("memories_created", 0),
-                    "duration_ms": duration_ms
+                    "memory_ids": result.get("memory_ids", []),
+                    "duration_ms": duration_ms,
+                    "full_response": result  # Log complete response for debugging
                 }
             )
             return True

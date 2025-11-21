@@ -581,13 +581,40 @@ async def stream_response(conversation_id: str, request: Request):
             if session:
                 platform = session.get("platform", "api")
 
-        # Build system message with user_id and platform-specific formatting
+        # Load user profile from Redis cache (set by chat endpoint)
+        profile = None
+        if user_id:
+            try:
+                profile_key = f"profile_cache:{conversation_id}"
+                profile_data = await state_manager.redis_client.get(profile_key)
+                if profile_data:
+                    import json
+                    profile = json.loads(profile_data)
+                    logger.info(
+                        "Profile loaded for system prompt",
+                        extra={
+                            "conversation_id": conversation_id,
+                            "user_id": user_id,
+                            "completeness": profile.get("completeness", 0)
+                        }
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to load profile for system prompt, continuing without: {str(e)}",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "user_id": user_id
+                    }
+                )
+
+        # Build system message with user_id, profile, and platform-specific formatting
         from api.prompts import build_system_prompt
-        
+
         system_message = build_system_prompt(
             user_id=user_id,
             platform=platform,
-            include_tool_instructions=True
+            include_tool_instructions=True,
+            profile=profile
         ) if user_id else None
 
         logger.debug(

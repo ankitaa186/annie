@@ -18,7 +18,7 @@ from fastapi.responses import JSONResponse
 
 from mcp_server.config import get_config
 from mcp_server.logging import get_logger, log_performance
-from mcp_server.tools import ToolRegistry, health_check_tool, store_memory_tool, retrieve_memories_tool
+from mcp_server.tools import ToolRegistry, health_check_tool, store_memory_tool, retrieve_memories_tool, get_user_profile_tool
 
 logger = get_logger(__name__)
 config = get_config()
@@ -59,6 +59,7 @@ class MCPServer:
         self.tool_registry.register(health_check_tool)
         self.tool_registry.register(store_memory_tool)
         self.tool_registry.register(retrieve_memories_tool)
+        self.tool_registry.register(get_user_profile_tool)
         logger.info(f"Registered {len(self.tool_registry.tools)} tools")
 
     async def handle_request(self, request: Dict[str, Any]) -> Dict[str, Any]:

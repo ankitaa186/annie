@@ -1,0 +1,176 @@
+<story-context id=".bmad/bmm/workflows/4-implementation/story-context/template" v="1.0">
+  <metadata>
+    <epicId>7</epicId>
+    <storyId>7.1</storyId>
+    <title>Profile Integration & Smart Caching</title>
+    <status>drafted</status>
+    <generatedAt>2025-11-20</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>.bmad-ephemeral/stories/7-1-profile-integration-smart-caching.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>user</asA>
+    <iWant>Annie to always know who I am and my preferences</iWant>
+    <soThat>every conversation feels personal and contextually aware</soThat>
+    <tasks>
+      - Task 1: Create get_user_profile MCP Tool (AC #1)
+      - Task 2: Implement ProfileManager with Redis Caching (AC #2, #3)
+      - Task 3: Integrate Profile into Chat Endpoint (AC #3, #4)
+      - Task 4: Background Task Infrastructure (AC #3)
+      - Task 5: Performance Optimization & Testing (AC #6)
+      - Task 6: Integration Testing (All ACs)
+    </tasks>
+  </story>
+
+  <acceptanceCriteria>
+    - AC #1: MCP Tool - get_user_profile calls agentic-memories /v1/profile API and returns 21 profile fields with completeness percentage
+    - AC #2: Redis Caching Layer with profile:{user_id} key, TTL 900s, non-blocking cache misses
+    - AC #3: Smart Background Refresh triggered every 5 messages OR 15 minutes (whichever first), non-blocking
+    - AC #4: System Prompt Injection with profile data formatted into USER PROFILE section
+    - AC #5: Graceful Degradation - uses expired cache if service down, logs warnings, continues chat
+    - AC #6: Performance Requirements - cache load &lt;10ms p95, background refresh &lt;500ms, &gt;90% cache hit rate
+  </acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc>
+        <path>docs/epics-and-stories.md</path>
+        <title>Epic 7: User Profile & Personalization</title>
+        <section>Story 7.1: Profile Integration & Smart Caching</section>
+        <snippet>Leverages agentic-memories built-in profile system (21 fields, automatic extraction). Profile extraction happens automatically during /v1/store calls. This story focuses on RETRIEVAL and CACHING.</snippet>
+      </doc>
+      <doc>
+        <path>docs/01-product/PRODUCT_REQUIREMENTS.md</path>
+        <title>Product Requirements</title>
+        <section>V1.0 Goals - User Profile & Personalization</section>
+        <snippet>Annie knows user's name and greets personally. Understands background, goals, and preferences. Warm onboarding flow establishes rapport.</snippet>
+      </doc>
+    </docs>
+
+    <code>
+      <file>
+        <path>backend/api/memory_client.py</path>
+        <kind>HTTP Client</kind>
+        <symbol>MemoryClient</symbol>
+        <lines>1-170</lines>
+        <reason>HTTP client pattern for agentic-memories. Use this as reference for implementing profile API calls. Shows timeout handling, error types (MemoryNetworkError, MemoryAPIError), context manager pattern.</reason>
+      </file>
+
+      <file>
+        <path>backend/api/state.py</path>
+        <kind>State Manager</kind>
+        <symbol>StateManager</symbol>
+        <lines>1-200</lines>
+        <reason>Redis connection pattern for session management. ProfileManager should follow same patterns: async Redis client, connection pooling, TTL handling, key patterns (session:{user_id} → profile:{user_id}).</reason>
+      </file>
+
+      <file>
+        <path>mcp_server/tools.py</path>
+        <kind>MCP Tools</kind>
+        <symbol>store_memory_tool_handler, retrieve_memories_tool_handler</symbol>
+        <lines>82-526</lines>
+        <reason>Existing MCP tool pattern. get_user_profile tool should follow same structure: async handler, HTTP client usage, error handling, structured logging, tool schema registration.</reason>
+      </file>
+
+      <file>
+        <path>backend/api/routes/chat.py</path>
+        <kind>API Route</kind>
+        <symbol>chat endpoint</symbol>
+        <lines></lines>
+        <reason>MODIFY: Add profile loading at conversation start. Load ProfileManager, call load_profile_from_cache(), check refresh triggers, queue background tasks.</reason>
+      </file>
+
+      <file>
+        <path>backend/api/routes/stream.py</path>
+        <kind>API Route</kind>
+        <symbol>stream endpoint</symbol>
+        <lines></lines>
+        <reason>MODIFY: Inject profile into system prompt. Load profile from Redis, format into USER PROFILE section, handle empty profiles gracefully.</reason>
+      </file>
+    </code>
+
+    <dependencies>
+      <python>
+        <package name="fastapi" version="&gt;=0.104.0"/>
+        <package name="httpx" version="&gt;=0.25.0"/>
+        <package name="redis" version="&gt;=5.0.0"/>
+        <package name="pytest" version="&gt;=7.4.0"/>
+        <package name="pytest-asyncio" version="&gt;=0.21.0"/>
+      </python>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    - Non-blocking architecture: Profile loading must never delay chat responses
+    - Cache-first approach: Always use Redis cache, trigger background refresh separately
+    - Redis key patterns: profile:{user_id} (TTL: 900s), profile_meta:{user_id} (TTL: 86400s)
+    - Error handling: Graceful degradation when agentic-memories unavailable (use expired cache or empty profile)
+    - Performance targets: Cache load &lt;10ms p95, background refresh &lt;500ms, cache hit rate &gt;90%
+    - Reuse existing patterns: Follow MemoryClient for HTTP, StateManager for Redis, existing MCP tools for tool registration
+    - Testing requirements: Unit tests for ProfileManager, integration tests for full flow, performance tests for latency/hit rate
+  </constraints>
+
+  <interfaces>
+    <interface>
+      <name>agentic-memories Profile API</name>
+      <kind>REST endpoint</kind>
+      <signature>GET /v1/profile?user_id={user_id}</signature>
+      <path>External API - agentic-memories service</path>
+      <details>Returns profile object with 21 fields across 5 categories (basics, preferences, goals, interests, background) plus completeness percentage. Profile extraction happens automatically during /v1/store calls.</details>
+    </interface>
+
+    <interface>
+      <name>ProfileManager.load_profile_from_cache</name>
+      <kind>Python async method</kind>
+      <signature>async def load_profile_from_cache(user_id: str) -&gt; Dict[str, Any]</signature>
+      <path>backend/api/profile.py (NEW FILE)</path>
+      <details>Checks Redis profile:{user_id}, returns cached profile if exists, returns empty profile if not cached. Non-blocking, always returns immediately (&lt;10ms).</details>
+    </interface>
+
+    <interface>
+      <name>ProfileManager.refresh_profile_background</name>
+      <kind>Python async method</kind>
+      <signature>async def refresh_profile_background(user_id: str) -&gt; None</signature>
+      <path>backend/api/profile.py (NEW FILE)</path>
+      <details>Calls get_user_profile MCP tool, updates Redis cache with TTL=900s, updates profile_meta with message_count and last_refresh. Runs as background task, non-blocking.</details>
+    </interface>
+
+    <interface>
+      <name>get_user_profile MCP Tool</name>
+      <kind>MCP Tool Handler</kind>
+      <signature>async def get_user_profile_tool_handler(user_id: str) -&gt; Dict[str, Any]</signature>
+      <path>mcp_server/tools.py (MODIFY)</path>
+      <details>Makes HTTP GET to {AGENTIC_MEMORIES_URL}/v1/profile, parses 21 profile fields, returns completeness percentage. Follow store_memory_tool_handler pattern.</details>
+    </interface>
+  </interfaces>
+
+  <tests>
+    <standards>
+      - Testing framework: pytest with pytest-asyncio for async tests
+      - Test locations: tests/ directory (unit tests), tests/integration/ (integration tests)
+      - Mock HTTP calls using httpx mock or pytest-httpx
+      - Mock Redis using fakeredis or redis-py mocking
+      - Follow existing test patterns in tests/ directory
+      - Coverage target: 80%+ for new ProfileManager code
+    </standards>
+
+    <locations>
+      - tests/unit/test_profile_manager.py (NEW)
+      - tests/integration/test_profile_flow.py (NEW)
+      - tests/performance/test_profile_performance.py (NEW)
+    </locations>
+
+    <ideas>
+      - AC #1: Test get_user_profile tool calls agentic-memories API correctly, parses 21 fields, returns completeness
+      - AC #2: Test cache hit returns immediately (&lt;10ms), cache miss triggers background fetch, cache stores with TTL=900s
+      - AC #3: Test message count trigger (every 5 messages), time-based trigger (15 minutes), background task non-blocking
+      - AC #4: Test profile injection into system prompt, empty profile handling, profile formatting
+      - AC #5: Test graceful degradation - agentic-memories down uses expired cache, logs warnings, continues chat
+      - AC #6: Test cache load latency &lt;10ms p95, background refresh &lt;500ms, cache hit rate &gt;90% after warmup
+      - Integration: Test full flow Chat → Profile load → Background refresh → Cache update
+      - Integration: Test new user with empty profile
+      - Performance: Load test with 100+ concurrent users to validate performance targets
+    </ideas>
+  </tests>
+</story-context>
