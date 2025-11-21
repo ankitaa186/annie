@@ -306,11 +306,12 @@ class ProfileManager:
         try:
             meta_key = f"profile_meta:{user_id}"
 
-            # If message_count not provided, read from Redis
+            # If message_count not provided, read from Redis Hash
             if message_count is None:
-                meta_data = await self.redis_client.get(meta_key)
+                # Read all fields from hash
+                metadata = await self.redis_client.hgetall(meta_key)
 
-                if not meta_data:
+                if not metadata:
                     # First time - should trigger refresh
                     logger.info(
                         "Profile metadata not found - triggering first refresh",
@@ -318,23 +319,23 @@ class ProfileManager:
                     )
                     return True
 
-                metadata = json.loads(meta_data)
-                message_count = metadata.get("message_count", 0)
+                # Parse message_count (Redis returns strings)
+                message_count = int(metadata.get("message_count", "0") or "0")
                 last_refresh_str = metadata.get("last_refresh")
             else:
-                # Message count provided - read metadata only for time-based trigger
-                meta_data = await self.redis_client.get(meta_key)
+                # Message count provided - read only last_refresh for time-based trigger
+                last_refresh_str = await self.redis_client.hget(meta_key, "last_refresh")
 
-                if not meta_data:
-                    # First time - should trigger refresh
-                    logger.info(
-                        "Profile metadata not found - triggering first refresh",
-                        extra={"user_id": user_id}
-                    )
-                    return True
-
-                metadata = json.loads(meta_data)
-                last_refresh_str = metadata.get("last_refresh")
+                if last_refresh_str is None:
+                    # Check if hash exists at all
+                    exists = await self.redis_client.exists(meta_key)
+                    if not exists:
+                        # First time - should trigger refresh
+                        logger.info(
+                            "Profile metadata not found - triggering first refresh",
+                            extra={"user_id": user_id}
+                        )
+                        return True
 
             # Check message count trigger
             if message_count > 0 and message_count % self.MESSAGE_COUNT_TRIGGER == 0:
@@ -383,6 +384,7 @@ class ProfileManager:
         Increment message count for user.
 
         Used to track message-based refresh triggers.
+        Uses Redis HINCRBY for atomic increment to avoid race conditions.
 
         Args:
             user_id: User identifier
@@ -392,29 +394,15 @@ class ProfileManager:
         """
         try:
             meta_key = f"profile_meta:{user_id}"
-            meta_data = await self.redis_client.get(meta_key)
 
-            if meta_data:
-                metadata = json.loads(meta_data)
-                message_count = metadata.get("message_count", 0) + 1
-                metadata["message_count"] = message_count
-            else:
-                # Initialize metadata
-                metadata = {
-                    "message_count": 1,
-                    "last_refresh": None
-                }
-                message_count = 1
+            # Use HINCRBY for atomic increment (avoids read-modify-write race)
+            message_count = await self.redis_client.hincrby(meta_key, "message_count", 1)
 
-            # Store updated metadata with TTL
-            await self.redis_client.setex(
-                meta_key,
-                self.PROFILE_META_TTL,
-                json.dumps(metadata)
-            )
+            # Reset TTL after increment to keep metadata fresh
+            await self.redis_client.expire(meta_key, self.PROFILE_META_TTL)
 
             logger.debug(
-                "Message count incremented",
+                "Message count incremented atomically",
                 extra={
                     "user_id": user_id,
                     "message_count": message_count
@@ -438,32 +426,26 @@ class ProfileManager:
         Update last_refresh timestamp in metadata.
 
         Internal method called after successful profile refresh.
+        Uses Redis HSET for atomic field update to avoid race conditions.
 
         Args:
             user_id: User identifier
         """
         try:
             meta_key = f"profile_meta:{user_id}"
-            meta_data = await self.redis_client.get(meta_key)
+            last_refresh = datetime.now(timezone.utc).isoformat()
 
-            if meta_data:
-                metadata = json.loads(meta_data)
-            else:
-                metadata = {"message_count": 0}
+            # Use HSET for atomic field update (avoids read-modify-write race)
+            await self.redis_client.hset(meta_key, "last_refresh", last_refresh)
 
-            metadata["last_refresh"] = datetime.now(timezone.utc).isoformat()
-
-            await self.redis_client.setex(
-                meta_key,
-                self.PROFILE_META_TTL,
-                json.dumps(metadata)
-            )
+            # Reset TTL after update to keep metadata fresh
+            await self.redis_client.expire(meta_key, self.PROFILE_META_TTL)
 
             logger.debug(
-                "Updated last_refresh timestamp",
+                "Updated last_refresh timestamp atomically",
                 extra={
                     "user_id": user_id,
-                    "last_refresh": metadata["last_refresh"]
+                    "last_refresh": last_refresh
                 }
             )
 
