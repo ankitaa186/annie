@@ -118,7 +118,14 @@ def format_profile_for_prompt(profile: Dict[str, Any]) -> Optional[str]:
                 user_tz = pytz.timezone(basics['timezone'])
                 user_time = datetime.now(user_tz).strftime("%I:%M %p")
                 basics_lines.append(f"Timezone: {basics['timezone']} (current time: {user_time})")
-            except:
+            except (pytz.exceptions.UnknownTimeZoneError, ValueError, KeyError) as e:
+                # Log timezone conversion errors for debugging
+                from api.logging import get_logger
+                logger = get_logger(__name__)
+                logger.warning(
+                    f"Failed to convert timezone: {basics.get('timezone')}",
+                    extra={"error": str(e), "error_type": type(e).__name__}
+                )
                 basics_lines.append(f"Timezone: {basics['timezone']}")
         if basics.get("pronouns"):
             basics_lines.append(f"Pronouns: {basics['pronouns']}")

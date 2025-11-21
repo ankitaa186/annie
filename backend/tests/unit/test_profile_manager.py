@@ -16,8 +16,16 @@ from api.profile import ProfileManager, ProfileCacheError
 async def redis_mock():
     """Mock Redis client."""
     mock = AsyncMock()
+    # Old JSON string methods (still used for profile cache)
     mock.get = AsyncMock()
     mock.setex = AsyncMock()
+    # New Redis Hash methods (used for profile metadata)
+    mock.hgetall = AsyncMock()
+    mock.hget = AsyncMock()
+    mock.hincrby = AsyncMock()
+    mock.hset = AsyncMock()
+    mock.expire = AsyncMock()
+    mock.exists = AsyncMock()
     mock.close = AsyncMock()
     return mock
 
@@ -107,10 +115,6 @@ async def test_refresh_profile_background_success(profile_manager, redis_mock):
         "background": {}
     }
 
-    # Mock Redis get to return existing metadata (for _update_last_refresh)
-    existing_metadata = {"message_count": 3, "last_refresh": None}
-    redis_mock.get.return_value = json.dumps(existing_metadata)
-
     # Mock MCP client
     with patch("api.profile.MCPClient") as mcp_mock:
         mcp_client_instance = AsyncMock()
@@ -125,15 +129,25 @@ async def test_refresh_profile_background_success(profile_manager, redis_mock):
             {"user_id": user_id}
         )
 
-        # Verify Redis setex was called with correct data
-        assert redis_mock.setex.call_count == 2  # profile + metadata
+        # Verify profile was cached using SETEX (still uses JSON for profile cache)
+        assert redis_mock.setex.call_count == 1  # profile only
 
         # Check profile was cached
-        profile_call = [call for call in redis_mock.setex.call_args_list
-                        if call[0][0] == f"profile:{user_id}"][0]
+        profile_call = redis_mock.setex.call_args_list[0]
+        assert profile_call[0][0] == f"profile:{user_id}"
         assert profile_call[0][1] == 900  # TTL
         cached_data = json.loads(profile_call[0][2])
         assert cached_data["completeness"] == 60
+
+        # Verify _update_last_refresh was called (uses HSET + EXPIRE for metadata)
+        redis_mock.hset.assert_called_once()
+        hset_call = redis_mock.hset.call_args[0]
+        assert hset_call[0] == f"profile_meta:{user_id}"
+        assert hset_call[1] == "last_refresh"
+        # hset_call[2] is the timestamp string
+
+        # Verify EXPIRE was called to set TTL on metadata
+        redis_mock.expire.assert_called_once_with(f"profile_meta:{user_id}", 86400)
 
 
 @pytest.mark.asyncio
@@ -168,13 +182,13 @@ async def test_check_refresh_triggers_first_time(profile_manager, redis_mock):
     """Test refresh trigger on first access (no metadata)."""
     user_id = "test_user_123"
 
-    # Mock Redis get to return None (no metadata)
-    redis_mock.get.return_value = None
+    # Mock Redis hgetall to return empty dict (no metadata)
+    redis_mock.hgetall.return_value = {}
 
     result = await profile_manager.check_refresh_triggers(user_id)
 
     assert result == True  # Should trigger on first time
-    redis_mock.get.assert_called_once_with(f"profile_meta:{user_id}")
+    redis_mock.hgetall.assert_called_once_with(f"profile_meta:{user_id}")
 
 
 @pytest.mark.asyncio
@@ -184,22 +198,24 @@ async def test_check_refresh_triggers_message_count(profile_manager, redis_mock)
 
     # Test trigger at message 5, 10, 15, etc.
     for count in [5, 10, 15, 20]:
+        # Redis Hash returns dict with string values
         metadata = {
-            "message_count": count,
+            "message_count": str(count),
             "last_refresh": datetime.now(timezone.utc).isoformat()
         }
-        redis_mock.get.return_value = json.dumps(metadata)
+        redis_mock.hgetall.return_value = metadata
 
         result = await profile_manager.check_refresh_triggers(user_id)
         assert result == True, f"Should trigger at message count {count}"
 
     # Test NO trigger at message 4, 6, 7, 8, 9
     for count in [4, 6, 7, 8, 9]:
+        # Redis Hash returns dict with string values
         metadata = {
-            "message_count": count,
+            "message_count": str(count),
             "last_refresh": datetime.now(timezone.utc).isoformat()
         }
-        redis_mock.get.return_value = json.dumps(metadata)
+        redis_mock.hgetall.return_value = metadata
 
         result = await profile_manager.check_refresh_triggers(user_id)
         assert result == False, f"Should NOT trigger at message count {count}"
@@ -212,11 +228,12 @@ async def test_check_refresh_triggers_time_based(profile_manager, redis_mock):
 
     # Last refresh was 16 minutes ago (should trigger)
     last_refresh = datetime.now(timezone.utc) - timedelta(minutes=16)
+    # Redis Hash returns dict with string values
     metadata = {
-        "message_count": 3,  # Not a message trigger
+        "message_count": "3",  # Not a message trigger
         "last_refresh": last_refresh.isoformat()
     }
-    redis_mock.get.return_value = json.dumps(metadata)
+    redis_mock.hgetall.return_value = metadata
 
     result = await profile_manager.check_refresh_triggers(user_id)
     assert result == True  # Should trigger based on time
@@ -224,7 +241,7 @@ async def test_check_refresh_triggers_time_based(profile_manager, redis_mock):
     # Last refresh was 14 minutes ago (should NOT trigger)
     last_refresh = datetime.now(timezone.utc) - timedelta(minutes=14)
     metadata["last_refresh"] = last_refresh.isoformat()
-    redis_mock.get.return_value = json.dumps(metadata)
+    redis_mock.hgetall.return_value = metadata
 
     result = await profile_manager.check_refresh_triggers(user_id)
     assert result == False  # Should NOT trigger yet
@@ -235,20 +252,18 @@ async def test_increment_message_count_new_user(profile_manager, redis_mock):
     """Test incrementing message count for new user."""
     user_id = "test_user_123"
 
-    # Mock Redis get to return None (new user)
-    redis_mock.get.return_value = None
+    # Mock Redis hincrby to return 1 (first increment)
+    redis_mock.hincrby.return_value = 1
 
     count = await profile_manager.increment_message_count(user_id)
 
     assert count == 1
-    redis_mock.setex.assert_called_once()
 
-    # Verify metadata structure
-    call_args = redis_mock.setex.call_args[0]
-    assert call_args[0] == f"profile_meta:{user_id}"
-    assert call_args[1] == 86400  # TTL = 24 hours
-    metadata = json.loads(call_args[2])
-    assert metadata["message_count"] == 1
+    # Verify HINCRBY was called correctly
+    redis_mock.hincrby.assert_called_once_with(f"profile_meta:{user_id}", "message_count", 1)
+
+    # Verify EXPIRE was called to set TTL
+    redis_mock.expire.assert_called_once_with(f"profile_meta:{user_id}", 86400)
 
 
 @pytest.mark.asyncio
@@ -256,22 +271,18 @@ async def test_increment_message_count_existing_user(profile_manager, redis_mock
     """Test incrementing message count for existing user."""
     user_id = "test_user_123"
 
-    # Mock Redis get to return existing metadata
-    existing_metadata = {
-        "message_count": 5,
-        "last_refresh": datetime.now(timezone.utc).isoformat()
-    }
-    redis_mock.get.return_value = json.dumps(existing_metadata)
+    # Mock Redis hincrby to return 6 (existing count 5 + 1)
+    redis_mock.hincrby.return_value = 6
 
     count = await profile_manager.increment_message_count(user_id)
 
     assert count == 6
 
-    # Verify metadata was updated
-    call_args = redis_mock.setex.call_args[0]
-    metadata = json.loads(call_args[2])
-    assert metadata["message_count"] == 6
-    assert metadata["last_refresh"] == existing_metadata["last_refresh"]
+    # Verify HINCRBY was called correctly
+    redis_mock.hincrby.assert_called_once_with(f"profile_meta:{user_id}", "message_count", 1)
+
+    # Verify EXPIRE was called to reset TTL
+    redis_mock.expire.assert_called_once_with(f"profile_meta:{user_id}", 86400)
 
 
 @pytest.mark.asyncio
