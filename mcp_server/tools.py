@@ -638,15 +638,22 @@ async def get_user_profile_tool_handler(
             # Calculate duration
             duration_ms = int((time.time() - start_time) * 1000)
 
-            # Extract completeness percentage (default to 0 if not present)
-            completeness = profile_data.get("completeness", 0)
+            # Extract completeness percentage from agentic-memories API format
+            # API returns "completeness_pct" (not "completeness")
+            completeness = int(profile_data.get("completeness_pct", 0))
+
+            # Extract nested profile data from "profile" object
+            # API returns nested structure: {"profile": {"basics": {}, "preferences": {}, ...}}
+            profile = profile_data.get("profile", {})
 
             logger.info(
                 "Profile retrieved successfully",
                 extra={
                     "user_id": user_id,
                     "completeness": completeness,
-                    "duration_ms": duration_ms
+                    "duration_ms": duration_ms,
+                    "populated_fields": profile_data.get("populated_fields", 0),
+                    "total_fields": profile_data.get("total_fields", 21)
                 }
             )
 
@@ -654,11 +661,11 @@ async def get_user_profile_tool_handler(
                 "status": "success",
                 "user_id": user_id,
                 "completeness": completeness,
-                "basics": profile_data.get("basics", {}),
-                "preferences": profile_data.get("preferences", {}),
-                "goals": profile_data.get("goals", {}),
-                "interests": profile_data.get("interests", {}),
-                "background": profile_data.get("background", {})
+                "basics": profile.get("basics", {}),
+                "preferences": profile.get("preferences", {}),
+                "goals": profile.get("goals", {}),
+                "interests": profile.get("interests", {}),
+                "background": profile.get("background", {})
             }
 
     except httpx.TimeoutException as e:
