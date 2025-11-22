@@ -20,6 +20,20 @@ from api.mcp_client import MCPClient, MCPClientError, MCPToolError, MCPNetworkEr
 from api.state import StateManager, StateError
 from api.logging import get_logger
 
+try:
+    from langfuse.decorators import observe, langfuse_context
+    LANGFUSE_AVAILABLE = True
+except ImportError:
+    LANGFUSE_AVAILABLE = False
+    def observe(**kwargs):
+        def decorator(func):
+            return func
+        return decorator
+    class langfuse_context:
+        @staticmethod
+        def update_current_observation(**kwargs):
+            pass
+
 logger = get_logger(__name__)
 
 # Create router
@@ -30,6 +44,7 @@ active_streams: Dict[str, float] = {}  # conversation_id -> timestamp
 MAX_CONCURRENT_STREAMS = 100
 
 
+@observe(name="llm_streaming", as_type="span")
 async def stream_generator(
     conversation_id: str,
     messages: List[Dict[str, Any]],
@@ -38,6 +53,11 @@ async def stream_generator(
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Generate SSE events from LLM streaming response with tool orchestration.
+
+    Langfuse @observe() decorator automatically traces:
+    - Input: conversation_id, messages (truncated), request metadata
+    - Output: chunk_count, duration, completion_status
+    - Duration and errors
 
     Handles:
     - Tool schema fetching from MCP server
@@ -60,6 +80,19 @@ async def stream_generator(
     first_token_sent = False
     max_tool_iterations = 10
     assistant_response_content = []  # Accumulate assistant response for storage
+    chunk_count = 0  # Track number of chunks streamed
+
+    # Update observation metadata (decorator handles all tracing)
+    if LANGFUSE_AVAILABLE:
+        try:
+            langfuse_context.update_current_observation(
+                metadata={
+                    "conversation_id": conversation_id,
+                    "message_count": len(messages)
+                }
+            )
+        except Exception:
+            pass  # Fire-and-forget
 
     try:
         # Create clients
@@ -196,9 +229,10 @@ async def stream_generator(
                             )
                             first_token_sent = True
 
-                        # Accumulate assistant response content
+                        # Accumulate assistant response content and track chunks
                         if event.get("type") == "token":
                             assistant_response_content.append(event.get("content", ""))
+                            chunk_count += 1
 
                         # Yield SSE event
                         yield {
@@ -404,9 +438,10 @@ async def stream_generator(
                         if await request.is_disconnected():
                             break
 
-                        # Accumulate assistant response content
+                        # Accumulate assistant response content and track chunks
                         if event.get("type") == "token":
                             assistant_response_content.append(event.get("content", ""))
+                            chunk_count += 1
 
                         yield {
                             "event": "message",
@@ -485,6 +520,20 @@ async def stream_generator(
         }
 
     finally:
+        # Update observation output (decorator handles span end automatically)
+        if LANGFUSE_AVAILABLE:
+            try:
+                duration_ms = int((time.time() - start_time) * 1000)
+                langfuse_context.update_current_observation(
+                    output={
+                        "chunk_count": chunk_count,
+                        "duration_ms": duration_ms,
+                        "completion_status": "completed" if chunk_count > 0 else "failed"
+                    }
+                )
+            except Exception:
+                pass  # Fire-and-forget
+
         # Cleanup: Remove from active streams
         if conversation_id in active_streams:
             del active_streams[conversation_id]
@@ -515,9 +564,16 @@ async def stream_health():
 
 
 @router.get("/stream/{conversation_id}")
+@observe(name="stream_request", as_type="trace")
 async def stream_response(conversation_id: str, request: Request):
     """
     Stream LLM response via Server-Sent Events (SSE).
+
+    Langfuse @observe() decorator automatically traces:
+    - Input: conversation_id, request metadata
+    - Output: EventSourceResponse (SSE stream)
+    - Duration, errors, and nested spans
+    - Session linking via conversation_id
 
     This endpoint establishes an SSE connection, loads conversation context from Redis,
     and streams tokens from the LLM in real-time. After streaming completes, stores
@@ -539,6 +595,17 @@ async def stream_response(conversation_id: str, request: Request):
         Completion event: {"type":"done","tokens_used":{"prompt":N,"completion":M}}
         Error event: {"type":"error","message":"error message","code":"ERROR_CODE"}
     """
+    # Update trace with session_id to link to chat_request trace (decorator handles trace creation)
+    if LANGFUSE_AVAILABLE:
+        try:
+            langfuse_context.update_current_trace(
+                session_id=conversation_id,
+                user_id="system",  # Will update with actual user_id once loaded from state
+                metadata={"endpoint": "/stream"}
+            )
+        except Exception:
+            pass  # Fire-and-forget
+
     # Check concurrent stream limit
     if len(active_streams) >= MAX_CONCURRENT_STREAMS:
         logger.warning(
@@ -573,6 +640,17 @@ async def stream_response(conversation_id: str, request: Request):
 
         # Get user_id for this conversation (needed for memory tool calls)
         user_id = await state_manager.get_user_id_for_conversation(conversation_id)
+
+        # Update trace with actual user_id (decorator handles trace management)
+        if LANGFUSE_AVAILABLE and user_id:
+            try:
+                langfuse_context.update_current_trace(user_id=user_id)
+                logger.info(
+                    f"[LANGFUSE] Updated stream trace with user_id: {user_id}",
+                    extra={"conversation_id": conversation_id, "user_id": user_id}
+                )
+            except Exception:
+                pass  # Fire-and-forget
 
         # Get platform from session if available (for platform-specific formatting)
         platform = "api"  # Default platform
@@ -660,6 +738,7 @@ async def stream_response(conversation_id: str, request: Request):
         )
 
     except StateError as e:
+        # Decorator automatically captures exceptions, just log it
         logger.error(
             "State management error in stream endpoint",
             extra={

@@ -6,6 +6,7 @@ of sensitive values for the Backend API service.
 """
 
 import os
+from functools import lru_cache
 from typing import List, Optional
 
 
@@ -77,6 +78,7 @@ SENSITIVE_VARS = [
     "TELEGRAM_BOT_TOKEN",
     "BRAVE_SEARCH_API_KEY",
     "STOCK_API_KEY",
+    "LANGFUSE_SECRET_KEY",
 ]
 
 
@@ -165,6 +167,62 @@ def get_config() -> dict:
         Dictionary of validated configuration values
     """
     return validate_environment()
+
+
+# Langfuse Configuration Functions (Story 8.1)
+
+@lru_cache(maxsize=1)
+def get_langfuse_public_key() -> Optional[str]:
+    """Get Langfuse public key from environment.
+
+    Cached for performance optimization.
+
+    Returns:
+        Public key if set, None otherwise.
+    """
+    key = get_env_var("LANGFUSE_PUBLIC_KEY")
+    if key and key != "REPLACE_ME":
+        return key
+    return None
+
+
+@lru_cache(maxsize=1)
+def get_langfuse_secret_key() -> Optional[str]:
+    """Get Langfuse secret key from environment.
+
+    Cached for performance optimization.
+
+    Returns:
+        Secret key if set, None otherwise.
+    """
+    key = get_env_var("LANGFUSE_SECRET_KEY")
+    if key and key != "REPLACE_ME":
+        return key
+    return None
+
+
+@lru_cache(maxsize=1)
+def get_langfuse_host() -> str:
+    """Get Langfuse host URL from environment.
+
+    Cached for performance optimization.
+
+    Returns:
+        Host URL (defaults to Langfuse Cloud US region).
+    """
+    return get_env_var("LANGFUSE_HOST", default="https://us.cloud.langfuse.com")
+
+
+@lru_cache(maxsize=1)
+def is_langfuse_enabled() -> bool:
+    """Check if Langfuse is enabled (both keys configured).
+
+    Cached for performance optimization.
+
+    Returns:
+        True if both public and secret keys are set, False otherwise.
+    """
+    return get_langfuse_public_key() is not None and get_langfuse_secret_key() is not None
 
 
 # Validate on import (can be disabled for testing)

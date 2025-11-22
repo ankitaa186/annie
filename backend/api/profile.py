@@ -25,6 +25,16 @@ from api.config import get_config
 from api.logging import get_logger
 from api.mcp_client import MCPClient
 
+try:
+    from langfuse.decorators import observe
+    LANGFUSE_AVAILABLE = True
+except ImportError:
+    LANGFUSE_AVAILABLE = False
+    def observe(**kwargs):
+        def decorator(func):
+            return func
+        return decorator
+
 logger = get_logger(__name__)
 
 
@@ -95,9 +105,12 @@ class ProfileManager:
             await self.redis_client.close()
             logger.debug("Closed Redis connection")
 
+    @observe(name="profile_cache_load", as_type="span")
     async def load_profile_from_cache(self, user_id: str) -> Dict[str, Any]:
         """
         Load user profile from Redis cache (non-blocking, <10ms).
+
+        Note: Called from within chat request - should nest as span.
 
         Returns cached profile if available, empty profile if not cached.
         Never blocks - always returns immediately.
@@ -201,9 +214,12 @@ class ProfileManager:
                 "background": {}
             }
 
+    @observe(name="profile_refresh", as_type="trace")
     async def refresh_profile_background(self, user_id: str) -> None:
         """
         Refresh profile from agentic-memories and update Redis cache.
+
+        Note: Runs as background task (separate trace). Link to user via metadata.
 
         This is designed to run as a background task - non-blocking.
         Calls get_user_profile MCP tool, updates cache with TTL=900s,

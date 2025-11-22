@@ -1,0 +1,210 @@
+"""
+Tracing utilities for Langfuse integration.
+
+Provides request-scoped trace context using contextvars for async-safe operation.
+This ensures trace context is isolated between concurrent requests without manual
+context passing.
+"""
+from contextvars import ContextVar
+from typing import Optional, Dict, Any
+
+from api.logging import get_logger
+
+# Try to import Langfuse decorators for compatibility with @observe()
+try:
+    from langfuse.decorators import langfuse_context
+    LANGFUSE_AVAILABLE = True
+except ImportError:
+    LANGFUSE_AVAILABLE = False
+    langfuse_context = None
+
+logger = get_logger(__name__)
+
+# Request-scoped context variables (async-safe)
+_current_trace: ContextVar[Optional[Any]] = ContextVar('current_trace', default=None)
+# Stack of spans to handle nesting safely (immutable tuple)
+_span_stack: ContextVar[tuple] = ContextVar('span_stack', default=())
+
+
+def start_trace(name: str, user_id: str, metadata: Optional[Dict[str, Any]] = None, session_id: Optional[str] = None) -> Optional[Any]:
+    """Start a new trace for a request.
+
+    This creates a new trace context that will be isolated to the current
+    async context (request). All spans created within this request will
+    automatically be associated with this trace.
+
+    Args:
+        name: Name of the trace (e.g., "chat_request", "memory_storage")
+        user_id: User ID for grouping traces
+        metadata: Additional metadata to attach to the trace
+        session_id: Optional session ID to link related traces (e.g., conversation_id)
+
+    Returns:
+        Trace object if Langfuse is enabled, None otherwise.
+    """
+    from api.observability.langfuse_client import get_langfuse_client
+
+    client = get_langfuse_client()
+    if not client:
+        logger.debug("Langfuse client not available, skipping trace start")
+        return None
+
+    try:
+        trace = client.trace(name=name, user_id=user_id, session_id=session_id, metadata=metadata or {})
+        _current_trace.set(trace)
+        # Reset span stack for new trace
+        _span_stack.set(())
+        logger.info(
+            f"[LANGFUSE] Started trace: {name}",
+            extra={
+                "trace_name": name,
+                "user_id": user_id,
+                "session_id": session_id,
+                "trace_id": trace.id if hasattr(trace, 'id') else None,
+                "metadata": metadata
+            }
+        )
+        return trace
+    except Exception as e:
+        # Fire-and-forget: log warning but don't crash
+        logger.warning(
+            f"[LANGFUSE] Failed to start trace: {name}",
+            extra={"trace_name": name, "error": str(e), "error_type": type(e).__name__}
+        )
+        return None
+
+
+def get_current_trace() -> Optional[Any]:
+    """Get the current trace from context.
+
+    This function supports both:
+    1. Manually created traces via start_trace() (stored in ContextVar)
+    2. Decorator-created traces via @observe() (from langfuse_context)
+
+    Returns:
+        Current trace object or None if no trace is active.
+    """
+    # First, check if there's a manually created trace in the ContextVar
+    trace = _current_trace.get()
+    if trace:
+        return trace
+
+    # If not, try to get the current observation from Langfuse decorator context
+    # This allows LLM generations to attach to traces created by @observe()
+    if LANGFUSE_AVAILABLE and langfuse_context:
+        try:
+            # Get the current observation (trace or span) from decorator context
+            observation = langfuse_context.get_current_observation()
+            if observation:
+                return observation
+        except Exception as e:
+            logger.debug(f"Could not get trace from langfuse_context: {e}")
+
+    return None
+
+
+def start_span(name: str, metadata: Optional[Dict[str, Any]] = None, input: Optional[Dict[str, Any]] = None) -> Optional[Any]:
+    """Start a new span within the current trace or parent span.
+
+    Spans automatically nest under the current trace. If a parent span exists
+    in the context, the new span will be created as a child of that span.
+
+    Args:
+        name: Name of the span (e.g., "llm_call", "tool_execution", "memory_retrieval")
+        metadata: Additional metadata to attach to the span
+        input: Input data for the span (will be recorded in Langfuse)
+
+    Returns:
+        Span object if trace exists, None otherwise.
+    """
+    trace = get_current_trace()
+    if not trace:
+        logger.debug("No active trace, skipping span start")
+        return None
+
+    try:
+        # Get current stack
+        stack = _span_stack.get()
+        parent_span = stack[-1] if stack else None
+
+        # Create span as child of parent span, or directly under trace
+        if parent_span:
+            span = parent_span.span(name=name, metadata=metadata or {}, input=input)
+            logger.debug(
+                "Started nested span",
+                extra={
+                    "span_name": name,
+                    "parent_span_id": parent_span.id if hasattr(parent_span, 'id') else None
+                }
+            )
+        else:
+            span = trace.span(name=name, metadata=metadata or {}, input=input)
+            logger.debug("Started top-level span", extra={"span_name": name})
+
+        # Push new span to stack (immutable update)
+        _span_stack.set(stack + (span,))
+
+        return span
+    except Exception as e:
+        # Fire-and-forget: log warning but don't crash
+        logger.warning(
+            "Failed to start span",
+            extra={"span_name": name, "error": str(e)}
+        )
+        return None
+
+
+def end_span(output: Optional[Dict[str, Any]] = None, level: str = "DEFAULT") -> None:
+    """End the current span.
+
+    Args:
+        output: Output data from the span (will be recorded in Langfuse)
+        level: Log level (DEFAULT, WARNING, ERROR)
+    """
+    stack = _span_stack.get()
+    if stack:
+        span = stack[-1]
+        try:
+            span.end(output=output, level=level)
+            logger.debug("Ended span", extra={"level": level})
+            # Pop from stack (immutable update)
+            _span_stack.set(stack[:-1])
+        except Exception as e:
+            # Fire-and-forget: log warning but don't crash
+            logger.warning("Failed to end span", extra={"error": str(e)})
+
+
+def trace_error(exception: Exception, metadata: Optional[Dict[str, Any]] = None) -> None:
+    """Record an error event in the current trace.
+
+    This creates an error event associated with the current trace, making it
+    visible in Langfuse for debugging and monitoring.
+
+    Args:
+        exception: The exception that occurred
+        metadata: Additional context about the error
+    """
+    trace = get_current_trace()
+    if not trace:
+        return
+
+    try:
+        trace.event(
+            name="error",
+            input={
+                "exception_type": type(exception).__name__,
+                "message": str(exception)
+            },
+            metadata=metadata or {},
+            level="ERROR"
+        )
+        logger.debug(
+            "Recorded error event in trace",
+            extra={
+                "exception_type": type(exception).__name__,
+                "message": str(exception)
+            }
+        )
+    except Exception as e:
+        # Fire-and-forget: log warning but don't crash
+        logger.warning("Failed to record error event", extra={"error": str(e)})
