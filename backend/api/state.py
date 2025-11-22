@@ -21,6 +21,16 @@ import redis.asyncio as redis
 from api.config import get_config
 from api.logging import get_logger
 
+try:
+    from langfuse.decorators import observe
+    LANGFUSE_AVAILABLE = True
+except ImportError:
+    LANGFUSE_AVAILABLE = False
+    def observe(**kwargs):
+        def decorator(func):
+            return func
+        return decorator
+
 logger = get_logger(__name__)
 
 
@@ -194,6 +204,7 @@ class StateManager:
                 original_error=e
             )
 
+    @observe(name="create_session", as_type="span")
     async def create_session(self, user_id: str, platform: str) -> Dict[str, Any]:
         """
         Create new session for user.
@@ -286,6 +297,7 @@ class StateManager:
             self._is_healthy = False
             return session
 
+    @observe(name="get_session", as_type="span")
     async def get_session(self, user_id: str) -> Optional[Dict[str, Any]]:
         """
         Retrieve session for user.
@@ -437,6 +449,7 @@ class StateManager:
 
             self._is_healthy = False
 
+    @observe(name="add_message", as_type="span")
     async def add_message(
         self,
         conversation_id: str,
@@ -596,6 +609,7 @@ class StateManager:
             self._is_healthy = False
             return []
 
+    @observe(name="build_llm_context", as_type="span")
     async def build_llm_context(
         self,
         conversation_id: str,

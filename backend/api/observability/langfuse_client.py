@@ -42,12 +42,17 @@ def get_langfuse_client() -> Optional[Any]:
 
             # Get environment for release tagging
             environment = os.getenv("ENVIRONMENT", "dev")
+            release = f"annie-{environment}"
+
+            # Set LANGFUSE_RELEASE env var for decorators if not set
+            if "LANGFUSE_RELEASE" not in os.environ:
+                os.environ["LANGFUSE_RELEASE"] = release
 
             _langfuse_client = Langfuse(
                 public_key=get_langfuse_public_key(),
                 secret_key=get_langfuse_secret_key(),
                 host=get_langfuse_host(),
-                release=f"annie-{environment}",  # Tag traces with release/environment
+                release=release,  # Tag traces with release/environment
                 flush_at=10,  # Batch size - send after 10 traces
                 flush_interval=1.0,  # Flush every second
                 enabled=True,  # Explicitly enable

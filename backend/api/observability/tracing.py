@@ -22,7 +22,8 @@ logger = get_logger(__name__)
 
 # Request-scoped context variables (async-safe)
 _current_trace: ContextVar[Optional[Any]] = ContextVar('current_trace', default=None)
-_current_span: ContextVar[Optional[Any]] = ContextVar('current_span', default=None)
+# Stack of spans to handle nesting safely (immutable tuple)
+_span_stack: ContextVar[tuple] = ContextVar('span_stack', default=())
 
 
 def start_trace(name: str, user_id: str, metadata: Optional[Dict[str, Any]] = None, session_id: Optional[str] = None) -> Optional[Any]:
@@ -51,6 +52,8 @@ def start_trace(name: str, user_id: str, metadata: Optional[Dict[str, Any]] = No
     try:
         trace = client.trace(name=name, user_id=user_id, session_id=session_id, metadata=metadata or {})
         _current_trace.set(trace)
+        # Reset span stack for new trace
+        _span_stack.set(())
         logger.info(
             f"[LANGFUSE] Started trace: {name}",
             extra={
@@ -120,8 +123,9 @@ def start_span(name: str, metadata: Optional[Dict[str, Any]] = None, input: Opti
         return None
 
     try:
-        # Get current parent span (if any) to create nested hierarchy
-        parent_span = _current_span.get()
+        # Get current stack
+        stack = _span_stack.get()
+        parent_span = stack[-1] if stack else None
 
         # Create span as child of parent span, or directly under trace
         if parent_span:
@@ -137,8 +141,8 @@ def start_span(name: str, metadata: Optional[Dict[str, Any]] = None, input: Opti
             span = trace.span(name=name, metadata=metadata or {}, input=input)
             logger.debug("Started top-level span", extra={"span_name": name})
 
-        # Set as current span for potential child spans
-        _current_span.set(span)
+        # Push new span to stack (immutable update)
+        _span_stack.set(stack + (span,))
 
         return span
     except Exception as e:
@@ -157,13 +161,14 @@ def end_span(output: Optional[Dict[str, Any]] = None, level: str = "DEFAULT") ->
         output: Output data from the span (will be recorded in Langfuse)
         level: Log level (DEFAULT, WARNING, ERROR)
     """
-    span = _current_span.get()
-    if span:
+    stack = _span_stack.get()
+    if stack:
+        span = stack[-1]
         try:
             span.end(output=output, level=level)
             logger.debug("Ended span", extra={"level": level})
-            # Clear the current span from context
-            _current_span.set(None)
+            # Pop from stack (immutable update)
+            _span_stack.set(stack[:-1])
         except Exception as e:
             # Fire-and-forget: log warning but don't crash
             logger.warning("Failed to end span", extra={"error": str(e)})

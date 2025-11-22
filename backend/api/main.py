@@ -178,12 +178,12 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 
-def check_mcp_server_health() -> str:
+async def check_mcp_server_health() -> str:
     """Check MCP server health via HTTP."""
     try:
-        with MCPClient() as client:
-            health = client.health_check()
-            if health.get("status") == "ok":
+        async with MCPClient() as client:
+            health = await client.client.get(f"{client.mcp_server_url}/health")
+            if health.status_code == 200 and health.json().get("status") == "ok":
                 return "ok"
             else:
                 return "degraded"
@@ -298,6 +298,13 @@ async def startup_event():
     logger.info(f"Log level: {config.get('LOG_LEVEL', 'INFO')}")
     logger.info(f"MCP Server URL: {config.get('MCP_SERVER_URL', 'not configured')}")
 
+    # Initialize Langfuse client to ensure environment variables are set for decorators
+    try:
+        from api.observability.langfuse_client import get_langfuse_client
+        get_langfuse_client()
+    except Exception as e:
+        logger.warning(f"Failed to initialize Langfuse on startup: {e}")
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -335,7 +342,7 @@ async def detailed_health_check() -> JSONResponse:
     """
     # Check all components
     components = {
-        "mcp_server": check_mcp_server_health(),
+        "mcp_server": await check_mcp_server_health(),
         "redis": check_redis_health(),
         "llm_api": check_llm_api_health(),
         "agentic_memories": check_agentic_memories_health(),
