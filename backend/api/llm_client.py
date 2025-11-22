@@ -12,6 +12,7 @@ import httpx
 from api.config import get_config
 from api.logging import get_logger
 from api.observability.tracing import get_current_trace
+from api.observability.cost import calculate_llm_cost
 
 logger = get_logger(__name__)
 
@@ -331,10 +332,12 @@ class LLMClient:
 
             duration_ms = int((time.time() - start_time) * 1000)
 
+            # Extract message and tool_calls from response (needed for tracing)
+            message = result.get("choices", [{}])[0].get("message", {})
+            tool_calls = message.get("tool_calls", [])
+
             # Debug: Log response structure to understand tool calling behavior
             if tools:
-                message = result.get("choices", [{}])[0].get("message", {})
-                tool_calls = message.get("tool_calls", [])
                 logger.debug(
                     "LLM response structure",
                     extra={
@@ -387,6 +390,14 @@ class LLMClient:
                     completion_tokens = usage.get("completion_tokens", 0)
                     total_tokens = usage.get("total_tokens", prompt_tokens + completion_tokens)
 
+                    # Calculate costs
+                    cost_details = calculate_llm_cost(
+                        provider=provider,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        sources_used=sources_used
+                    )
+
                     # Prepare prompt (truncate to 1000 chars)
                     prompt_text = json.dumps([m for m in messages if m.get("role") != "tool"])
                     truncated_prompt = self._truncate_text(prompt_text, 1000)
@@ -395,7 +406,7 @@ class LLMClient:
                     completion_text = message.get("content", "") if message.get("content") else json.dumps(tool_calls) if tool_calls else ""
                     truncated_completion = self._truncate_text(completion_text, 1000)
 
-                    # Create Langfuse generation (Langfuse will calculate costs automatically)
+                    # Create Langfuse generation with cost details
                     trace.generation(
                         name=f"llm_call_{provider}",
                         input=truncated_prompt,
@@ -413,7 +424,8 @@ class LLMClient:
                             "output": completion_tokens,
                             "total": total_tokens,
                             "unit": "TOKENS"
-                        }
+                        },
+                        usage_details=cost_details
                     )
 
                     logger.info(
@@ -810,13 +822,21 @@ class LLMClient:
                                             completion_tokens = usage.get("completion_tokens", token_count)
                                             total_tokens = prompt_tokens + completion_tokens
 
+                                            # Calculate costs
+                                            cost_details = calculate_llm_cost(
+                                                provider=provider,
+                                                prompt_tokens=prompt_tokens,
+                                                completion_tokens=completion_tokens,
+                                                sources_used=sources_used
+                                            )
+
                                             # Prepare prompt and completion (truncated)
                                             prompt_text = json.dumps([m for m in messages if m.get("role") != "tool"])
                                             truncated_prompt = self._truncate_text(prompt_text, 1000)
                                             full_completion = "".join(accumulated_content)
                                             truncated_completion = self._truncate_text(full_completion, 1000)
 
-                                            # Create Langfuse generation (Langfuse will calculate costs automatically)
+                                            # Create Langfuse generation with cost details
                                             trace.generation(
                                                 name=f"llm_call_{provider}_streaming",
                                                 input=truncated_prompt,
@@ -833,7 +853,8 @@ class LLMClient:
                                                     "output": completion_tokens,
                                                     "total": total_tokens,
                                                     "unit": "TOKENS"
-                                                }
+                                                },
+                                                usage_details=cost_details
                                             )
                                         except Exception as e:
                                             # Fire-and-forget: log but don't fail stream
