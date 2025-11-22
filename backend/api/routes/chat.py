@@ -20,6 +20,20 @@ from api.mcp_client import MCPClient, MCPClientError, MCPNetworkError, MCPToolEr
 from api.profile import ProfileManager
 from api.state import StateManager, StateError
 
+try:
+    from langfuse.decorators import observe, langfuse_context
+    LANGFUSE_AVAILABLE = True
+except ImportError:
+    LANGFUSE_AVAILABLE = False
+    def observe(**kwargs):
+        def decorator(func):
+            return func
+        return decorator
+    class langfuse_context:
+        @staticmethod
+        def update_current_trace(**kwargs):
+            pass
+
 logger = get_logger(__name__)
 
 # Farewell keywords for conversation end detection
@@ -235,9 +249,16 @@ class ChatResponse(BaseModel):
 
 
 @router.post("/chat", response_model=ChatResponse)
+@observe(name="chat_request", as_type="trace")
 async def create_chat(request: ChatRequest, background_tasks: BackgroundTasks):
     """
     Process incoming chat message and initiate streaming response.
+
+    Langfuse @observe() decorator automatically traces:
+    - Input: request (user_id, platform, message, context)
+    - Output: ChatResponse (conversation_id, stream_url)
+    - Duration, errors, and session linking
+    - Nested spans for memory retrieval
 
     This endpoint receives a chat message, manages session state with Redis,
     and returns the streaming URL where the client can connect to receive
@@ -296,6 +317,22 @@ async def create_chat(request: ChatRequest, background_tasks: BackgroundTasks):
         }
     )
 
+    # Update trace metadata (decorator handles trace creation)
+    if LANGFUSE_AVAILABLE:
+        try:
+            langfuse_context.update_current_trace(
+                user_id=request.user_id,
+                metadata={
+                    "platform": request.platform,
+                    "message_length": len(request.message),
+                    "conversation_ending": conversation_is_ending,
+                    "needs_decision_support": needs_decision_support,
+                    "message": request.message[:100]  # First 100 chars for context
+                }
+            )
+        except Exception:
+            pass  # Fire-and-forget
+
     try:
         async with StateManager() as state:
             # Get or create session
@@ -323,6 +360,17 @@ async def create_chat(request: ChatRequest, background_tasks: BackgroundTasks):
                 )
 
             conversation_id = session["conversation_id"]
+
+            # Update trace with session_id to link with stream trace (decorator handles trace management)
+            if LANGFUSE_AVAILABLE:
+                try:
+                    langfuse_context.update_current_trace(session_id=conversation_id)
+                    logger.info(
+                        f"[LANGFUSE] Updated chat trace with session_id: {conversation_id}",
+                        extra={"conversation_id": conversation_id}
+                    )
+                except Exception:
+                    pass  # Fire-and-forget: ignore tracing failures
 
             # Store user message in conversation history
             user_message = {
@@ -531,6 +579,18 @@ async def create_chat(request: ChatRequest, background_tasks: BackgroundTasks):
                 }
             )
 
+            # Update trace with success status (decorator handles output automatically)
+            if LANGFUSE_AVAILABLE:
+                try:
+                    langfuse_context.update_current_trace(
+                        metadata={
+                            "response_status": "success",
+                            "conversation_id": conversation_id
+                        }
+                    )
+                except Exception:
+                    pass  # Fire-and-forget: ignore tracing failures
+
             return ChatResponse(
                 conversation_id=conversation_id,
                 status="streaming",
@@ -539,6 +599,7 @@ async def create_chat(request: ChatRequest, background_tasks: BackgroundTasks):
             )
 
     except StateError as e:
+        # Decorator automatically captures exceptions, just log it
         logger.error(
             "State management error",
             extra={
@@ -553,6 +614,7 @@ async def create_chat(request: ChatRequest, background_tasks: BackgroundTasks):
         )
 
     except Exception as e:
+        # Decorator automatically captures exceptions, just log it
         logger.error(
             "Unexpected error in chat endpoint",
             extra={

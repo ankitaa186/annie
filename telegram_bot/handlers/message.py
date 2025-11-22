@@ -132,6 +132,28 @@ async def stream_response_to_telegram(
         )
         raise  # Re-raise to be handled by caller
 
+    except StopAsyncIteration:
+        # Stream completed without yielding any tokens (empty response)
+        # This can happen if backend sends "done" event before any "token" events
+        logger.warning(
+            "Stream completed with no tokens (empty LLM response)",
+            extra={
+                "user_id": user_id,
+                "conversation_id": conversation_id,
+                "event": "empty_stream_response"
+            }
+        )
+
+        # Cancel typing indicator
+        typing_task.cancel()
+        try:
+            await typing_task
+        except asyncio.CancelledError:
+            pass
+
+        # Return 0 - no response sent (graceful handling, no error to user)
+        return 0
+
     # Continue streaming remaining chunks
     async for chunk in stream:
         response_buffer.append(chunk)

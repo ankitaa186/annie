@@ -18,6 +18,16 @@ from api.logging import get_logger
 from api.memory_client import MemoryClient, MemoryNetworkError, MemoryAPIError
 from api.state import StateManager
 
+try:
+    from langfuse.decorators import observe
+    LANGFUSE_AVAILABLE = True
+except ImportError:
+    LANGFUSE_AVAILABLE = False
+    def observe(**kwargs):
+        def decorator(func):
+            return func
+        return decorator
+
 logger = get_logger(__name__)
 
 
@@ -47,6 +57,7 @@ class MemoryManager:
 
         logger.info("Memory Manager initialized")
 
+    @observe(name="memory_storage", as_type="trace")
     async def store_conversation_memory(
         self,
         user_id: str,
@@ -56,6 +67,8 @@ class MemoryManager:
     ) -> bool:
         """
         Store conversation turn in agentic-memories service.
+
+        Note: Runs as background task (separate trace). Link to conversation via metadata.
 
         Typically receives only the most recent turn (2 messages: user + assistant)
         for incremental memory storage. The service will automatically extract
@@ -356,9 +369,15 @@ class MemoryManager:
                 # Continue running even if one iteration fails
                 await asyncio.sleep(self.RETRY_INTERVAL)
 
+    @observe(name="format_memories", as_type="span")
     async def format_memories_for_llm(self, memories: List[Dict[str, Any]]) -> str:
         """
         Format retrieved memories into LLM-friendly context string.
+
+        Langfuse @observe() decorator automatically traces:
+        - Input: memory count
+        - Output: formatted context length, token estimate
+        - Duration
 
         This method transforms memory objects from agentic-memories into a readable
         context string that can be injected into the LLM system prompt. The format

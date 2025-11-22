@@ -11,6 +11,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional, Union
 import httpx
 from api.config import get_config
 from api.logging import get_logger
+from api.observability.tracing import get_current_trace
 
 logger = get_logger(__name__)
 
@@ -218,6 +219,21 @@ class LLMClient:
             return "grok-4"
         return None
 
+    def _truncate_text(self, text: str, max_length: int = 1000) -> str:
+        """
+        Truncate text to maximum length for Langfuse tracing.
+
+        Args:
+            text: Text to truncate
+            max_length: Maximum length (default: 1000 as per Epic requirement)
+
+        Returns:
+            Truncated text
+        """
+        if len(text) <= max_length:
+            return text
+        return text[:max_length] + "..." + f" (truncated from {len(text)} chars)"
+
     async def _call_provider(
         self,
         provider: str,
@@ -361,6 +377,61 @@ class LLMClient:
                     "model": payload["model"]
                 }
             )
+
+            # Track LLM generation in Langfuse (fire-and-forget)
+            trace = get_current_trace()
+            if trace:
+                try:
+                    # Extract token usage
+                    prompt_tokens = usage.get("prompt_tokens", 0)
+                    completion_tokens = usage.get("completion_tokens", 0)
+                    total_tokens = usage.get("total_tokens", prompt_tokens + completion_tokens)
+
+                    # Prepare prompt (truncate to 1000 chars)
+                    prompt_text = json.dumps([m for m in messages if m.get("role") != "tool"])
+                    truncated_prompt = self._truncate_text(prompt_text, 1000)
+
+                    # Prepare completion (truncate to 1000 chars)
+                    completion_text = message.get("content", "") if message.get("content") else json.dumps(tool_calls) if tool_calls else ""
+                    truncated_completion = self._truncate_text(completion_text, 1000)
+
+                    # Create Langfuse generation (Langfuse will calculate costs automatically)
+                    trace.generation(
+                        name=f"llm_call_{provider}",
+                        input=truncated_prompt,
+                        output=truncated_completion,
+                        model=payload["model"],
+                        metadata={
+                            "provider": provider,
+                            "duration_ms": duration_ms,
+                            "sources_used": sources_used if provider == "grok-4" else None,
+                            "has_tool_calls": bool(tool_calls),
+                            "tool_count": len(tool_calls) if tool_calls else 0
+                        },
+                        usage={
+                            "input": prompt_tokens,
+                            "output": completion_tokens,
+                            "total": total_tokens,
+                            "unit": "TOKENS"
+                        }
+                    )
+
+                    logger.info(
+                        f"[LANGFUSE] Created LLM generation: {provider}",
+                        extra={
+                            "provider": provider,
+                            "model": payload["model"],
+                            "prompt_tokens": prompt_tokens,
+                            "completion_tokens": completion_tokens,
+                            "duration_ms": duration_ms
+                        }
+                    )
+                except Exception as e:
+                    # Fire-and-forget: log but don't fail request
+                    logger.warning(
+                        f"[LANGFUSE] Failed to track LLM generation: {str(e)}",
+                        extra={"provider": provider, "error_type": type(e).__name__}
+                    )
 
             return result
 
@@ -640,6 +711,10 @@ class LLMClient:
                 first_token = True
                 first_token_time = None
                 token_count = 0
+                accumulated_content = []  # Accumulate content for Langfuse
+
+                # Get current trace for Langfuse generation tracking (fire-and-forget)
+                trace = get_current_trace()
 
                 # Parse SSE stream
                 async for line in response.aiter_lines():
@@ -679,6 +754,7 @@ class LLMClient:
                                         first_token = False
 
                                     token_count += 1
+                                    accumulated_content.append(content)  # Track for Langfuse
 
                                     # Yield token in SSE format
                                     yield {
@@ -725,6 +801,46 @@ class LLMClient:
                                             "finish_reason": finish_reason
                                         }
                                     )
+
+                                    # Track LLM generation in Langfuse for streaming (fire-and-forget)
+                                    if trace:
+                                        try:
+                                            # Extract token usage
+                                            prompt_tokens = usage.get("prompt_tokens", 0)
+                                            completion_tokens = usage.get("completion_tokens", token_count)
+                                            total_tokens = prompt_tokens + completion_tokens
+
+                                            # Prepare prompt and completion (truncated)
+                                            prompt_text = json.dumps([m for m in messages if m.get("role") != "tool"])
+                                            truncated_prompt = self._truncate_text(prompt_text, 1000)
+                                            full_completion = "".join(accumulated_content)
+                                            truncated_completion = self._truncate_text(full_completion, 1000)
+
+                                            # Create Langfuse generation (Langfuse will calculate costs automatically)
+                                            trace.generation(
+                                                name=f"llm_call_{provider}_streaming",
+                                                input=truncated_prompt,
+                                                output=truncated_completion,
+                                                model=payload["model"],
+                                                metadata={
+                                                    "provider": provider,
+                                                    "duration_ms": duration_ms,
+                                                    "sources_used": sources_used if provider == "grok-4" else None,
+                                                    "streaming": True
+                                                },
+                                                usage={
+                                                    "input": prompt_tokens,
+                                                    "output": completion_tokens,
+                                                    "total": total_tokens,
+                                                    "unit": "TOKENS"
+                                                }
+                                            )
+                                        except Exception as e:
+                                            # Fire-and-forget: log but don't fail stream
+                                            logger.warning(
+                                                f"Failed to track streaming LLM generation in Langfuse: {str(e)}",
+                                                extra={"provider": provider}
+                                            )
 
                                     # Yield completion event
                                     yield {

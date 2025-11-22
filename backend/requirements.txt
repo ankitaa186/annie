@@ -23,3 +23,6 @@ pytz>=2025.2
 
 # Debugging (dev environment only)
 debugpy>=1.8.0
+
+# Observability - LLM tracing (Story 8.1)
+langfuse==2.36.0

@@ -251,6 +251,45 @@ def check_agentic_memories_health() -> str:
     return "ok"
 
 
+def check_langfuse_health() -> Dict[str, Any]:
+    """Check Langfuse observability status.
+
+    Returns:
+        Dictionary with Langfuse status including enabled, available, and last_flush.
+    """
+    try:
+        from api.observability.langfuse_client import ping_langfuse
+        from api.config import is_langfuse_enabled
+
+        enabled = is_langfuse_enabled()
+        if not enabled:
+            return {
+                "enabled": False,
+                "client_available": False,
+                "last_flush": None
+            }
+
+        client_available = ping_langfuse()
+        return {
+            "enabled": True,
+            "client_available": client_available,
+            "last_flush": None  # TODO: Track actual last flush timestamp if needed
+        }
+    except Exception as e:
+        logger.warning(
+            "Langfuse health check failed",
+            extra={
+                "error": str(e),
+                "error_type": type(e).__name__
+            }
+        )
+        return {
+            "enabled": False,
+            "client_available": False,
+            "last_flush": None
+        }
+
+
 @app.on_event("startup")
 async def startup_event():
     """Application startup handler."""
@@ -299,7 +338,8 @@ async def detailed_health_check() -> JSONResponse:
         "mcp_server": check_mcp_server_health(),
         "redis": check_redis_health(),
         "llm_api": check_llm_api_health(),
-        "agentic_memories": check_agentic_memories_health()
+        "agentic_memories": check_agentic_memories_health(),
+        "langfuse": check_langfuse_health()
     }
 
     # Overall status is "ok" if at least the API itself is running

@@ -15,6 +15,18 @@ import httpx
 from api.config import get_config
 from api.logging import get_logger
 
+try:
+    from langfuse.decorators import observe
+    LANGFUSE_AVAILABLE = True
+except ImportError:
+    # Graceful degradation if langfuse not installed
+    LANGFUSE_AVAILABLE = False
+    def observe(**kwargs):
+        """No-op decorator when Langfuse not available"""
+        def decorator(func):
+            return func
+        return decorator
+
 logger = get_logger(__name__)
 
 
@@ -214,9 +226,15 @@ class MCPClient:
             )
             raise MCPClientError(f"Unexpected error: {type(e).__name__}")
 
+    @observe(name="mcp_tool_call", as_type="span")
     async def call_tool(self, tool_name: str, arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Execute an MCP tool via JSON-RPC 2.0.
+
+        Langfuse automatically traces this method with:
+        - Input: tool_name, arguments (truncated to 500 chars)
+        - Output: tool_result (truncated to 500 chars)
+        - Duration, errors, and metadata
 
         Args:
             tool_name: Name of the tool to execute
@@ -331,6 +349,7 @@ class MCPClient:
                 }
             )
 
+            # @observe() decorator automatically captures return value
             return tool_result
 
         except httpx.TimeoutException as e:
@@ -344,6 +363,7 @@ class MCPClient:
                     "timeout": self.timeout
                 }
             )
+            # @observe() decorator automatically captures and logs the exception
             raise MCPNetworkError(f"Tool '{tool_name}' timed out", e)
 
         except httpx.NetworkError as e:
@@ -357,9 +377,11 @@ class MCPClient:
                     "error": str(e)
                 }
             )
+            # @observe() decorator automatically captures and logs the exception
             raise MCPNetworkError(f"MCP server unreachable for tool '{tool_name}'", e)
 
         except (MCPClientError, MCPToolError):
+            # @observe() decorator automatically captures and logs the exception
             # Re-raise MCP errors as-is
             raise
 
@@ -375,4 +397,5 @@ class MCPClient:
                     "error": str(e)
                 }
             )
+            # @observe() decorator automatically captures and logs the exception
             raise MCPClientError(f"Unexpected error calling tool '{tool_name}': {type(e).__name__}")

@@ -26,6 +26,11 @@ services:
       - LLM_FAILOVER_TIMEOUT=${LLM_FAILOVER_TIMEOUT:-180}
       - LLM_STREAMING_TIMEOUT=${LLM_STREAMING_TIMEOUT:-180}
       - AGENTIC_MEMORIES_URL=${AGENTIC_MEMORIES_URL}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY}
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-https://us.cloud.langfuse.com}
+      - LANGFUSE_PROJECT_NAME=${LANGFUSE_PROJECT_NAME:-Annie}
+      - LANGFUSE_ENVIRONMENT=${LANGFUSE_ENVIRONMENT:-development}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

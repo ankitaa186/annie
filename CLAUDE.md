@@ -222,6 +222,66 @@ logger.info(
 )
 ```
 
+## LLM Observability with Langfuse
+
+Annie uses [Langfuse](https://langfuse.com) for comprehensive LLM observability and tracing.
+
+### Features
+- **Automatic Tracing**: All LLM calls, tool executions, and memory operations traced via `@observe()` decorators
+- **Cost Tracking**: Automatic cost calculation based on model usage and token counts
+- **Session Linking**: Chat and stream requests linked via `conversation_id` for unified trace views
+- **Performance Monitoring**: Track latency, token usage, and completion rates
+- **Fire-and-Forget**: Tracing failures never block application flow
+
+### Configuration
+Required environment variables in `.env`:
+```bash
+LANGFUSE_PUBLIC_KEY=pk-lf-...     # Your Langfuse public key
+LANGFUSE_SECRET_KEY=sk-lf-...     # Your Langfuse secret key
+LANGFUSE_HOST=https://us.cloud.langfuse.com  # Langfuse Cloud URL
+```
+
+### Architecture
+- **Trace Hierarchy**: `chat_request` → `stream_request` → `llm_streaming` → `mcp_tool_call`
+- **Session Grouping**: Traces linked by `session_id` (conversation_id) for end-to-end visibility
+- **Decorator Pattern**: Functions traced with `@observe(name="...", as_type="trace"|"span")`
+- **Automatic Capture**: Inputs, outputs, duration, errors, and metadata captured automatically
+
+### Traced Components
+1. **Chat Endpoint** (`backend/api/routes/chat.py`): Request handling, session management
+2. **Stream Endpoint** (`backend/api/routes/stream.py`): SSE streaming, tool orchestration
+3. **LLM Calls** (`backend/api/llm_client.py`): Token usage, model performance, costs
+4. **Tool Execution** (`backend/api/mcp_client.py`): MCP tool calls with arguments and results
+5. **Memory Storage** (`backend/api/memory.py`): Conversation memory operations
+6. **Profile Management** (`backend/api/profile.py`): User profile cache and refresh
+
+### Health Check
+Check Langfuse status via `/health/detailed` endpoint:
+```bash
+curl http://localhost:8000/health/detailed
+```
+
+Returns:
+```json
+{
+  "langfuse": {
+    "enabled": true,
+    "client_available": true,
+    "last_flush": null
+  }
+}
+```
+
+### Viewing Traces
+1. Navigate to https://us.cloud.langfuse.com
+2. Filter by:
+   - **Release**: `annie-dev` (or `annie-prod`)
+   - **Session ID**: Conversation ID for linked traces
+   - **User ID**: Telegram user ID
+3. View trace hierarchy with nested spans for complete request flow
+
+For detailed troubleshooting, see `LANGFUSE_DEBUG.md`.
+
 ## Development Workflow
 
 When implementing new features:
