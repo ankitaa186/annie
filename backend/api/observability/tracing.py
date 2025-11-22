@@ -10,6 +10,14 @@ from typing import Optional, Dict, Any
 
 from api.logging import get_logger
 
+# Try to import Langfuse decorators for compatibility with @observe()
+try:
+    from langfuse.decorators import langfuse_context
+    LANGFUSE_AVAILABLE = True
+except ImportError:
+    LANGFUSE_AVAILABLE = False
+    langfuse_context = None
+
 logger = get_logger(__name__)
 
 # Request-scoped context variables (async-safe)
@@ -66,10 +74,30 @@ def start_trace(name: str, user_id: str, metadata: Optional[Dict[str, Any]] = No
 def get_current_trace() -> Optional[Any]:
     """Get the current trace from context.
 
+    This function supports both:
+    1. Manually created traces via start_trace() (stored in ContextVar)
+    2. Decorator-created traces via @observe() (from langfuse_context)
+
     Returns:
         Current trace object or None if no trace is active.
     """
-    return _current_trace.get()
+    # First, check if there's a manually created trace in the ContextVar
+    trace = _current_trace.get()
+    if trace:
+        return trace
+
+    # If not, try to get the current observation from Langfuse decorator context
+    # This allows LLM generations to attach to traces created by @observe()
+    if LANGFUSE_AVAILABLE and langfuse_context:
+        try:
+            # Get the current observation (trace or span) from decorator context
+            observation = langfuse_context.get_current_observation()
+            if observation:
+                return observation
+        except Exception as e:
+            logger.debug(f"Could not get trace from langfuse_context: {e}")
+
+    return None
 
 
 def start_span(name: str, metadata: Optional[Dict[str, Any]] = None, input: Optional[Dict[str, Any]] = None) -> Optional[Any]:

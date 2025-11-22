@@ -16,7 +16,7 @@ from api.config import get_config
 from api.logging import get_logger
 
 try:
-    from langfuse.decorators import observe
+    from langfuse.decorators import observe, langfuse_context
     LANGFUSE_AVAILABLE = True
 except ImportError:
     # Graceful degradation if langfuse not installed
@@ -26,6 +26,10 @@ except ImportError:
         def decorator(func):
             return func
         return decorator
+    class langfuse_context:
+        @staticmethod
+        def update_current_observation(**kwargs):
+            pass
 
 logger = get_logger(__name__)
 
@@ -278,6 +282,19 @@ class MCPClient:
                 }
             )
 
+            # Update Langfuse observation with metadata (decorator creates span automatically)
+            if LANGFUSE_AVAILABLE:
+                try:
+                    langfuse_context.update_current_observation(
+                        metadata={
+                            "tool_name": tool_name,
+                            "request_id": request_id,
+                            "arguments": str(arguments)[:500]  # Truncate to 500 chars
+                        }
+                    )
+                except Exception:
+                    pass  # Fire-and-forget
+
             response = await self.client.post(
                 url,
                 json=json_rpc_request,
@@ -348,6 +365,26 @@ class MCPClient:
                     "success": True
                 }
             )
+
+            # Update Langfuse observation with output (decorator captures return automatically)
+            if LANGFUSE_AVAILABLE:
+                try:
+                    langfuse_context.update_current_observation(
+                        output={
+                            "tool_result": str(tool_result)[:500],  # Truncate to 500 chars
+                            "duration_ms": duration_ms,
+                            "result_size": len(str(tool_result))
+                        }
+                    )
+                    logger.info(
+                        f"[LANGFUSE] Updated MCP tool call span: {tool_name}",
+                        extra={
+                            "tool_name": tool_name,
+                            "duration_ms": duration_ms
+                        }
+                    )
+                except Exception as e:
+                    logger.debug(f"[LANGFUSE] Failed to update tool span: {e}")
 
             # @observe() decorator automatically captures return value
             return tool_result
