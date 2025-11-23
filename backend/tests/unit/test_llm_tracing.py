@@ -56,6 +56,9 @@ class TestLLMGenerationTracing:
 
             client = LLMClient()
             client.client = mock_client_instance
+            # Mock provider availability to allow chatgpt-5 calls
+            client.providers_available["chatgpt-5"] = True
+            client.chatgpt_api_key = "test_key"
 
             # Call provider
             await client._call_provider("chatgpt-5", [{"role": "user", "content": "Test"}])
@@ -103,6 +106,9 @@ class TestLLMGenerationTracing:
 
             client = LLMClient()
             client.client = mock_client_instance
+            # Mock provider availability to allow chatgpt-5 calls
+            client.providers_available["chatgpt-5"] = True
+            client.chatgpt_api_key = "test_key"
 
             await client._call_provider("chatgpt-5", [{"role": "user", "content": long_message}])
 
@@ -145,6 +151,9 @@ class TestLLMGenerationTracing:
 
             client = LLMClient()
             client.client = mock_client_instance
+            # Mock provider availability to allow chatgpt-5 calls
+            client.providers_available["chatgpt-5"] = True
+            client.chatgpt_api_key = "test_key"
 
             await client._call_provider("chatgpt-5", [{"role": "user", "content": "Test"}])
 
@@ -180,6 +189,9 @@ class TestLLMGenerationTracing:
 
             client = LLMClient()
             client.client = mock_client_instance
+            # Mock provider availability to allow chatgpt-5 calls
+            client.providers_available["chatgpt-5"] = True
+            client.chatgpt_api_key = "test_key"
 
             # Call should succeed despite tracing failure
             result = await client._call_provider("chatgpt-5", [{"role": "user", "content": "Test"}])
