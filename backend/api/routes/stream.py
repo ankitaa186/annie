@@ -234,65 +234,69 @@ async def stream_generator(
                             assistant_response_content.append(event.get("content", ""))
                             chunk_count += 1
 
-                        # Yield SSE event
+                        # If error or completion, handle Redis save BEFORE yielding done event
+                        # This prevents SSE framework cleanup from cancelling the Redis operation
+                        if event.get("type") == "done":
+                            duration_ms = int((time.time() - start_time) * 1000)
+                            logger.info(
+                                "Stream completed successfully",
+                                extra={
+                                    "conversation_id": conversation_id,
+                                    "duration_ms": duration_ms,
+                                    "tool_calls": tool_call_count,
+                                    "tokens": event.get("tokens_used", {})
+                                }
+                            )
+
+                            # Store assistant response in Redis BEFORE yielding done event
+                            # This prevents cancellation by SSE framework's cancel_on_finish task
+                            if state_manager and assistant_response_content:
+                                # Check if client disconnected before saving
+                                if await request.is_disconnected():
+                                    logger.info(
+                                        "Client disconnected, skipping Redis save",
+                                        extra={"conversation_id": conversation_id}
+                                    )
+                                else:
+                                    full_response = "".join(assistant_response_content)
+                                    assistant_message = {
+                                        "role": "assistant",
+                                        "content": full_response
+                                    }
+                                    try:
+                                        await state_manager.add_message(conversation_id, assistant_message)
+                                        logger.info(
+                                            "Assistant response stored in Redis",
+                                            extra={
+                                                "conversation_id": conversation_id,
+                                                "response_length": len(full_response)
+                                            }
+                                        )
+                                    except asyncio.CancelledError:
+                                        # Shouldn't happen now since we save before yielding, but handle gracefully
+                                        logger.warning(
+                                            "Redis save cancelled (unexpected - should not occur)",
+                                            extra={"conversation_id": conversation_id}
+                                        )
+                                        raise  # Re-raise to allow proper cancellation
+                                    except StateError as e:
+                                        logger.error(
+                                            "Failed to store assistant response",
+                                            extra={
+                                                "conversation_id": conversation_id,
+                                                "error": str(e)
+                                            },
+                                            exc_info=True
+                                        )
+
+                        # Yield SSE event (after Redis save for done events)
                         yield {
                             "event": "message",
                             "data": json.dumps(event)
                         }
 
-                        # If error or completion, stop streaming
+                        # If error or completion, stop streaming after yielding
                         if event.get("type") in ["error", "done"]:
-                            if event.get("type") == "done":
-                                duration_ms = int((time.time() - start_time) * 1000)
-                                logger.info(
-                                    "Stream completed successfully",
-                                    extra={
-                                        "conversation_id": conversation_id,
-                                        "duration_ms": duration_ms,
-                                        "tool_calls": tool_call_count,
-                                        "tokens": event.get("tokens_used", {})
-                                    }
-                                )
-
-                                # Store assistant response in Redis (only if client is still connected)
-                                if state_manager and assistant_response_content:
-                                    # Check if client disconnected before saving
-                                    if await request.is_disconnected():
-                                        logger.info(
-                                            "Client disconnected, skipping Redis save",
-                                            extra={"conversation_id": conversation_id}
-                                        )
-                                    else:
-                                        full_response = "".join(assistant_response_content)
-                                        assistant_message = {
-                                            "role": "assistant",
-                                            "content": full_response
-                                        }
-                                        try:
-                                            await state_manager.add_message(conversation_id, assistant_message)
-                                            logger.info(
-                                                "Assistant response stored in Redis",
-                                                extra={
-                                                    "conversation_id": conversation_id,
-                                                    "response_length": len(full_response)
-                                                }
-                                            )
-                                        except asyncio.CancelledError:
-                                            # Client disconnected during save - this is normal
-                                            logger.info(
-                                                "Client disconnected during Redis save",
-                                                extra={"conversation_id": conversation_id}
-                                            )
-                                            raise  # Re-raise to allow proper cancellation
-                                        except StateError as e:
-                                            logger.error(
-                                                "Failed to store assistant response",
-                                                extra={
-                                                    "conversation_id": conversation_id,
-                                                    "error": str(e)
-                                                },
-                                                exc_info=True
-                                            )
                             break
 
                     # Exit tool orchestration loop
@@ -457,38 +461,47 @@ async def stream_generator(
                             assistant_response_content.append(event.get("content", ""))
                             chunk_count += 1
 
+                        # Handle Redis save BEFORE yielding done event (prevents cancellation)
+                        if event.get("type") == "done":
+                            # Store assistant response in Redis before yielding
+                            if state_manager and assistant_response_content:
+                                full_response = "".join(assistant_response_content)
+                                assistant_message = {
+                                    "role": "assistant",
+                                    "content": full_response
+                                }
+                                try:
+                                    await state_manager.add_message(conversation_id, assistant_message)
+                                    logger.info(
+                                        "Assistant response stored in Redis (max iterations)",
+                                        extra={
+                                            "conversation_id": conversation_id,
+                                            "response_length": len(full_response)
+                                        }
+                                    )
+                                except asyncio.CancelledError:
+                                    # Shouldn't happen now since we save before yielding
+                                    logger.warning(
+                                        "Redis save cancelled (unexpected - max iterations)",
+                                        extra={"conversation_id": conversation_id}
+                                    )
+                                    raise
+                                except StateError as e:
+                                    logger.error(
+                                        "Failed to store assistant response (max iterations)",
+                                        extra={
+                                            "conversation_id": conversation_id,
+                                            "error": str(e)
+                                        },
+                                        exc_info=True
+                                    )
+
                         yield {
                             "event": "message",
                             "data": json.dumps(event)
                         }
 
                         if event.get("type") in ["error", "done"]:
-                            if event.get("type") == "done":
-                                # Store assistant response in Redis
-                                if state_manager and assistant_response_content:
-                                    full_response = "".join(assistant_response_content)
-                                    assistant_message = {
-                                        "role": "assistant",
-                                        "content": full_response
-                                    }
-                                    try:
-                                        await state_manager.add_message(conversation_id, assistant_message)
-                                        logger.info(
-                                            "Assistant response stored in Redis (max iterations)",
-                                            extra={
-                                                "conversation_id": conversation_id,
-                                                "response_length": len(full_response)
-                                            }
-                                        )
-                                    except StateError as e:
-                                        logger.error(
-                                            "Failed to store assistant response (max iterations)",
-                                            extra={
-                                                "conversation_id": conversation_id,
-                                                "error": str(e)
-                                            },
-                                            exc_info=True
-                                        )
                             break
                     break
 
