@@ -254,31 +254,45 @@ async def stream_generator(
                                     }
                                 )
 
-                                # Store assistant response in Redis
+                                # Store assistant response in Redis (only if client is still connected)
                                 if state_manager and assistant_response_content:
-                                    full_response = "".join(assistant_response_content)
-                                    assistant_message = {
-                                        "role": "assistant",
-                                        "content": full_response
-                                    }
-                                    try:
-                                        await state_manager.add_message(conversation_id, assistant_message)
+                                    # Check if client disconnected before saving
+                                    if await request.is_disconnected():
                                         logger.info(
-                                            "Assistant response stored in Redis",
-                                            extra={
-                                                "conversation_id": conversation_id,
-                                                "response_length": len(full_response)
-                                            }
+                                            "Client disconnected, skipping Redis save",
+                                            extra={"conversation_id": conversation_id}
                                         )
-                                    except StateError as e:
-                                        logger.error(
-                                            "Failed to store assistant response",
-                                            extra={
-                                                "conversation_id": conversation_id,
-                                                "error": str(e)
-                                            },
-                                            exc_info=True
-                                        )
+                                    else:
+                                        full_response = "".join(assistant_response_content)
+                                        assistant_message = {
+                                            "role": "assistant",
+                                            "content": full_response
+                                        }
+                                        try:
+                                            await state_manager.add_message(conversation_id, assistant_message)
+                                            logger.info(
+                                                "Assistant response stored in Redis",
+                                                extra={
+                                                    "conversation_id": conversation_id,
+                                                    "response_length": len(full_response)
+                                                }
+                                            )
+                                        except asyncio.CancelledError:
+                                            # Client disconnected during save - this is normal
+                                            logger.info(
+                                                "Client disconnected during Redis save",
+                                                extra={"conversation_id": conversation_id}
+                                            )
+                                            raise  # Re-raise to allow proper cancellation
+                                        except StateError as e:
+                                            logger.error(
+                                                "Failed to store assistant response",
+                                                extra={
+                                                    "conversation_id": conversation_id,
+                                                    "error": str(e)
+                                                },
+                                                exc_info=True
+                                            )
                             break
 
                     # Exit tool orchestration loop
