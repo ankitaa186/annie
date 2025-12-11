@@ -10,6 +10,7 @@ Redis Key Patterns:
 - conversation_mapping:{conversation_id} -> user_id (String, TTL: 30 min) - Reverse lookup for memory tools
 """
 
+import asyncio
 import json
 import time
 import uuid
@@ -17,6 +18,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import redis.asyncio as redis
+from redis import exceptions as redis_exceptions
 
 from api.config import get_config
 from api.logging import get_logger
@@ -169,7 +171,7 @@ class StateManager:
             self._is_healthy = True
             return True
 
-        except redis.exceptions.ConnectionError as e:
+        except redis_exceptions.ConnectionError as e:
             duration_ms = int((time.time() - start_time) * 1000)
 
             logger.error(
@@ -281,7 +283,7 @@ class StateManager:
 
             return session
 
-        except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError) as e:
+        except (redis_exceptions.ConnectionError, redis_exceptions.TimeoutError) as e:
             duration_ms = int((time.time() - start_time) * 1000)
 
             logger.error(
@@ -347,7 +349,7 @@ class StateManager:
 
             return session
 
-        except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError) as e:
+        except (redis_exceptions.ConnectionError, redis_exceptions.TimeoutError) as e:
             duration_ms = int((time.time() - start_time) * 1000)
 
             logger.error(
@@ -435,7 +437,7 @@ class StateManager:
                 }
             )
 
-        except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError) as e:
+        except (redis_exceptions.ConnectionError, redis_exceptions.TimeoutError) as e:
             duration_ms = int((time.time() - start_time) * 1000)
 
             logger.error(
@@ -510,7 +512,10 @@ class StateManager:
                 }
             )
 
-        except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError) as e:
+        except asyncio.CancelledError:
+            # Client disconnected - this is normal, just re-raise to allow proper cancellation
+            raise
+        except (redis_exceptions.ConnectionError, redis_exceptions.TimeoutError) as e:
             duration_ms = int((time.time() - start_time) * 1000)
 
             logger.error(
@@ -519,6 +524,7 @@ class StateManager:
                     "conversation_id": conversation_id,
                     "role": message["role"],
                     "error": str(e),
+                    "error_type": type(e).__name__,
                     "duration_ms": duration_ms
                 }
             )
@@ -594,7 +600,7 @@ class StateManager:
 
             return messages
 
-        except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError) as e:
+        except (redis_exceptions.ConnectionError, redis_exceptions.TimeoutError) as e:
             duration_ms = int((time.time() - start_time) * 1000)
 
             logger.error(
@@ -721,7 +727,7 @@ class StateManager:
                 "status": "active"
             }
 
-        except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError) as e:
+        except (redis_exceptions.ConnectionError, redis_exceptions.TimeoutError) as e:
             logger.error(
                 "Failed to get conversation metadata",
                 extra={
@@ -787,7 +793,7 @@ class StateManager:
                 )
                 return None
 
-        except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError) as e:
+        except (redis_exceptions.ConnectionError, redis_exceptions.TimeoutError) as e:
             logger.error(
                 "Failed to retrieve user_id mapping",
                 extra={

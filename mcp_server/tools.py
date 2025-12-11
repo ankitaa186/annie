@@ -309,7 +309,7 @@ async def retrieve_memories_tool_handler(
     Args:
         user_id: User identifier
         query: Search query describing the decision context (e.g., 'stock investment decisions', 'career choices')
-        limit: Maximum number of memories to retrieve (default: 50, max: 100)
+        limit: Maximum number of memories to retrieve (default: 50, max: 1000)
         persona: Optional persona filter (e.g., 'stock_trader', 'career_advisor') to filter memories by decision-making context
 
     Returns:
@@ -326,9 +326,9 @@ async def retrieve_memories_tool_handler(
         memories_url = "http://host.docker.internal:8080"
 
     # Validate limit parameter
-    if limit < 50 or limit > 100:
-        logger.warning(f"Invalid limit {limit}, clamping to range [50, 100]")
-        limit = max(50, min(100, limit))
+    if limit < 50 or limit > 1000:
+        logger.warning(f"Invalid limit {limit}, clamping to range [50, 1000]")
+        limit = max(50, min(1000, limit))
 
     try:
         logger.info(
