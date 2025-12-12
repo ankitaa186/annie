@@ -202,9 +202,10 @@ async def stream_generator(
                     )
 
                     # Stream tokens from LLM
-                    async for event in llm_client.chat_completion_stream(
+                    async for event in llm_client.stream_chat_completion(
                         conversation_messages,
-                        tools=tools
+                        tools=tools,
+                        mcp_client=mcp_client
                     ):
                         # Check for client disconnection
                         if await request.is_disconnected():
@@ -452,7 +453,7 @@ async def stream_generator(
                         }
                     )
                     # Stream final response anyway
-                    async for event in llm_client.chat_completion_stream(conversation_messages, tools=tools):
+                    async for event in llm_client.stream_chat_completion(conversation_messages, tools=tools, mcp_client=mcp_client):
                         if await request.is_disconnected():
                             break
 

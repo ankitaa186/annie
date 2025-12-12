@@ -1,0 +1,191 @@
+<story-context id=".bmad/bmm/workflows/4-implementation/story-context/template" v="1.0">
+  <metadata>
+    <epicId>9</epicId>
+    <storyId>3</storyId>
+    <title>Gemini Tool Calling Integration</title>
+    <status>drafted</status>
+    <generatedAt>2025-12-11</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>.bmad-ephemeral/stories/9-3-gemini-tool-calling-integration.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>platform engineer</asA>
+    <iWant>MCP tools to work seamlessly with Gemini's function calling format</iWant>
+    <soThat>Gemini provider has feature parity with Grok-4 and ChatGPT-5, enabling users to leverage internet search, memory storage, and profile access regardless of which provider is active</soThat>
+    <tasks>
+### Task 1: Create Gemini Tool Adapter Module
+- [ ] 1.1 Create GeminiToolAdapter class with schema conversion methods
+- [ ] 1.2 Implement convert_openai_to_gemini_schema(openai_tools: list) -> list
+- [ ] 1.3 Implement convert_gemini_to_openai_call(gemini_call: dict) -> dict
+- [ ] 1.4 Implement format_tool_result_for_gemini(tool_result: dict) -> dict
+- [ ] 1.5 Add schema validation with Pydantic models for type safety
+
+### Task 2: Integrate Tool Adapter into GeminiProvider
+- [ ] 2.1 Import and initialize GeminiToolAdapter in GeminiProvider.__init__()
+- [ ] 2.2 Update stream_chat_completion() to accept MCP tools parameter
+- [ ] 2.3 Convert MCP tool schemas to Gemini format before API call
+- [ ] 2.4 Detect function calls in streaming response chunks
+- [ ] 2.5 Execute tool calls via existing MCP client
+- [ ] 2.6 Format tool results and append to conversation context
+- [ ] 2.7 Continue streaming final LLM response after tool execution
+
+### Task 3: Handle Multi-Turn Tool Calling
+- [ ] 3.1 CRITICAL: Preserve thought_signature from Gemini responses
+- [ ] 3.2 Maintain tool call history in conversation context
+- [ ] 3.3 Implement sequential tool call logic
+- [ ] 3.4 Add max iterations limit (prevent infinite loops)
+- [ ] 3.5 Track tool call chain and thought_signatures in Langfuse for debugging
+
+### Task 4: Add Tool Call Event Streaming
+- [ ] 4.1 Emit tool_call_started SSE event when function call detected
+- [ ] 4.2 Emit tool_call_completed event with result summary
+- [ ] 4.3 Emit tool_call_failed event on errors with helpful message
+- [ ] 4.4 Ensure Telegram bot displays tool activity to user
+
+### Task 5: Error Handling for Tool Calls
+- [ ] 5.1 Handle MCP server unreachable
+- [ ] 5.2 Handle tool execution timeout
+- [ ] 5.3 Handle invalid tool arguments
+- [ ] 5.4 Handle tool result too large
+
+### Task 6: Integration Tests for Gemini + MCP
+- [ ] 6.1 Test basic tool calling flow
+- [ ] 6.2 Test multi-tool sequence
+- [ ] 6.3 Test tool error handling
+- [ ] 6.4 Test tool call timeout
+- [ ] 6.5 Test parallel tool calls (if Gemini supports)
+
+### Task 7: Unit Tests for Tool Adapter
+- [ ] 7.1 Test OpenAI → Gemini schema conversion
+- [ ] 7.2 Test Gemini → OpenAI tool call conversion
+- [ ] 7.3 Test tool result formatting
+- [ ] 7.4 Test edge cases
+
+### Task 8: Update LLM Client Factory
+- [ ] 8.1 Pass MCP tool list to GeminiProvider during initialization
+- [ ] 8.2 Update stream_chat_completion() signature to accept tools parameter
+- [ ] 8.3 Update all provider implementations to accept tools parameter
+- [ ] 8.4 Update streaming logic to handle tool call events
+    </tasks>
+  </story>
+
+  <acceptanceCriteria>
+### AC#1: MCP Tool Compatibility
+- All existing MCP tools work with Gemini provider (internet_search, store_memory, retrieve_memories, get_user_profile)
+- Tool execution produces identical results regardless of provider
+
+### AC#2: Schema Conversion
+- Tool adapter converts OpenAI tool schema → Gemini function_declarations format
+- Conversion handles parameter types, required/optional parameters, nested objects/arrays, enum constraints, descriptions
+
+### AC#3: Streaming Tool Results
+- Tool results properly formatted for SSE streaming to Telegram
+- Tool call status events sent during execution (tool_call_started, tool_call_completed, tool_call_failed)
+- Final response incorporates tool results naturally
+
+### AC#4: Error Handling
+- Tool call failures handled gracefully (MCP server unreachable, timeout, invalid arguments, result too large)
+- Langfuse traces capture tool call failures with error metadata
+
+### AC#5: Multi-Tool Sequences
+- Multiple tool calls in single conversation work correctly
+- Tool results from previous calls available in context
+- Sequential dependencies handled properly
+- Parallel tool calls execute concurrently (if Gemini supports)
+
+### AC#6: Context Integration
+- Tool results properly incorporated into LLM context for next turn
+- Context window management preserves tool history
+- Tool result formatting optimized for Gemini's input format
+- Token counting includes tool call overhead
+  </acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc path="docs/epics/epic-9-gemini-provider.md" title="Epic 9: Multi-LLM Provider Support - Add Gemini 3 Pro" section="Story 9.3: Gemini Tool Calling Integration">
+        Provides comprehensive context for implementing Gemini tool calling. Includes tool adapter design (OpenAI to Gemini format conversion), function calling API examples with thought_signature preservation, multi-turn tool calling patterns, and error handling strategies.
+      </doc>
+      <doc path="docs/epics/epic-9-gemini-provider.md" title="Epic 9: Multi-LLM Provider Support" section="Technical Architecture">
+        Defines provider abstraction layer architecture using Strategy + Factory + Facade patterns. GeminiToolAdapter converts OpenAI schema to Gemini function_declarations format. Provider-specific adapters translate native formats while maintaining OpenAI-compatible schema for MCP tools.
+      </doc>
+      <doc path="CLAUDE.md" title="Project Overview" section="Backend API">
+        Backend service architecture using FastAPI, MCP server communication via Docker exec with stdio transport, and JSON-RPC 2.0 protocol for tool execution.
+      </doc>
+    </docs>
+    <code>
+      <artifact path="backend/api/providers/base.py" kind="interface" symbol="BaseProvider" lines="1-100" reason="Abstract base class defining provider interface contract. Declares stream_chat_completion() method signature with tools parameter that GeminiProvider must implement for tool calling support."/>
+      <artifact path="backend/api/providers/gemini_provider.py" kind="provider" symbol="GeminiProvider" lines="1-605" reason="Existing GeminiProvider implementation (Story 9.2). Needs to be extended with tool calling support, function call detection in streaming chunks, and tool result formatting."/>
+      <artifact path="backend/api/providers/grok_provider.py" kind="provider" symbol="GrokProvider" lines="full" reason="Reference implementation for tool calling with Grok-4. Shows existing pattern for MCP tool integration and streaming tool events."/>
+      <artifact path="backend/api/mcp_client.py" kind="client" symbol="MCPClient" lines="1-150" reason="Existing MCP client for tool execution via JSON-RPC 2.0. Provides call_tool() method that GeminiProvider will use to execute converted tool calls. Includes error handling patterns (MCPNetworkError, MCPToolError)."/>
+      <artifact path="backend/api/llm_client.py" kind="factory" symbol="LLMClient" lines="full" reason="Factory pattern implementation for provider instantiation. Needs updates to pass MCP tool list to GeminiProvider and handle tool call events in streaming logic."/>
+    </code>
+    <dependencies>
+      <python>
+        <package name="google-generativeai" version=">=0.3.0" reason="Google Gemini SDK for function calling API"/>
+        <package name="httpx" version=">=0.25.0" reason="Async HTTP client for MCP server communication"/>
+        <package name="fastapi" version=">=0.104.0" reason="Web framework for backend API"/>
+        <package name="langfuse" version="==2.36.0" reason="LLM observability for tracing tool calls"/>
+        <package name="pytest" version=">=7.4.0" reason="Testing framework for unit and integration tests"/>
+        <package name="pytest-asyncio" version=">=0.21.0" reason="Async test support"/>
+      </python>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint type="critical">Thought Signature Preservation: Gemini 3 requires thought_signature from previous responses to be included in follow-up requests for function calling. Missing signatures cause 400 errors. SDK auto-handles, but must be verified in implementation.</constraint>
+    <constraint type="backward-compatibility">All existing MCP tools must work unchanged with Gemini provider (internet_search, store_memory, retrieve_memories, get_user_profile).</constraint>
+    <constraint type="provider-parity">Gemini tool calling behavior must match Grok-4/ChatGPT-5. Same prompts should trigger same tools with identical results.</constraint>
+    <constraint type="performance">Tool execution latency must be <5 seconds (p95) per Story 2.4 requirement.</constraint>
+    <constraint type="error-handling">Graceful degradation when tools fail. MCP server unreachable should return user-friendly error, not crash.</constraint>
+    <constraint type="observability">All tool calls must be traced in Langfuse with full metadata (tool name, arguments, results, errors, duration).</constraint>
+    <constraint type="testing">80%+ code coverage for tool adapter module. Integration tests must cover all MCP tools with Gemini.</constraint>
+    <constraint type="api-compatibility">Tool adapter must preserve round-trip conversion (OpenAI → Gemini → OpenAI) without data loss.</constraint>
+  </constraints>
+
+  <interfaces>
+    <interface name="BaseProvider.stream_chat_completion" kind="abstract-method" signature="async def stream_chat_completion(messages: List[Dict], tools: Optional[List[Dict]] = None) -> AsyncGenerator[Dict, None]" path="backend/api/providers/base.py">
+      Abstract method that GeminiProvider implements. Must accept tools parameter (OpenAI format) and yield streaming events including tool call events (tool_call_started, tool_call_completed, tool_call_failed).
+    </interface>
+    <interface name="MCPClient.call_tool" kind="async-method" signature="async def call_tool(tool_name: str, arguments: dict) -> dict" path="backend/api/mcp_client.py">
+      Executes MCP tool via JSON-RPC 2.0. GeminiProvider calls this after converting Gemini function call to OpenAI format. Raises MCPNetworkError if server unreachable, MCPToolError if execution fails.
+    </interface>
+    <interface name="MCPClient.list_tools" kind="async-method" signature="async def list_tools(use_cache: bool = True) -> List[Dict[str, Any]]" path="backend/api/mcp_client.py">
+      Fetches available MCP tools with schemas. Returns list of tools with 'name', 'description', 'inputSchema' in OpenAI format. GeminiToolAdapter converts these to Gemini function_declarations.
+    </interface>
+    <interface name="Gemini Function Calling API" kind="external-api" signature="genai.GenerativeModel.generate_content(messages, tools=[...], stream=True)" path="google.generativeai">
+      Gemini SDK function calling API. Accepts tools in function_declarations format. Returns chunks with function_call in candidates[0].content.parts[0]. Requires thought_signature preservation for multi-turn.
+    </interface>
+  </interfaces>
+
+  <tests>
+    <standards>
+      Testing framework: pytest with pytest-asyncio for async support. Unit tests use mocking (unittest.mock) for external dependencies. Integration tests use real MCP server in Docker. Code coverage target: 80%+ for new modules. Test file naming: test_{module_name}.py in tests/unit/ or tests/integration/.
+    </standards>
+    <locations>
+      - backend/tests/unit/ - Unit tests with mocked dependencies
+      - backend/tests/integration/ - End-to-end tests with real MCP server
+      - Test files: test_gemini_tool_adapter.py, test_gemini_mcp.py
+    </locations>
+    <ideas>
+      <test id="AC1" criteria="MCP Tool Compatibility">
+        Test all existing MCP tools (internet_search, store_memory, retrieve_memories, get_user_profile) work with GeminiProvider. Assert tool execution produces identical results regardless of provider (Grok, ChatGPT, Gemini).
+      </test>
+      <test id="AC2" criteria="Schema Conversion">
+        Test OpenAI → Gemini schema conversion with internet_search tool. Verify parameter types (string→STRING), required fields, nested objects, enum constraints. Assert round-trip conversion preserves all schema information.
+      </test>
+      <test id="AC3" criteria="Streaming Tool Results">
+        Test tool call SSE events (tool_call_started, tool_call_completed) are emitted during Gemini tool execution. Verify Telegram bot receives status updates. Assert final LLM response incorporates tool results naturally.
+      </test>
+      <test id="AC4" criteria="Error Handling">
+        Test tool failures: Mock MCP server unreachable (assert graceful error), tool timeout (assert retry with exponential backoff), invalid arguments (assert validation error to LLM). Verify Langfuse captures error metadata.
+      </test>
+      <test id="AC5" criteria="Multi-Tool Sequences">
+        Test sequential tool calls: retrieve_memories → internet_search → store_memory. Assert tool results available in context for subsequent calls. Verify thought_signature preserved across iterations.
+      </test>
+      <test id="AC6" criteria="Context Integration">
+        Test tool results appended to conversation context properly. Assert token counting includes tool call overhead. Verify context window management preserves tool history without exceeding limits.
+      </test>
+    </ideas>
+  </tests>
+</story-context>
