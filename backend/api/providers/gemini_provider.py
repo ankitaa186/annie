@@ -441,7 +441,9 @@ class GeminiProvider(BaseProvider):
                                     if hasattr(part, 'function_call') and part.function_call:
                                         function_call_detected = True
                                         function_call_name = part.function_call.name
-                                        function_call_args = dict(part.function_call.args)
+                                        # Convert args to JSON-serializable format
+                                        # dict() alone doesn't handle nested RepeatedComposite objects
+                                        function_call_args = json.loads(json.dumps(dict(part.function_call.args), default=str))
 
                                         # ChatSession handles thought_signatures automatically
                                         logger.info(

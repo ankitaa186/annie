@@ -133,6 +133,116 @@ async def stream_generator(
             tool_call_count = 0
             conversation_messages = messages.copy()
 
+            # IMPORTANT: Gemini handles tool execution internally during streaming
+            # Skip the OpenAI-style tool orchestration loop for Gemini providers
+            if llm_client.primary_provider_name == "gemini-3-pro-preview":
+                # Gemini: Stream directly with mcp_client - tools are handled automatically
+                logger.info(
+                    "Using Gemini streaming (internal tool handling)",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "provider": "gemini-3-pro-preview"
+                    }
+                )
+
+                async for event in llm_client.stream_chat_completion(
+                    conversation_messages,
+                    tools=tools,
+                    mcp_client=mcp_client
+                ):
+                    # Check for client disconnection
+                    if await request.is_disconnected():
+                        logger.info(
+                            "Client disconnected during stream",
+                            extra={
+                                "conversation_id": conversation_id,
+                                "reason": "client_disconnect"
+                            }
+                        )
+                        break
+
+                    # Track first token latency
+                    if not first_token_sent and event.get("type") == "token":
+                        first_token_latency_ms = int((time.time() - start_time) * 1000)
+                        logger.info(
+                            "First token sent to client",
+                            extra={
+                                "conversation_id": conversation_id,
+                                "latency_ms": first_token_latency_ms
+                            }
+                        )
+                        first_token_sent = True
+
+                    # Accumulate assistant response content and track chunks
+                    if event.get("type") == "token":
+                        assistant_response_content.append(event.get("content", ""))
+                        chunk_count += 1
+
+                    # Handle Redis save BEFORE yielding done event
+                    if event.get("type") == "done":
+                        duration_ms = int((time.time() - start_time) * 1000)
+                        logger.info(
+                            "Stream completed successfully",
+                            extra={
+                                "conversation_id": conversation_id,
+                                "duration_ms": duration_ms,
+                                "tool_calls": event.get("tool_calls_made", 0),
+                                "tokens": event.get("tokens_used", {})
+                            }
+                        )
+
+                        # Store assistant response in Redis BEFORE yielding done event
+                        if state_manager and assistant_response_content:
+                            if await request.is_disconnected():
+                                logger.info(
+                                    "Client disconnected, skipping Redis save",
+                                    extra={"conversation_id": conversation_id}
+                                )
+                            else:
+                                full_response = "".join(assistant_response_content)
+                                assistant_message = {
+                                    "role": "assistant",
+                                    "content": full_response
+                                }
+                                try:
+                                    await state_manager.add_message(conversation_id, assistant_message)
+                                    logger.info(
+                                        "Assistant response stored in Redis",
+                                        extra={
+                                            "conversation_id": conversation_id,
+                                            "response_length": len(full_response)
+                                        }
+                                    )
+                                except asyncio.CancelledError:
+                                    logger.warning(
+                                        "Redis save cancelled (unexpected - should not occur)",
+                                        extra={"conversation_id": conversation_id}
+                                    )
+                                    raise
+                                except StateError as e:
+                                    logger.error(
+                                        "Failed to store assistant response",
+                                        extra={
+                                            "conversation_id": conversation_id,
+                                            "error": str(e)
+                                        },
+                                        exc_info=True
+                                    )
+
+                    # Yield SSE event
+                    yield {
+                        "event": "message",
+                        "data": json.dumps(event)
+                    }
+
+                    # If error or completion, stop streaming
+                    if event.get("type") in ["error", "done"]:
+                        break
+
+                # Gemini streaming complete - exit generator
+                return
+
+            # OpenAI/Grok: Use traditional tool orchestration loop
             for iteration in range(max_tool_iterations):
                 # Check for client disconnection
                 if await request.is_disconnected():
