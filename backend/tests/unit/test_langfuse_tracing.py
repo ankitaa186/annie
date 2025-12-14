@@ -15,10 +15,10 @@ def reset_context_vars():
     """Reset context variables before each test."""
     import api.observability.tracing as tracing
     tracing._current_trace.set(None)
-    tracing._current_span.set(None)
+    tracing._span_stack.set(())
     yield
     tracing._current_trace.set(None)
-    tracing._current_span.set(None)
+    tracing._span_stack.set(())
 
 
 @pytest.fixture
@@ -30,14 +30,14 @@ def mock_langfuse_client():
     mock_trace.span = Mock(return_value=Mock())
     mock_client.trace = Mock(return_value=mock_trace)
 
-    with patch("api.observability.tracing.get_langfuse_client", return_value=mock_client):
+    with patch("api.observability.langfuse_client.get_langfuse_client", return_value=mock_client):
         yield mock_client
 
 
 @pytest.fixture
 def mock_langfuse_disabled():
     """Mock Langfuse client as disabled."""
-    with patch("api.observability.tracing.get_langfuse_client", return_value=None):
+    with patch("api.observability.langfuse_client.get_langfuse_client", return_value=None):
         yield
 
 
@@ -67,6 +67,7 @@ class TestTraceContextManagement:
         mock_langfuse_client.trace.assert_called_once_with(
             name="test_trace",
             user_id="user123",
+            session_id=None,
             metadata={"key": "value"}
         )
 
@@ -234,7 +235,7 @@ class TestFireAndForgetPattern:
         mock_client = Mock()
         mock_client.trace.side_effect = Exception("Connection refused")
 
-        with patch("api.observability.tracing.get_langfuse_client", return_value=mock_client):
+        with patch("api.observability.langfuse_client.get_langfuse_client", return_value=mock_client):
             from api.observability.tracing import start_trace
 
             trace = start_trace(name="test_trace", user_id="user123")

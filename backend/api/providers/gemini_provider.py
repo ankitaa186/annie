@@ -372,10 +372,8 @@ class GeminiProvider(BaseProvider):
                         tools=tools_config
                     )
 
-                    # Track if we found a function call in this iteration
-                    function_call_detected = False
-                    function_call_name = None
-                    function_call_args = None
+                    # Track ALL function calls in this iteration (parallel tool calling support)
+                    function_calls = []  # List of {name, args} dicts
 
                     # Process chunks
                     # Note: thought_signatures are handled automatically by ChatSession (Story 9.3)
@@ -437,20 +435,68 @@ class GeminiProvider(BaseProvider):
                             # Extract content (text or function_call)
                             if candidate.content and candidate.content.parts:
                                 for part in candidate.content.parts:
-                                    # Check for function call (Story 9.3)
+                                    # Check for function call (Story 9.3) - supports parallel tool calls
                                     if hasattr(part, 'function_call') and part.function_call:
-                                        function_call_detected = True
-                                        function_call_name = part.function_call.name
+                                        func_name = part.function_call.name
                                         # Convert args to JSON-serializable format
-                                        # dict() alone doesn't handle nested RepeatedComposite objects
-                                        function_call_args = json.loads(json.dumps(dict(part.function_call.args), default=str))
+                                        # Need to handle nested protobuf objects recursively
+
+                                        def convert_proto_to_dict(obj):
+                                            """Recursively convert protobuf objects to JSON-serializable dict."""
+                                            # Import proto.marshal for type checking
+                                            try:
+                                                from proto.marshal.collections import RepeatedComposite, MapComposite
+                                                from proto.marshal.collections.repeated import Repeated
+                                                from proto.marshal.collections.maps import MapComposite as MapComp
+                                            except ImportError:
+                                                RepeatedComposite = type(None)
+                                                MapComposite = type(None)
+                                                Repeated = type(None)
+                                                MapComp = type(None)
+
+                                            # Handle proto.marshal wrapper types
+                                            type_name = type(obj).__name__
+                                            if 'Repeated' in type_name or 'MapComposite' in type_name:
+                                                # Convert proto.marshal collections to list/dict
+                                                if 'Repeated' in type_name:
+                                                    # It's a list-like proto object
+                                                    return [convert_proto_to_dict(item) for item in obj]
+                                                elif 'MapComposite' in type_name:
+                                                    # It's a dict-like proto object
+                                                    return {k: convert_proto_to_dict(v) for k, v in obj.items()}
+
+                                            # Handle normal Python types
+                                            if isinstance(obj, dict):
+                                                return {k: convert_proto_to_dict(v) for k, v in obj.items()}
+                                            elif isinstance(obj, (list, tuple)):
+                                                return [convert_proto_to_dict(item) for item in obj]
+                                            elif isinstance(obj, (str, int, float, bool, type(None))):
+                                                return obj
+                                            elif hasattr(obj, '__dict__'):
+                                                # This is likely a proto object, try to convert to dict
+                                                try:
+                                                    return convert_proto_to_dict(dict(obj))
+                                                except (TypeError, ValueError):
+                                                    # If that fails, use string representation
+                                                    return str(obj)
+                                            else:
+                                                return obj
+
+                                        # Convert the args dict recursively
+                                        func_args = convert_proto_to_dict(dict(part.function_call.args))
+
+                                        # Append to list (supports parallel tool calls)
+                                        function_calls.append({
+                                            "name": func_name,
+                                            "args": func_args
+                                        })
 
                                         # ChatSession handles thought_signatures automatically
                                         logger.info(
-                                            "Gemini function call detected",
+                                            f"Gemini requesting tool: {func_name}",
                                             extra={
                                                 "provider": "gemini-3-pro-preview",
-                                                "tool_name": function_call_name,
+                                                "tool_name": func_name,
                                                 "iteration": tool_iteration
                                             }
                                         )
@@ -458,8 +504,8 @@ class GeminiProvider(BaseProvider):
                                         # Emit tool_call_started event
                                         yield {
                                             "type": "tool_call_started",
-                                            "tool": function_call_name,
-                                            "arguments": function_call_args
+                                            "tool": func_name,
+                                            "arguments": func_args
                                         }
 
                                     # Extract text content (can co-exist with function_call)
@@ -492,8 +538,8 @@ class GeminiProvider(BaseProvider):
                             if candidate.finish_reason:
                                 finish_reason_str = str(candidate.finish_reason)
 
-                                # If STOP and no function call, we're done
-                                if "STOP" in finish_reason_str and not function_call_detected:
+                                # If STOP and no function calls, we're done
+                                if "STOP" in finish_reason_str and not function_calls:
                                     duration_ms = int((time.time() - start_time) * 1000)
 
                                     logger.info(
@@ -519,7 +565,7 @@ class GeminiProvider(BaseProvider):
                                     # Track in Langfuse (fire-and-forget)
                                     if trace:
                                         try:
-                                            cost_details = self.calculate_cost({
+                                            cost_info = self.calculate_cost({
                                                 "prompt_tokens": prompt_tokens,
                                                 "completion_tokens": completion_tokens,
                                                 "cached_tokens": 0
@@ -530,30 +576,51 @@ class GeminiProvider(BaseProvider):
                                             full_completion = "".join(accumulated_content)
                                             truncated_completion = self._truncate_text(full_completion, 1000)
 
-                                            trace.generation(
+                                            # Create generation and finalize with end()
+                                            # Langfuse v2 requires end() to be called for proper tracking
+                                            generation = trace.generation(
                                                 name="llm_call_gemini-3-pro-preview_streaming",
                                                 input=truncated_prompt,
-                                                output=truncated_completion,
                                                 model=self.model_name,
+                                                model_parameters={
+                                                    "temperature": self.temperature,
+                                                    "max_output_tokens": self.max_output_tokens
+                                                },
                                                 metadata={
                                                     "provider": "gemini-3-pro-preview",
-                                                    "duration_ms": duration_ms,
                                                     "streaming": True,
                                                     "safety_setting": str(self.safety_setting),
                                                     "tool_iterations": tool_iteration
-                                                },
+                                                }
+                                            )
+
+                                            # End the generation with output, usage, and cost
+                                            generation.end(
+                                                output=truncated_completion,
                                                 usage={
                                                     "input": prompt_tokens,
                                                     "output": completion_tokens,
-                                                    "total": prompt_tokens + completion_tokens,
-                                                    "unit": "TOKENS"
+                                                    "total": prompt_tokens + completion_tokens
                                                 },
-                                                usage_details=cost_details
+                                                metadata={
+                                                    "duration_ms": duration_ms,
+                                                    "cost_usd": cost_info.get("total_cost", 0)
+                                                }
+                                            )
+
+                                            logger.info(
+                                                "Langfuse generation tracked successfully",
+                                                extra={
+                                                    "provider": "gemini-3-pro-preview",
+                                                    "prompt_tokens": prompt_tokens,
+                                                    "completion_tokens": completion_tokens,
+                                                    "cost_usd": cost_info.get("total_cost", 0)
+                                                }
                                             )
                                         except Exception as e:
                                             logger.warning(
                                                 f"Failed to track Gemini streaming in Langfuse: {str(e)}",
-                                                extra={"provider": "gemini-3-pro-preview"}
+                                                extra={"provider": "gemini-3-pro-preview", "error": str(e)}
                                             )
 
                                     # Yield completion event
@@ -566,84 +633,212 @@ class GeminiProvider(BaseProvider):
                                     }
                                     return  # Exit the multi-turn loop
 
-                    # After chunk processing, check if we need to execute a tool
-                    if function_call_detected and mcp_client:
-                        # Execute tool via MCP client
-                        tool_result = await self._execute_tool_call(
-                            function_call_name,
-                            function_call_args,
-                            mcp_client
-                        )
+                    # After chunk processing, check if we need to execute tools
+                    # Supports parallel tool calls - execute ALL function calls
+                    if function_calls and mcp_client:
+                        tool_count = len(function_calls)
+                        tool_names = [fc["name"] for fc in function_calls]
 
-                        # Check if tool execution succeeded or failed
-                        if "error" in tool_result:
-                            # Emit tool_call_failed event
-                            yield {
-                                "type": "tool_call_failed",
-                                "tool": function_call_name,
-                                "error": tool_result.get("error", "Unknown error")
-                            }
-                        else:
-                            # Emit tool_call_completed event
-                            result_summary = str(tool_result)[:200] if tool_result else ""
-                            yield {
-                                "type": "tool_call_completed",
-                                "tool": function_call_name,
-                                "result_summary": result_summary
-                            }
+                        # Log parallel tool calls summary
+                        if tool_count > 1:
+                            logger.info(
+                                f"Executing {tool_count} parallel tool calls",
+                                extra={
+                                    "provider": "gemini-3-pro-preview",
+                                    "tools": tool_names,
+                                    "tool_count": tool_count,
+                                    "iteration": tool_iteration
+                                }
+                            )
+
+                        # Execute ALL tools via MCP client
+                        tool_results = []
+
+                        for idx, func_call in enumerate(function_calls, 1):
+                            # Log tool execution with position indicator
+                            logger.info(
+                                f"Executing tool {idx}/{tool_count}: {func_call['name']}",
+                                extra={
+                                    "provider": "gemini-3-pro-preview",
+                                    "tool_name": func_call["name"],
+                                    "tool_position": f"{idx}/{tool_count}",
+                                    "iteration": tool_iteration
+                                }
+                            )
+
+                            tool_result = await self._execute_tool_call(
+                                func_call["name"],
+                                func_call["args"],
+                                mcp_client
+                            )
+
+                            # Check if tool execution succeeded or failed
+                            if "error" in tool_result:
+                                # Emit tool_call_failed event
+                                yield {
+                                    "type": "tool_call_failed",
+                                    "tool": func_call["name"],
+                                    "error": tool_result.get("error", "Unknown error")
+                                }
+                            else:
+                                # Emit tool_call_completed event
+                                result_summary = str(tool_result)[:200] if tool_result else ""
+                                yield {
+                                    "type": "tool_call_completed",
+                                    "tool": func_call["name"],
+                                    "result_summary": result_summary
+                                }
+
+                            # Format function response for Gemini
+                            formatted_result = self.tool_adapter.format_tool_result_for_gemini(
+                                func_call["name"],
+                                tool_result
+                            )
+                            tool_results.append(formatted_result)
 
                         # With ChatSession, thought_signatures are preserved automatically
-                        # We just need to format the tool response and continue the loop
+                        # We just need to format the tool responses and continue the loop
                         # Reference: https://ai.google.dev/gemini-api/docs/thought-signatures
 
-                        # Format function response for Gemini
-                        formatted_result = self.tool_adapter.format_tool_result_for_gemini(
-                            function_call_name,
-                            tool_result
-                        )
-
-                        # ChatSession automatically includes the function call and preserves thought_signatures
-                        # Send the function response as a Part with functionResponse
-                        # The SDK expects a list of parts for multi-part messages
+                        # ChatSession automatically includes the function calls and preserves thought_signatures
+                        # Send ALL function responses as Parts with functionResponse
+                        # The SDK expects a list of parts for multi-part messages (parallel tool calls)
                         from google.ai import generativelanguage as glm
 
                         last_user_message = [
                             glm.Part(function_response=glm.FunctionResponse(
-                                name=formatted_result["name"],
-                                response=formatted_result["response"]
+                                name=result["name"],
+                                response=result["response"]
                             ))
+                            for result in tool_results
                         ]
 
                         # Increment iteration and continue loop
                         tool_iteration += 1
-                        logger.info(
-                            "Tool execution completed, continuing multi-turn loop with ChatSession",
+                        if tool_count > 1:
+                            logger.info(
+                                f"All {tool_count} parallel tools completed, continuing conversation",
+                                extra={
+                                    "provider": "gemini-3-pro-preview",
+                                    "tools_executed": tool_names,
+                                    "tool_count": tool_count,
+                                    "iteration": tool_iteration
+                                }
+                            )
+                        else:
+                            logger.info(
+                                f"Tool '{tool_names[0]}' completed, continuing conversation",
+                                extra={
+                                    "provider": "gemini-3-pro-preview",
+                                    "tool_name": tool_names[0],
+                                    "iteration": tool_iteration
+                                }
+                            )
+
+                    elif function_calls and not mcp_client:
+                        # No MCP client provided but function calls detected
+                        tool_names = [fc["name"] for fc in function_calls]
+                        logger.error(
+                            "Function calls detected but no MCP client provided",
+                            extra={"provider": "gemini-3-pro-preview", "tools": tool_names}
+                        )
+                        for fc in function_calls:
+                            yield {
+                                "type": "tool_call_failed",
+                                "tool": fc["name"],
+                                "error": "MCP client not provided to execute tools"
+                            }
+                        return
+
+                    elif not function_calls:
+                        # No function calls, but also no STOP - unexpected but valid completion
+                        # This can happen when Gemini finishes without explicit STOP signal
+                        duration_ms = int((time.time() - start_time) * 1000)
+
+                        logger.warning(
+                            "Streaming ended without STOP or function call",
                             extra={
                                 "provider": "gemini-3-pro-preview",
-                                "tool": function_call_name,
-                                "iteration": tool_iteration
+                                "duration_ms": duration_ms,
+                                "token_count": token_count
                             }
                         )
 
-                    elif function_call_detected and not mcp_client:
-                        # No MCP client provided but function call detected
-                        logger.error(
-                            "Function call detected but no MCP client provided",
-                            extra={"provider": "gemini-3-pro-preview", "tool": function_call_name}
-                        )
-                        yield {
-                            "type": "tool_call_failed",
-                            "tool": function_call_name,
-                            "error": "MCP client not provided to execute tools"
-                        }
-                        return
+                        # Still track in Langfuse for this case
+                        if trace and token_count > 0:
+                            try:
+                                prompt_tokens = 0
+                                completion_tokens = token_count
 
-                    elif not function_call_detected:
-                        # No function call, but also no STOP - unexpected
-                        logger.warning(
-                            "Streaming ended without STOP or function call",
-                            extra={"provider": "gemini-3-pro-preview"}
-                        )
+                                try:
+                                    prompt_tokens = self.model.count_tokens(gemini_messages).total_tokens
+                                except Exception:
+                                    pass
+
+                                cost_info = self.calculate_cost({
+                                    "prompt_tokens": prompt_tokens,
+                                    "completion_tokens": completion_tokens,
+                                    "cached_tokens": 0
+                                })
+
+                                prompt_text = json.dumps([m for m in messages if m.get("role") != "tool"])
+                                truncated_prompt = self._truncate_text(prompt_text, 1000)
+                                full_completion = "".join(accumulated_content)
+                                truncated_completion = self._truncate_text(full_completion, 1000)
+
+                                generation = trace.generation(
+                                    name="llm_call_gemini-3-pro-preview_streaming",
+                                    input=truncated_prompt,
+                                    model=self.model_name,
+                                    model_parameters={
+                                        "temperature": self.temperature,
+                                        "max_output_tokens": self.max_output_tokens
+                                    },
+                                    metadata={
+                                        "provider": "gemini-3-pro-preview",
+                                        "streaming": True,
+                                        "safety_setting": str(self.safety_setting),
+                                        "tool_iterations": tool_iteration,
+                                        "ended_without_stop": True
+                                    }
+                                )
+
+                                generation.end(
+                                    output=truncated_completion,
+                                    usage={
+                                        "input": prompt_tokens,
+                                        "output": completion_tokens,
+                                        "total": prompt_tokens + completion_tokens
+                                    },
+                                    metadata={
+                                        "duration_ms": duration_ms,
+                                        "cost_usd": cost_info.get("total_cost", 0)
+                                    }
+                                )
+
+                                logger.info(
+                                    "Langfuse generation tracked (ended without STOP)",
+                                    extra={
+                                        "provider": "gemini-3-pro-preview",
+                                        "prompt_tokens": prompt_tokens,
+                                        "completion_tokens": completion_tokens,
+                                        "cost_usd": cost_info.get("total_cost", 0)
+                                    }
+                                )
+                            except Exception as e:
+                                logger.warning(
+                                    f"Failed to track Gemini streaming in Langfuse: {str(e)}",
+                                    extra={"provider": "gemini-3-pro-preview", "error": str(e)}
+                                )
+
+                        # Yield done event even without STOP
+                        yield {
+                            "type": "done",
+                            "tokens_used": {
+                                "prompt": 0,
+                                "completion": token_count
+                            }
+                        }
                         return
 
                 except Exception as e:

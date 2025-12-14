@@ -20,6 +20,47 @@ except ImportError:
 
 logger = get_logger(__name__)
 
+
+class DecoratorTraceWrapper:
+    """Wrapper that provides trace-like interface for decorator context.
+
+    When using @observe() decorators, we can't get the trace object directly.
+    This wrapper uses the Langfuse client with the current trace_id to provide
+    the same interface (generation(), span(), event()) that trace objects have.
+    """
+
+    def __init__(self, client, trace_id: str, observation_id: Optional[str] = None):
+        self._client = client
+        self._trace_id = trace_id
+        self._observation_id = observation_id
+
+    @property
+    def id(self) -> str:
+        """Return the trace ID for compatibility."""
+        return self._trace_id
+
+    def generation(self, **kwargs) -> Any:
+        """Create a generation attached to the current trace."""
+        # Use observation_id as parent if available (for nesting under spans)
+        if self._observation_id:
+            kwargs.setdefault('parent_observation_id', self._observation_id)
+        kwargs.setdefault('trace_id', self._trace_id)
+        return self._client.generation(**kwargs)
+
+    def span(self, **kwargs) -> Any:
+        """Create a span attached to the current trace."""
+        if self._observation_id:
+            kwargs.setdefault('parent_observation_id', self._observation_id)
+        kwargs.setdefault('trace_id', self._trace_id)
+        return self._client.span(**kwargs)
+
+    def event(self, **kwargs) -> Any:
+        """Create an event attached to the current trace."""
+        if self._observation_id:
+            kwargs.setdefault('parent_observation_id', self._observation_id)
+        kwargs.setdefault('trace_id', self._trace_id)
+        return self._client.event(**kwargs)
+
 # Request-scoped context variables (async-safe)
 _current_trace: ContextVar[Optional[Any]] = ContextVar('current_trace', default=None)
 # Stack of spans to handle nesting safely (immutable tuple)
@@ -79,24 +120,38 @@ def get_current_trace() -> Optional[Any]:
 
     This function supports both:
     1. Manually created traces via start_trace() (stored in ContextVar)
-    2. Decorator-created traces via @observe() (from langfuse_context)
+    2. Decorator-created traces via @observe() (using trace_id from langfuse_context)
 
     Returns:
-        Current trace object or None if no trace is active.
+        Current trace object (or wrapper) or None if no trace is active.
     """
     # First, check if there's a manually created trace in the ContextVar
     trace = _current_trace.get()
     if trace:
         return trace
 
-    # If not, try to get the current observation from Langfuse decorator context
+    # If not, try to get the current trace from Langfuse decorator context
     # This allows LLM generations to attach to traces created by @observe()
     if LANGFUSE_AVAILABLE and langfuse_context:
         try:
-            # Get the current observation (trace or span) from decorator context
-            observation = langfuse_context.get_current_observation()
-            if observation:
-                return observation
+            # Get the trace_id and observation_id from decorator context
+            trace_id = langfuse_context.get_current_trace_id()
+            observation_id = langfuse_context.get_current_observation_id()
+
+            if trace_id:
+                # Get the Langfuse client to create a wrapper
+                from api.observability.langfuse_client import get_langfuse_client
+                client = get_langfuse_client()
+                if client:
+                    wrapper = DecoratorTraceWrapper(client, trace_id, observation_id)
+                    logger.debug(
+                        "Created trace wrapper from decorator context",
+                        extra={
+                            "trace_id": trace_id,
+                            "observation_id": observation_id
+                        }
+                    )
+                    return wrapper
         except Exception as e:
             logger.debug(f"Could not get trace from langfuse_context: {e}")
 
