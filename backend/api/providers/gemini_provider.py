@@ -594,17 +594,20 @@ class GeminiProvider(BaseProvider):
                                                 }
                                             )
 
-                                            # End the generation with output, usage, and cost
+                                            # End the generation with output and usage (includes cost)
+                                            # ModelUsage TypedDict: input, output, total, input_cost, output_cost, total_cost
                                             generation.end(
                                                 output=truncated_completion,
                                                 usage={
                                                     "input": prompt_tokens,
                                                     "output": completion_tokens,
-                                                    "total": prompt_tokens + completion_tokens
+                                                    "total": prompt_tokens + completion_tokens,
+                                                    "input_cost": cost_info.get("input_cost", 0),
+                                                    "output_cost": cost_info.get("output_cost", 0),
+                                                    "total_cost": cost_info.get("total_cost", 0)
                                                 },
                                                 metadata={
-                                                    "duration_ms": duration_ms,
-                                                    "cost_usd": cost_info.get("total_cost", 0)
+                                                    "duration_ms": duration_ms
                                                 }
                                             )
 
@@ -803,16 +806,19 @@ class GeminiProvider(BaseProvider):
                                     }
                                 )
 
+                                # ModelUsage TypedDict: input, output, total, input_cost, output_cost, total_cost
                                 generation.end(
                                     output=truncated_completion,
                                     usage={
                                         "input": prompt_tokens,
                                         "output": completion_tokens,
-                                        "total": prompt_tokens + completion_tokens
+                                        "total": prompt_tokens + completion_tokens,
+                                        "input_cost": cost_info.get("input_cost", 0),
+                                        "output_cost": cost_info.get("output_cost", 0),
+                                        "total_cost": cost_info.get("total_cost", 0)
                                     },
                                     metadata={
-                                        "duration_ms": duration_ms,
-                                        "cost_usd": cost_info.get("total_cost", 0)
+                                        "duration_ms": duration_ms
                                     }
                                 )
 

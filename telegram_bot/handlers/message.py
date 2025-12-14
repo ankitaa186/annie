@@ -5,10 +5,13 @@ This module handles incoming Telegram messages with authorization checks.
 """
 
 import asyncio
+import html
+import re
 import time
 from telegram import Update, Message as TelegramMessage
 from telegram.ext import ContextTypes, MessageHandler, filters
 from telegram.error import RetryAfter, TelegramError
+from telegram.constants import ParseMode
 
 from telegram_bot.auth import AuthenticationModule
 from telegram_bot.backend_client import get_backend_client
@@ -16,6 +19,79 @@ from telegram_bot.config import get_config
 from telegram_bot.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def markdown_to_telegram_html(text: str) -> str:
+    """
+    Convert markdown from LLM output to Telegram-safe HTML.
+
+    Handles common markdown patterns:
+    - **bold** or __bold__ → <b>bold</b>
+    - *italic* or _italic_ → <i>italic</i>
+    - `code` → <code>code</code>
+    - ```code blocks``` → <pre>code</pre>
+    - [link](url) → <a href="url">link</a>
+    - ### headers → <b>header</b>
+    - Numbered lists: 1. item → 1. item (plain)
+
+    Args:
+        text: Raw markdown text from LLM
+
+    Returns:
+        HTML-formatted text safe for Telegram
+    """
+    if not text:
+        return text
+
+    # First, escape HTML special characters to prevent injection
+    # But we need to do this carefully to not break our own tags
+    text = html.escape(text)
+
+    # Code blocks (``` ... ```) - must be done before inline code
+    # Handle multi-line code blocks
+    text = re.sub(
+        r'```(?:\w+)?\n?(.*?)```',
+        r'<pre>\1</pre>',
+        text,
+        flags=re.DOTALL
+    )
+
+    # Inline code (`code`)
+    text = re.sub(r'`([^`]+)`', r'<code>\1</code>', text)
+
+    # Bold: **text** or __text__
+    text = re.sub(r'\*\*([^*]+)\*\*', r'<b>\1</b>', text)
+    text = re.sub(r'__([^_]+)__', r'<b>\1</b>', text)
+
+    # Italic: *text* or _text_ (but not inside words like file_name)
+    # Use word boundaries to avoid matching underscores in identifiers
+    text = re.sub(r'(?<!\w)\*([^*]+)\*(?!\w)', r'<i>\1</i>', text)
+    text = re.sub(r'(?<!\w)_([^_]+)_(?!\w)', r'<i>\1</i>', text)
+
+    # Links: [text](url)
+    text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', text)
+
+    # Headers: ### Header → bold (Telegram doesn't support headers)
+    text = re.sub(r'^#{1,6}\s*(.+)$', r'<b>\1</b>', text, flags=re.MULTILINE)
+
+    # Strikethrough: ~~text~~ → <s>text</s>
+    text = re.sub(r'~~([^~]+)~~', r'<s>\1</s>', text)
+
+    # Clean up escaped characters that markdown uses
+    # (html.escape already handled &, <, > so we just need backslash escapes)
+    text = text.replace(r'\*', '*')
+    text = text.replace(r'\_', '_')
+    text = text.replace(r'\`', '`')
+    text = text.replace(r'\#', '#')
+    text = text.replace(r'\.', '.')
+    text = text.replace(r'\-', '-')
+    text = text.replace(r'\!', '!')
+    text = text.replace(r'\[', '[')
+    text = text.replace(r'\]', ']')
+    text = text.replace(r'\(', '(')
+    text = text.replace(r'\)', ')')
+
+    return text
 
 # Global auth module (initialized once)
 auth_module = None
@@ -99,8 +175,9 @@ async def stream_response_to_telegram(
         current_text = "".join(response_buffer)
         current_time_ms = time.time() * 1000
 
-        # Send first message immediately
-        sent_messages.append(await message.reply_text(current_text))
+        # Send first message immediately (with HTML formatting)
+        html_text = markdown_to_telegram_html(current_text)
+        sent_messages.append(await message.reply_text(html_text, parse_mode=ParseMode.HTML))
         last_update_time = current_time_ms
         is_first_chunk = False
 
@@ -174,13 +251,15 @@ async def stream_response_to_telegram(
             # Send current message part as final edit
             current_part = current_text[:split_point]
             try:
-                await sent_messages[-1].edit_text(current_part)
+                html_part = markdown_to_telegram_html(current_part)
+                await sent_messages[-1].edit_text(html_part, parse_mode=ParseMode.HTML)
             except Exception:
                 pass  # Ignore edit failures on split
 
             # Start new message with remainder
             remaining_text = current_text[split_point:]
-            new_message = await message.reply_text(remaining_text)
+            html_remaining = markdown_to_telegram_html(remaining_text)
+            new_message = await message.reply_text(html_remaining, parse_mode=ParseMode.HTML)
             sent_messages.append(new_message)
 
             # Reset buffer to only contain the new message's text
@@ -220,9 +299,10 @@ async def stream_response_to_telegram(
             )
 
         if should_update and not is_rate_limited:
-            # Edit last message (time-throttled)
+            # Edit last message (time-throttled) with HTML formatting
             try:
-                await sent_messages[-1].edit_text(current_text)
+                html_text = markdown_to_telegram_html(current_text)
+                await sent_messages[-1].edit_text(html_text, parse_mode=ParseMode.HTML)
                 last_update_time = current_time_ms
 
                 logger.debug(
@@ -297,8 +377,9 @@ async def stream_response_to_telegram(
                     f"Attempting final edit (attempt {attempt + 1}, length {len(final_text)})",
                     extra={"user_id": user_id, "final_length": len(final_text)}
                 )
+                final_html = markdown_to_telegram_html(final_text)
                 await asyncio.wait_for(
-                    sent_messages[-1].edit_text(final_text),
+                    sent_messages[-1].edit_text(final_html, parse_mode=ParseMode.HTML),
                     timeout=30.0
                 )
                 logger.info(

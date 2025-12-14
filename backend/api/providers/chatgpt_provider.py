@@ -292,7 +292,7 @@ class ChatGPTProvider(BaseProvider):
                                             total_tokens = prompt_tokens + completion_tokens
 
                                             # Calculate costs
-                                            cost_details = calculate_llm_cost(
+                                            cost_info = calculate_llm_cost(
                                                 provider="chatgpt-5",
                                                 prompt_tokens=prompt_tokens,
                                                 completion_tokens=completion_tokens,
@@ -305,30 +305,47 @@ class ChatGPTProvider(BaseProvider):
                                             full_completion = "".join(accumulated_content)
                                             truncated_completion = self._truncate_text(full_completion, 1000)
 
-                                            # Create Langfuse generation with cost details
-                                            trace.generation(
+                                            # Create Langfuse generation and end it with usage including costs
+                                            # ModelUsage TypedDict: input, output, total, input_cost, output_cost, total_cost
+                                            generation = trace.generation(
                                                 name="llm_call_chatgpt-5_streaming",
                                                 input=truncated_prompt,
-                                                output=truncated_completion,
                                                 model=self.MODEL_NAME,
                                                 metadata={
                                                     "provider": "chatgpt-5",
-                                                    "duration_ms": duration_ms,
                                                     "streaming": True
-                                                },
+                                                }
+                                            )
+
+                                            generation.end(
+                                                output=truncated_completion,
                                                 usage={
                                                     "input": prompt_tokens,
                                                     "output": completion_tokens,
                                                     "total": total_tokens,
-                                                    "unit": "TOKENS"
+                                                    "input_cost": cost_info.get("input_cost", 0),
+                                                    "output_cost": cost_info.get("output_cost", 0),
+                                                    "total_cost": cost_info.get("total_cost", 0)
                                                 },
-                                                usage_details=cost_details
+                                                metadata={
+                                                    "duration_ms": duration_ms
+                                                }
+                                            )
+
+                                            logger.info(
+                                                "Langfuse generation tracked successfully",
+                                                extra={
+                                                    "provider": "chatgpt-5",
+                                                    "prompt_tokens": prompt_tokens,
+                                                    "completion_tokens": completion_tokens,
+                                                    "cost_usd": cost_info.get("total_cost", 0)
+                                                }
                                             )
                                         except Exception as e:
                                             # Fire-and-forget: log but don't fail stream
                                             logger.warning(
                                                 f"Failed to track ChatGPT-5 streaming generation in Langfuse: {str(e)}",
-                                                extra={"provider": "chatgpt-5"}
+                                                extra={"provider": "chatgpt-5", "error": str(e)}
                                             )
 
                                     # Yield completion event
