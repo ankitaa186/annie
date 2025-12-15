@@ -760,6 +760,11 @@ get_user_profile_tool = {
 # =============================================================================
 
 import re
+import json
+import redis.asyncio as redis
+
+# Price cache TTL: 15 minutes (900 seconds)
+PRICE_CACHE_TTL = 900
 
 # Ticker validation pattern: 1-10 uppercase alphanumeric + dots (for BRK.B style)
 TICKER_PATTERN = re.compile(r'^[A-Z0-9\.]{1,10}$')
@@ -790,8 +795,157 @@ def normalize_ticker(ticker: str) -> Optional[str]:
     return normalized
 
 
+async def batch_fetch_prices_with_cache(
+    tickers: list,
+    redis_client: Optional[redis.Redis] = None
+) -> tuple[Dict[str, float], list]:
+    """
+    Fetch current prices for multiple tickers with Redis caching.
+
+    Uses single batch call to yfinance for uncached tickers.
+    Caches fetched prices in Redis with 5-minute TTL.
+
+    Args:
+        tickers: List of ticker symbols (already normalized to uppercase)
+        redis_client: Optional Redis client. Creates new connection if not provided.
+
+    Returns:
+        tuple: (prices_dict, failed_tickers_list)
+            - prices_dict: {ticker: price} for successful fetches
+            - failed_tickers_list: tickers that failed to fetch
+    """
+    if not tickers:
+        return {}, []
+
+    prices = {}
+    failed_tickers = []
+    tickers_to_fetch = []
+
+    # Get Redis connection
+    own_redis = False
+    if redis_client is None:
+        try:
+            config = get_config()
+            redis_host = config.get("REDIS_HOST", "redis")
+            redis_port = int(config.get("REDIS_PORT", 6379))
+            redis_client = redis.Redis(
+                host=redis_host,
+                port=redis_port,
+                decode_responses=True
+            )
+            own_redis = True
+        except Exception as e:
+            logger.warning(f"Failed to connect to Redis for price caching: {e}")
+            redis_client = None
+
+    # Check cache for each ticker
+    for ticker in tickers:
+        if redis_client:
+            try:
+                cache_key = f"stock_price:{ticker}"
+                cached_price = await redis_client.get(cache_key)
+                if cached_price:
+                    prices[ticker] = float(cached_price)
+                    logger.debug(f"Price cache hit for {ticker}: {cached_price}")
+                    continue
+            except Exception as e:
+                logger.warning(f"Redis cache check failed for {ticker}: {e}")
+
+        tickers_to_fetch.append(ticker)
+
+    # Batch fetch uncached tickers from yfinance
+    if tickers_to_fetch:
+        try:
+            logger.info(
+                "Batch fetching prices from yfinance",
+                extra={
+                    "tickers": tickers_to_fetch,
+                    "count": len(tickers_to_fetch)
+                }
+            )
+
+            # Single batch call to yfinance
+            data = yf.download(
+                tickers_to_fetch,
+                period="1d",
+                progress=False,
+                threads=True
+            )
+
+            # Check if we got any data
+            if data.empty:
+                logger.warning("yfinance returned empty DataFrame")
+                failed_tickers.extend(tickers_to_fetch)
+            else:
+                # Handle both single and multi-ticker response formats
+                # yfinance returns different column structures:
+                # - Single ticker: columns are ['Open', 'High', 'Low', 'Close', 'Volume']
+                # - Multiple tickers: MultiIndex columns like [('Close', 'AAPL'), ('Close', 'GOOGL')]
+
+                has_multiindex = isinstance(data.columns, pd.MultiIndex)
+
+                for ticker in tickers_to_fetch:
+                    try:
+                        price = None
+
+                        if has_multiindex:
+                            # Multi-ticker format: access via ('Close', ticker)
+                            if ('Close', ticker) in data.columns:
+                                price_series = data[('Close', ticker)]
+                                if not price_series.empty:
+                                    price = price_series.iloc[-1]
+                        else:
+                            # Single ticker format: access via 'Close'
+                            if 'Close' in data.columns:
+                                price_series = data['Close']
+                                if not price_series.empty:
+                                    price = price_series.iloc[-1]
+
+                        if price is not None and pd.notna(price):
+                            prices[ticker] = round(float(price), 2)
+                            # Cache the price
+                            if redis_client:
+                                try:
+                                    await redis_client.setex(
+                                        f"stock_price:{ticker}",
+                                        PRICE_CACHE_TTL,
+                                        str(prices[ticker])
+                                    )
+                                except Exception as e:
+                                    logger.warning(f"Failed to cache price for {ticker}: {e}")
+                        else:
+                            failed_tickers.append(ticker)
+
+                    except Exception as e:
+                        logger.warning(f"Failed to parse price for {ticker}: {e}")
+                        failed_tickers.append(ticker)
+
+            logger.info(
+                "Batch price fetch completed",
+                extra={
+                    "fetched_count": len(tickers_to_fetch) - len([t for t in failed_tickers if t in tickers_to_fetch]),
+                    "failed_count": len([t for t in failed_tickers if t in tickers_to_fetch])
+                }
+            )
+
+        except Exception as e:
+            logger.error(f"yfinance batch download failed: {e}")
+            # All tickers in this batch failed
+            failed_tickers.extend([t for t in tickers_to_fetch if t not in prices])
+
+    # Close Redis connection if we created it
+    if own_redis and redis_client:
+        try:
+            await redis_client.close()
+        except Exception:
+            pass
+
+    return prices, failed_tickers
+
+
 async def get_portfolio_tool_handler(
-    user_id: str
+    user_id: str,
+    include_prices: bool = False
 ) -> Dict[str, Any]:
     """
     Get user's investment portfolio holdings from agentic-memories service.
@@ -809,12 +963,19 @@ async def get_portfolio_tool_handler(
     The holdings data includes ticker symbols, share quantities, purchase prices,
     and dates—everything needed to analyze their investment situation.
 
+    When include_prices=True, enriches holdings with current market prices and
+    calculates performance metrics (gain/loss, percentages, portfolio totals).
+
     Args:
         user_id: User identifier
+        include_prices: If True, fetch current prices and calculate performance metrics.
+                       Defaults to False for fast "what do I own?" queries.
 
     Returns:
         dict: Portfolio with holdings array (ticker, shares, cost_basis, purchase_date),
-              total_holdings count, and last_updated timestamp
+              total_holdings count, and last_updated timestamp.
+              When include_prices=True, also includes current_price, current_value,
+              gain_loss, gain_loss_pct per holding, plus portfolio totals.
     """
     start_time = time.time()
 
@@ -843,6 +1004,7 @@ async def get_portfolio_tool_handler(
             "Retrieving portfolio via MCP tool",
             extra={
                 "user_id": user_id,
+                "include_prices": include_prices,
                 "url": memories_url
             }
         )
@@ -864,17 +1026,90 @@ async def get_portfolio_tool_handler(
                     extra={
                         "user_id": user_id,
                         "holdings_count": len(holdings),
+                        "include_prices": include_prices,
                         "duration_ms": duration_ms
                     }
                 )
 
-                return {
+                # Build base response
+                response_data = {
                     "status": "success",
                     "user_id": result.get("user_id", user_id),
                     "holdings": holdings,
                     "total_holdings": result.get("total_holdings", len(holdings)),
                     "last_updated": result.get("last_updated")
                 }
+
+                # Enrich with prices if requested
+                if include_prices and holdings:
+                    # Extract tickers from holdings
+                    tickers = [h.get("ticker") for h in holdings if h.get("ticker")]
+
+                    # Batch fetch prices with caching
+                    prices, failed_tickers = await batch_fetch_prices_with_cache(tickers)
+
+                    # Track totals for portfolio summary
+                    total_value = 0.0
+                    total_cost_basis = 0.0
+                    price_fetch_errors = []
+
+                    # Enrich each holding with price data
+                    for holding in holdings:
+                        ticker = holding.get("ticker")
+                        if not ticker:
+                            continue
+
+                        shares = holding.get("shares", 0) or 0
+                        avg_price = holding.get("avg_price", 0) or 0
+
+                        if ticker in prices:
+                            current_price = prices[ticker]
+                            current_value = round(shares * current_price, 2)
+                            cost_basis = round(shares * avg_price, 2)
+                            gain_loss = round(current_value - cost_basis, 2)
+                            gain_loss_pct = round((gain_loss / cost_basis) * 100, 2) if cost_basis > 0 else 0.0
+
+                            holding["current_price"] = current_price
+                            holding["current_value"] = current_value
+                            holding["cost_basis"] = cost_basis
+                            holding["gain_loss"] = gain_loss
+                            holding["gain_loss_pct"] = gain_loss_pct
+
+                            # Add to portfolio totals
+                            total_value += current_value
+                            total_cost_basis += cost_basis
+                        else:
+                            # Price fetch failed for this ticker
+                            holding["current_price"] = None
+                            holding["current_value"] = None
+                            holding["cost_basis"] = round(shares * avg_price, 2) if avg_price else None
+                            holding["gain_loss"] = None
+                            holding["gain_loss_pct"] = None
+                            if ticker in failed_tickers:
+                                price_fetch_errors.append(ticker)
+
+                    # Calculate portfolio totals
+                    total_gain_loss = round(total_value - total_cost_basis, 2)
+                    total_gain_loss_pct = round((total_gain_loss / total_cost_basis) * 100, 2) if total_cost_basis > 0 else 0.0
+
+                    response_data["total_value"] = round(total_value, 2)
+                    response_data["total_cost_basis"] = round(total_cost_basis, 2)
+                    response_data["total_gain_loss"] = total_gain_loss
+                    response_data["total_gain_loss_pct"] = total_gain_loss_pct
+                    response_data["price_fetch_errors"] = price_fetch_errors
+                    response_data["last_updated"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+                    logger.info(
+                        "Portfolio enriched with prices",
+                        extra={
+                            "user_id": user_id,
+                            "total_value": total_value,
+                            "total_gain_loss_pct": total_gain_loss_pct,
+                            "price_errors_count": len(price_fetch_errors)
+                        }
+                    )
+
+                return response_data
 
             else:
                 error_msg = f"HTTP {response.status_code}"
@@ -966,7 +1201,9 @@ get_portfolio_tool = {
         "(3) Provide personalized investment insights based on actual holdings, "
         "(4) Compare positions against market trends or news, "
         "(5) Suggest rebalancing or diversification strategies. "
-        "Combine with analyze_stock or get_stock_history for comprehensive analysis."
+        "Set include_prices=true when user asks 'how is my portfolio doing?' to get "
+        "current prices, values, and gain/loss calculations. Use include_prices=false "
+        "(default) for fast 'what do I own?' queries."
     ),
     "inputSchema": {
         "type": "object",
@@ -974,6 +1211,11 @@ get_portfolio_tool = {
             "user_id": {
                 "type": "string",
                 "description": "User identifier"
+            },
+            "include_prices": {
+                "type": "boolean",
+                "description": "If true, fetch current market prices and calculate performance metrics (current_value, gain_loss, gain_loss_pct). Adds ~1-2s latency. Default: false",
+                "default": False
             }
         },
         "required": ["user_id"]

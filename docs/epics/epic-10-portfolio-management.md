@@ -2,7 +2,7 @@
 
 **Status:** Planned
 **Priority:** High (Foundation for Stock Trading Features)
-**Estimated Effort:** 7-8 days
+**Estimated Effort:** 6.5-7.5 days
 **Author:** John (PM) with Winston (Architect)
 **Date:** 2025-12-14
 
@@ -309,64 +309,88 @@ Given user says "I sold my Apple stock", then:
 
 ---
 
-### Story 10.5: Portfolio Value & Performance Tracking
+### Story 10.5: Portfolio Value & Performance Tracking (Simplified)
 
-**Goal:** Calculate and display portfolio value, gains/losses, and performance metrics.
+**Goal:** Enhance `get_portfolio` tool to optionally include current prices and performance metrics.
 
 **As a** user,
 **I want** to know how my portfolio is performing,
 **So that** I can make informed decisions about buying or selling.
 
+**Design Decision:** Instead of creating a separate `get_portfolio_summary` tool, enhance the existing `get_portfolio` tool with an optional `include_prices` parameter. The LLM can calculate gains/losses from the enriched data, reducing tool proliferation and saving implementation effort.
+
 **Acceptance Criteria:**
 
-**AC #1: Current Price Integration**
-Given portfolio with holdings, when value requested, then:
-- Fetch current prices for each ticker (via stock API)
-- Calculate current value: shares * current_price
-- Calculate total portfolio value
+**AC #1: Enhanced get_portfolio with Prices**
+Given `get_portfolio` tool with `include_prices=true`, when called, then:
+- Fetch current prices for all tickers in a single batch (yfinance supports this)
+- Enrich each holding with current price and calculated values
+- Return enhanced response:
+  ```json
+  {
+    "user_id": "123",
+    "holdings": [
+      {
+        "ticker": "AAPL",
+        "shares": 10,
+        "avg_price": 150.00,
+        "current_price": 175.50,
+        "current_value": 1755.00,
+        "cost_basis": 1500.00,
+        "gain_loss": 255.00,
+        "gain_loss_pct": 17.0
+      }
+    ],
+    "total_holdings": 2,
+    "total_value": 3500.00,
+    "total_cost_basis": 2800.00,
+    "total_gain_loss": 700.00,
+    "total_gain_loss_pct": 25.0,
+    "last_updated": "2025-12-14T10:00:00Z"
+  }
+  ```
 
-**AC #2: Gain/Loss Calculation**
-Given holdings with avg_price, when performance requested, then:
-- Calculate per-holding gain/loss: (current_price - avg_price) / avg_price * 100
-- Calculate total portfolio gain/loss
-- Show both absolute ($) and percentage (%)
+**AC #2: Backward Compatibility**
+Given `get_portfolio` without `include_prices` (or `include_prices=false`), then:
+- Returns original response format (no price fetching)
+- Fast response for simple "what do I own?" queries
 
-**AC #3: Portfolio Summary Tool**
-Given `get_portfolio_summary` tool, when called, then returns:
-```json
-{
-  "total_value": 15000.00,
-  "total_cost_basis": 12000.00,
-  "total_gain_loss": 3000.00,
-  "total_gain_loss_pct": 25.0,
-  "holdings_count": 5,
-  "top_performer": {"ticker": "AAPL", "gain_pct": 45.0},
-  "worst_performer": {"ticker": "TSLA", "gain_pct": -10.0}
-}
-```
+**AC #3: Batch Price Fetching**
+Given portfolio with multiple holdings, when prices requested, then:
+- Use single batch call to yfinance (not N individual calls)
+- Handle partial failures gracefully (some tickers may fail)
+- Cache prices for 5 minutes to reduce API load
 
 **AC #4: Performance Display**
-Given user asks "how is my portfolio doing?", then Annie responds:
-```
-Your portfolio is worth $15,000, up $3,000 (25%) from your cost basis of $12,000.
+Given user asks "how is my portfolio doing?", then:
+- LLM calls `get_portfolio` with `include_prices=true`
+- LLM interprets the enriched data and responds naturally:
+  "Your portfolio is worth $15,000, up $3,000 (25%) from your $12,000 cost basis. 
+   AAPL is your top performer at +45%, while TSLA needs attention at -10%."
 
-Top Performer: AAPL +45%
-Needs Attention: TSLA -10%
-```
+**AC #5: Error Handling**
+Given price fetch fails for some tickers, then:
+- Return holdings with `current_price: null` for failed tickers
+- Include `price_fetch_errors` array with failed tickers
+- LLM can still provide partial information
 
 **Prerequisites:** Story 10.1, Story 10.6 (Yahoo Finance integration)
 
 **Technical Notes:**
-- Uses Yahoo Finance via `yfinance` library (from Story 10.6)
-- Consider caching prices (5-15 min TTL for real-time feel)
-- May need rate limit handling for multiple tickers
-- Cost tracking requires accurate avg_price data
+- Modify existing `get_portfolio_tool_handler` in `mcp_server/tools.py`
+- Add `include_prices: bool = false` parameter to tool schema
+- Use `yfinance.download(tickers, period="1d")` for batch fetching
+- Cache layer: Redis with 5-minute TTL keyed by ticker
+- LLM calculates top/worst performers from the data (good at this)
 
-**Estimated Effort:** 1.5 days
+**Estimated Effort:** 1 day (reduced from 1.5 days - no new tool needed)
 
 ---
 
-### Story 10.6: Stock Market Analysis Tool
+### Story 10.6: Stock Market Analysis Tool ✅ COMPLETE
+
+**Status:** ✅ Implemented  
+**Completed:** 2025-12-15
 
 **Goal:** Enable Annie to analyze stocks and provide market insights using real-time data.
 
@@ -376,59 +400,25 @@ Needs Attention: TSLA -10%
 
 *Moved from Epic 4 Story 4.2*
 
-**Acceptance Criteria:**
+**Implementation Summary:**
+- `analyze_stock` tool: `mcp_server/tools.py:1787`
+- `get_stock_history` tool: `mcp_server/tools.py:2006`
+- Both registered in `mcp_server/server.py:83-84`
 
-**AC #1: analyze_stock Tool**
-Given `analyze_stock` MCP tool, when called with ticker, then:
-- Fetches real-time price data via Yahoo Finance
-- Returns structured analysis:
-  ```json
-  {
-    "ticker": "AAPL",
-    "current_price": 175.50,
-    "change_1d": 2.3,
-    "change_1d_pct": 1.33,
-    "52_week_high": 199.62,
-    "52_week_low": 124.17,
-    "market_cap": "2.8T",
-    "pe_ratio": 28.5,
-    "volume": 45000000,
-    "avg_volume": 52000000
-  }
-  ```
+**Acceptance Criteria:** All Complete ✅
 
-**AC #2: Technical Indicators**
-Given stock analysis, when technical data requested, then tool returns:
-- RSI (Relative Strength Index)
-- Moving averages (50-day, 200-day)
-- Trend direction (bullish/bearish/neutral)
-- Volume analysis (above/below average)
+| AC | Description | Status |
+|----|-------------|--------|
+| AC #1 | analyze_stock with price, change, 52-week range, P/E, market cap, volume | ✅ |
+| AC #2 | Technical indicators (RSI, 50/200 MA, trend, volume analysis) | ✅ |
+| AC #3 | get_stock_history with multiple period options | ✅ |
+| AC #4 | LLM integration via tool registration | ✅ |
+| AC #5 | Error handling for invalid tickers | ✅ |
 
-**AC #3: Price History**
-Given `get_stock_history` tool, when called with ticker and period, then:
-- Returns historical prices for 1d, 5d, 1mo, 3mo, 6mo, 1y, 5y
-- Includes open, high, low, close, volume per period
+**Deferred to Story 10.5:**
+- Price caching (5-minute TTL) - will be implemented as part of batch price fetching
 
-**AC #4: LLM Integration**
-Given user asks "How is Apple doing?", then:
-- Annie calls `analyze_stock` with ticker "AAPL"
-- Responds with clear market analysis:
-  "Apple (AAPL) is trading at $175.50, up 1.33% today. It's currently 12% below its 52-week high of $199.62. The RSI of 55 suggests neutral momentum."
-
-**AC #5: Error Handling**
-Given invalid ticker or API failure, then:
-- Tool returns clear error message
-- Annie responds: "I couldn't find data for that ticker. Please check the symbol and try again."
-
-**Prerequisites:** Story 10.1
-
-**Technical Notes:**
-- Use `yfinance` Python library for Yahoo Finance data
-- Cache stock data for 5 minutes to reduce API calls
-- Handle market hours (show "market closed" when appropriate)
-- Rate limiting awareness
-
-**Estimated Effort:** 1.5 days
+**Actual Effort:** ~1 day (tools already implemented)
 
 ---
 
@@ -565,28 +555,29 @@ Given user asks "What should I invest in?", then Annie:
 ## Story Sequencing
 
 ```
-10.1 Portfolio Access Tools (GET/POST)
+10.1 Portfolio Access Tools (GET/POST) ✅
   │
   ├──► 10.2 Watchlist & Intent
   │
   ├──► 10.3 Portfolio Context Injection
   │
-  └──► 10.6 Stock Market Analysis (Yahoo Finance)
+  └──► 10.6 Stock Market Analysis (Yahoo Finance) ✅
          │
-         ├──► 10.5 Portfolio Value & Performance
+         ├──► 10.5 Portfolio Value & Performance (NEXT)
          │
          └──► 10.7 Personalized Recommendations
 
-10.4 Update/Remove Tools (BLOCKED - waiting on agentic-memories)
+10.4 Update/Remove Tools ✅
 ```
 
 **Recommended Execution Order:**
-1. 10.1 - Portfolio Access Tools (foundation)
+1. ~~10.1 - Portfolio Access Tools (foundation)~~ ✅ DONE
 2. 10.2 - Watchlist & Intent (quick win)
-3. 10.6 - Stock Market Analysis (Yahoo Finance - needed for prices)
-4. 10.3 - Portfolio Context Injection (LLM awareness)
-5. 10.5 - Portfolio Value & Performance (needs 10.6)
-6. 10.7 - Personalized Recommendations (capstone)
+3. ~~10.6 - Stock Market Analysis (Yahoo Finance - needed for prices)~~ ✅ DONE
+4. ~~10.4 - Update/Remove Tools~~ ✅ DONE
+5. 10.3 - Portfolio Context Injection (LLM awareness)
+6. 10.5 - Portfolio Value & Performance (enhance get_portfolio with prices)
+7. 10.7 - Personalized Recommendations (capstone)
 
 ---
 
