@@ -1173,6 +1173,495 @@ add_holding_tool = {
 }
 
 
+async def update_holding_tool_handler(
+    user_id: str,
+    ticker: str,
+    asset_name: str = None,
+    shares: float = None,
+    avg_price: float = None
+) -> Dict[str, Any]:
+    """
+    Update an existing stock holding in user's portfolio.
+
+    Unlike add_holding (which creates if not exists), this tool returns 404
+    if the holding doesn't exist. Supports partial updates - only provided
+    fields are updated.
+
+    Args:
+        user_id: User identifier
+        ticker: Stock ticker symbol (e.g., 'AAPL', 'GOOGL')
+        asset_name: Optional new asset name
+        shares: Optional new number of shares
+        avg_price: Optional new average purchase price
+
+    Returns:
+        dict: Updated holding details or error
+    """
+    start_time = time.time()
+
+    # Get agentic-memories URL from config
+    try:
+        config = get_config()
+        memories_url = config.get("AGENTIC_MEMORIES_URL", "http://host.docker.internal:8080")
+    except Exception as e:
+        logger.warning(f"Failed to load config, using default: {e}")
+        memories_url = "http://host.docker.internal:8080"
+
+    # Validate user_id
+    if not user_id or not isinstance(user_id, str):
+        return {
+            "status": "error",
+            "message": "Invalid user_id: must be non-empty string"
+        }
+
+    # Normalize and validate ticker
+    normalized_ticker = normalize_ticker(ticker)
+    if normalized_ticker is None:
+        return {
+            "status": "error",
+            "message": f"Invalid ticker format: '{ticker}'. Ticker must be 1-10 alphanumeric characters."
+        }
+
+    # Build request payload (only include provided fields)
+    payload = {"user_id": user_id}
+    if asset_name is not None:
+        payload["asset_name"] = asset_name
+    if shares is not None:
+        payload["shares"] = shares
+    if avg_price is not None:
+        payload["avg_price"] = avg_price
+
+    try:
+        logger.info(
+            "Updating holding via MCP tool",
+            extra={
+                "user_id": user_id,
+                "ticker": normalized_ticker,
+                "updates": {k: v for k, v in payload.items() if k != "user_id"}
+            }
+        )
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.put(
+                f"{memories_url}/v1/portfolio/holding/{normalized_ticker}",
+                json=payload,
+                headers={"Content-Type": "application/json"}
+            )
+
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            if response.status_code == 200:
+                result = response.json()
+
+                logger.info(
+                    "Holding updated successfully via MCP tool",
+                    extra={
+                        "user_id": user_id,
+                        "ticker": normalized_ticker,
+                        "duration_ms": duration_ms
+                    }
+                )
+
+                return {
+                    "status": "success",
+                    "ticker": result.get("ticker"),
+                    "asset_name": result.get("asset_name"),
+                    "shares": result.get("shares"),
+                    "avg_price": result.get("avg_price"),
+                    "first_acquired": result.get("first_acquired"),
+                    "last_updated": result.get("last_updated"),
+                    "message": f"Updated {normalized_ticker} in your portfolio."
+                }
+
+            elif response.status_code == 404:
+                logger.info(
+                    "Holding not found for update",
+                    extra={
+                        "user_id": user_id,
+                        "ticker": normalized_ticker,
+                        "duration_ms": duration_ms
+                    }
+                )
+                return {
+                    "status": "error",
+                    "message": f"Holding not found: You don't have {normalized_ticker} in your portfolio.",
+                    "error_code": 404
+                }
+
+            else:
+                error_msg = f"HTTP {response.status_code}"
+                try:
+                    error_data = response.json()
+                    error_msg = error_data.get("detail", error_msg)
+                except Exception:
+                    error_msg = response.text or error_msg
+
+                logger.error(
+                    "Update holding failed via MCP tool",
+                    extra={
+                        "user_id": user_id,
+                        "ticker": normalized_ticker,
+                        "status_code": response.status_code,
+                        "error": error_msg,
+                        "duration_ms": duration_ms
+                    }
+                )
+
+                return {
+                    "status": "error",
+                    "message": f"Failed to update holding: {error_msg}",
+                    "error_code": response.status_code
+                }
+
+    except httpx.TimeoutException:
+        duration_ms = int((time.time() - start_time) * 1000)
+        logger.error("Update holding timed out", extra={"user_id": user_id, "ticker": normalized_ticker, "duration_ms": duration_ms})
+        return {"status": "error", "message": "Portfolio service timed out. Please try again.", "error_code": "TIMEOUT"}
+
+    except (httpx.NetworkError, httpx.ConnectError) as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+        logger.error("Network error updating holding", extra={"user_id": user_id, "ticker": normalized_ticker, "error": str(e), "duration_ms": duration_ms})
+        return {"status": "error", "message": "Portfolio service unavailable. Please try again later.", "error_code": "NETWORK_ERROR"}
+
+    except Exception as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+        logger.error("Unexpected error updating holding", extra={"user_id": user_id, "ticker": normalized_ticker, "error": str(e), "duration_ms": duration_ms}, exc_info=True)
+        return {"status": "error", "message": f"Unexpected error: {str(e)}", "error_code": "INTERNAL_ERROR"}
+
+
+# Update holding tool definition
+update_holding_tool = {
+    "name": "update_holding",
+    "description": "Update an existing stock holding in user's portfolio. Use this when the user wants to change the number of shares or average price of a stock they already own. Returns error if the holding doesn't exist (use add_holding to create new holdings).",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "user_id": {
+                "type": "string",
+                "description": "User identifier"
+            },
+            "ticker": {
+                "type": "string",
+                "description": "Stock ticker symbol to update (e.g., 'AAPL')"
+            },
+            "asset_name": {
+                "type": "string",
+                "description": "Optional new human-readable name for the asset"
+            },
+            "shares": {
+                "type": "number",
+                "description": "New number of shares owned"
+            },
+            "avg_price": {
+                "type": "number",
+                "description": "New average purchase price per share in USD"
+            }
+        },
+        "required": ["user_id", "ticker"]
+    },
+    "handler": update_holding_tool_handler
+}
+
+
+async def remove_holding_tool_handler(
+    user_id: str,
+    ticker: str
+) -> Dict[str, Any]:
+    """
+    Remove a stock holding from user's portfolio.
+
+    Deletes the holding identified by user_id + ticker.
+    Returns 404 if holding doesn't exist.
+
+    Args:
+        user_id: User identifier
+        ticker: Stock ticker symbol to remove (e.g., 'AAPL')
+
+    Returns:
+        dict: Confirmation of deletion or error
+    """
+    start_time = time.time()
+
+    # Get agentic-memories URL from config
+    try:
+        config = get_config()
+        memories_url = config.get("AGENTIC_MEMORIES_URL", "http://host.docker.internal:8080")
+    except Exception as e:
+        logger.warning(f"Failed to load config, using default: {e}")
+        memories_url = "http://host.docker.internal:8080"
+
+    # Validate user_id
+    if not user_id or not isinstance(user_id, str):
+        return {
+            "status": "error",
+            "message": "Invalid user_id: must be non-empty string"
+        }
+
+    # Normalize and validate ticker
+    normalized_ticker = normalize_ticker(ticker)
+    if normalized_ticker is None:
+        return {
+            "status": "error",
+            "message": f"Invalid ticker format: '{ticker}'. Ticker must be 1-10 alphanumeric characters."
+        }
+
+    try:
+        logger.info(
+            "Removing holding via MCP tool",
+            extra={
+                "user_id": user_id,
+                "ticker": normalized_ticker
+            }
+        )
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.delete(
+                f"{memories_url}/v1/portfolio/holding/{normalized_ticker}",
+                params={"user_id": user_id}
+            )
+
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            if response.status_code == 200:
+                result = response.json()
+
+                logger.info(
+                    "Holding removed successfully via MCP tool",
+                    extra={
+                        "user_id": user_id,
+                        "ticker": normalized_ticker,
+                        "duration_ms": duration_ms
+                    }
+                )
+
+                return {
+                    "status": "success",
+                    "deleted": True,
+                    "ticker": result.get("ticker", normalized_ticker),
+                    "message": f"Removed {normalized_ticker} from your portfolio."
+                }
+
+            elif response.status_code == 404:
+                logger.info(
+                    "Holding not found for removal",
+                    extra={
+                        "user_id": user_id,
+                        "ticker": normalized_ticker,
+                        "duration_ms": duration_ms
+                    }
+                )
+                return {
+                    "status": "error",
+                    "message": f"Holding not found: You don't have {normalized_ticker} in your portfolio.",
+                    "error_code": 404
+                }
+
+            else:
+                error_msg = f"HTTP {response.status_code}"
+                try:
+                    error_data = response.json()
+                    error_msg = error_data.get("detail", error_msg)
+                except Exception:
+                    error_msg = response.text or error_msg
+
+                logger.error(
+                    "Remove holding failed via MCP tool",
+                    extra={
+                        "user_id": user_id,
+                        "ticker": normalized_ticker,
+                        "status_code": response.status_code,
+                        "error": error_msg,
+                        "duration_ms": duration_ms
+                    }
+                )
+
+                return {
+                    "status": "error",
+                    "message": f"Failed to remove holding: {error_msg}",
+                    "error_code": response.status_code
+                }
+
+    except httpx.TimeoutException:
+        duration_ms = int((time.time() - start_time) * 1000)
+        logger.error("Remove holding timed out", extra={"user_id": user_id, "ticker": normalized_ticker, "duration_ms": duration_ms})
+        return {"status": "error", "message": "Portfolio service timed out. Please try again.", "error_code": "TIMEOUT"}
+
+    except (httpx.NetworkError, httpx.ConnectError) as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+        logger.error("Network error removing holding", extra={"user_id": user_id, "ticker": normalized_ticker, "error": str(e), "duration_ms": duration_ms})
+        return {"status": "error", "message": "Portfolio service unavailable. Please try again later.", "error_code": "NETWORK_ERROR"}
+
+    except Exception as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+        logger.error("Unexpected error removing holding", extra={"user_id": user_id, "ticker": normalized_ticker, "error": str(e), "duration_ms": duration_ms}, exc_info=True)
+        return {"status": "error", "message": f"Unexpected error: {str(e)}", "error_code": "INTERNAL_ERROR"}
+
+
+# Remove holding tool definition
+remove_holding_tool = {
+    "name": "remove_holding",
+    "description": "Remove a stock holding from user's portfolio. Use this when the user has sold all shares of a stock and wants it removed from their portfolio. Returns error if the holding doesn't exist.",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "user_id": {
+                "type": "string",
+                "description": "User identifier"
+            },
+            "ticker": {
+                "type": "string",
+                "description": "Stock ticker symbol to remove (e.g., 'AAPL')"
+            }
+        },
+        "required": ["user_id", "ticker"]
+    },
+    "handler": remove_holding_tool_handler
+}
+
+
+async def clear_portfolio_tool_handler(
+    user_id: str,
+    confirmation: str = None
+) -> Dict[str, Any]:
+    """
+    Clear ALL holdings from user's portfolio.
+
+    WARNING: This is a destructive operation that removes ALL holdings.
+    Requires confirmation parameter set to 'DELETE_ALL' for safety.
+
+    Args:
+        user_id: User identifier
+        confirmation: Must be exactly 'DELETE_ALL' to proceed
+
+    Returns:
+        dict: Count of deleted holdings or error
+    """
+    start_time = time.time()
+
+    # Get agentic-memories URL from config
+    try:
+        config = get_config()
+        memories_url = config.get("AGENTIC_MEMORIES_URL", "http://host.docker.internal:8080")
+    except Exception as e:
+        logger.warning(f"Failed to load config, using default: {e}")
+        memories_url = "http://host.docker.internal:8080"
+
+    # Validate user_id
+    if not user_id or not isinstance(user_id, str):
+        return {
+            "status": "error",
+            "message": "Invalid user_id: must be non-empty string"
+        }
+
+    # Validate confirmation
+    if confirmation != "DELETE_ALL":
+        logger.warning(
+            "Clear portfolio called without proper confirmation",
+            extra={"user_id": user_id, "confirmation": confirmation}
+        )
+        return {
+            "status": "error",
+            "message": "Confirmation required. This will delete ALL holdings in the portfolio. Set confirmation='DELETE_ALL' to proceed.",
+            "error_code": "CONFIRMATION_REQUIRED"
+        }
+
+    try:
+        logger.info(
+            "Clearing portfolio via MCP tool",
+            extra={"user_id": user_id}
+        )
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.delete(
+                f"{memories_url}/v1/portfolio",
+                params={"user_id": user_id, "confirmation": "DELETE_ALL"}
+            )
+
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            if response.status_code == 200:
+                result = response.json()
+                holdings_removed = result.get("holdings_removed", 0)
+
+                logger.info(
+                    "Portfolio cleared successfully via MCP tool",
+                    extra={
+                        "user_id": user_id,
+                        "holdings_removed": holdings_removed,
+                        "duration_ms": duration_ms
+                    }
+                )
+
+                return {
+                    "status": "success",
+                    "deleted": True,
+                    "holdings_removed": holdings_removed,
+                    "message": f"Cleared your entire portfolio. {holdings_removed} holding{'s' if holdings_removed != 1 else ''} removed."
+                }
+
+            else:
+                error_msg = f"HTTP {response.status_code}"
+                try:
+                    error_data = response.json()
+                    error_msg = error_data.get("detail", error_msg)
+                except Exception:
+                    error_msg = response.text or error_msg
+
+                logger.error(
+                    "Clear portfolio failed via MCP tool",
+                    extra={
+                        "user_id": user_id,
+                        "status_code": response.status_code,
+                        "error": error_msg,
+                        "duration_ms": duration_ms
+                    }
+                )
+
+                return {
+                    "status": "error",
+                    "message": f"Failed to clear portfolio: {error_msg}",
+                    "error_code": response.status_code
+                }
+
+    except httpx.TimeoutException:
+        duration_ms = int((time.time() - start_time) * 1000)
+        logger.error("Clear portfolio timed out", extra={"user_id": user_id, "duration_ms": duration_ms})
+        return {"status": "error", "message": "Portfolio service timed out. Please try again.", "error_code": "TIMEOUT"}
+
+    except (httpx.NetworkError, httpx.ConnectError) as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+        logger.error("Network error clearing portfolio", extra={"user_id": user_id, "error": str(e), "duration_ms": duration_ms})
+        return {"status": "error", "message": "Portfolio service unavailable. Please try again later.", "error_code": "NETWORK_ERROR"}
+
+    except Exception as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+        logger.error("Unexpected error clearing portfolio", extra={"user_id": user_id, "error": str(e), "duration_ms": duration_ms}, exc_info=True)
+        return {"status": "error", "message": f"Unexpected error: {str(e)}", "error_code": "INTERNAL_ERROR"}
+
+
+# Clear portfolio tool definition
+clear_portfolio_tool = {
+    "name": "clear_portfolio",
+    "description": "DANGER: Clear ALL holdings from user's portfolio. This permanently deletes every stock in the portfolio. Only use when the user explicitly confirms they want to remove everything. Requires confirmation='DELETE_ALL' parameter.",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "user_id": {
+                "type": "string",
+                "description": "User identifier"
+            },
+            "confirmation": {
+                "type": "string",
+                "description": "Must be exactly 'DELETE_ALL' to confirm this destructive operation",
+                "enum": ["DELETE_ALL"]
+            }
+        },
+        "required": ["user_id", "confirmation"]
+    },
+    "handler": clear_portfolio_tool_handler
+}
+
+
 # =============================================================================
 # Stock Market Analysis Tools (Epic 10 - Story 10.6)
 # =============================================================================

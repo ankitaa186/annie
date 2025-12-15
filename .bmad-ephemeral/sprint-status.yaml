@@ -120,7 +120,7 @@ development_status:
   10-1-portfolio-access-mcp-tools: done
   10-2-watchlist-intent-tracking: backlog  # BLOCKED: waiting on agentic-memories intent/watchlist endpoints
   10-3-portfolio-summary-llm-context: done
-  10-4-portfolio-update-remove-tools: backlog  # BLOCKED: waiting on agentic-memories PUT/DELETE
+  10-4-portfolio-update-remove-tools: done  # Implements update_holding, remove_holding, clear_portfolio
   10-5-portfolio-value-performance-tracking: backlog
   10-6-stock-market-analysis-tool: done  # Moved from Epic 4 Story 4.2 (Yahoo Finance)
   10-7-personalized-stock-recommendations: backlog  # Moved from Epic 4 Story 4.3

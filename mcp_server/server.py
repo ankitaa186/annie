@@ -26,6 +26,9 @@ from mcp_server.tools import (
     get_user_profile_tool,
     get_portfolio_tool,
     add_holding_tool,
+    update_holding_tool,
+    remove_holding_tool,
+    clear_portfolio_tool,
     analyze_stock_tool,
     get_stock_history_tool,
 )
@@ -73,6 +76,9 @@ class MCPServer:
         # Portfolio management tools (Epic 10)
         self.tool_registry.register(get_portfolio_tool)
         self.tool_registry.register(add_holding_tool)
+        self.tool_registry.register(update_holding_tool)
+        self.tool_registry.register(remove_holding_tool)
+        self.tool_registry.register(clear_portfolio_tool)
         # Stock market analysis tools (Epic 10 - Story 10.6)
         self.tool_registry.register(analyze_stock_tool)
         self.tool_registry.register(get_stock_history_tool)

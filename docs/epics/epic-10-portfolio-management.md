@@ -51,8 +51,9 @@ TimescaleDB (portfolio_holdings table)
 |----------|--------|--------|-------------|
 | `/v1/portfolio` | GET | ✅ Ready | Get all holdings for user |
 | `/v1/portfolio/holding` | POST | ✅ Ready | Add/update holding (UPSERT) |
-| `/v1/portfolio/holding/{id}` | PUT | 🚧 Under Dev | Update specific holding |
-| `/v1/portfolio` | DELETE | 🚧 Under Dev | Clear all holdings |
+| `/v1/portfolio/holding/{ticker}` | PUT | ✅ Ready | Update specific holding (partial updates) |
+| `/v1/portfolio/holding/{ticker}` | DELETE | ✅ Ready | Delete single holding |
+| `/v1/portfolio` | DELETE | ✅ Ready | Clear all holdings (requires confirmation) |
 
 ### Portfolio Data Model (from agentic-memories)
 
@@ -293,16 +294,18 @@ Given user says "I sold my Apple stock", then:
 - Updates or removes holding accordingly
 - Confirms: "I've updated your portfolio. You now have X shares of AAPL remaining."
 
-**Prerequisites:** Story 10.1, agentic-memories PUT/DELETE endpoints
+**Prerequisites:** Story 10.1, agentic-memories PUT/DELETE endpoints ✅
 
 **Technical Notes:**
-- **BLOCKED** until agentic-memories implements PUT and DELETE endpoints
-- Can be worked in parallel once endpoints available
-- Consider soft-delete vs hard-delete
+- agentic-memories endpoints now available:
+  - PUT `/v1/portfolio/holding/{ticker}` - Update with partial updates support
+  - DELETE `/v1/portfolio/holding/{ticker}?user_id=xxx` - Delete single holding
+  - DELETE `/v1/portfolio?user_id=xxx&confirmation=DELETE_ALL` - Clear all holdings
+- Clear portfolio requires confirmation="DELETE_ALL" for safety
 
-**Estimated Effort:** 0.5 days (after agentic-memories ready)
+**Estimated Effort:** 0.5 days
 
-**Status:** BLOCKED - Waiting on agentic-memories endpoint development
+**Status:** UNBLOCKED - Ready for implementation
 
 ---
 
