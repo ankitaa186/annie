@@ -823,14 +823,41 @@ async def stream_response(conversation_id: str, request: Request):
                     }
                 )
 
-        # Build system message with user_id, profile, and platform-specific formatting
+        # Load user portfolio from cache or refresh (Story 10.3)
+        portfolio = None
+        if user_id:
+            try:
+                from api.portfolio_context import PortfolioManager
+                portfolio_manager = PortfolioManager(redis_client=state_manager.redis_client)
+                portfolio = await portfolio_manager.get_portfolio(user_id, refresh_if_empty=True)
+                if portfolio and portfolio.get("total_holdings", 0) > 0:
+                    logger.info(
+                        "Portfolio loaded for system prompt",
+                        extra={
+                            "conversation_id": conversation_id,
+                            "user_id": user_id,
+                            "holdings_count": portfolio.get("total_holdings", 0),
+                            "cached": portfolio.get("cached", False)
+                        }
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to load portfolio for system prompt, continuing without: {str(e)}",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "user_id": user_id
+                    }
+                )
+
+        # Build system message with user_id, profile, portfolio, and platform-specific formatting
         from api.prompts import build_system_prompt
 
         system_message = build_system_prompt(
             user_id=user_id,
             platform=platform,
             include_tool_instructions=True,
-            profile=profile
+            profile=profile,
+            portfolio=portfolio
         ) if user_id else None
 
         logger.debug(

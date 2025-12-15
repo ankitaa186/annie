@@ -1,6 +1,6 @@
 # Story 10.1: Portfolio Access MCP Tools
 
-Status: review
+Status: done
 
 ## Story
 

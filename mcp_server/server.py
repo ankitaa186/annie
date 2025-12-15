@@ -26,6 +26,8 @@ from mcp_server.tools import (
     get_user_profile_tool,
     get_portfolio_tool,
     add_holding_tool,
+    analyze_stock_tool,
+    get_stock_history_tool,
 )
 
 logger = get_logger(__name__)
@@ -71,6 +73,9 @@ class MCPServer:
         # Portfolio management tools (Epic 10)
         self.tool_registry.register(get_portfolio_tool)
         self.tool_registry.register(add_holding_tool)
+        # Stock market analysis tools (Epic 10 - Story 10.6)
+        self.tool_registry.register(analyze_stock_tool)
+        self.tool_registry.register(get_stock_history_tool)
         logger.info(f"Registered {len(self.tool_registry.tools)} tools")
 
     async def handle_request(self, request: Dict[str, Any]) -> Dict[str, Any]:

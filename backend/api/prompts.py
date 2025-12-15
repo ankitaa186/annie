@@ -100,6 +100,55 @@ Never use generic IDs like 'anonymous_user' - always use the specific user_id.
 """
 
 
+def format_portfolio_for_prompt(portfolio: Dict[str, Any]) -> Optional[str]:
+    """
+    Format user portfolio data for system prompt injection.
+
+    Args:
+        portfolio: Portfolio dictionary from PortfolioManager
+
+    Returns:
+        Formatted portfolio string or None if portfolio is empty
+    """
+    # Skip if portfolio is empty or not cached
+    if not portfolio:
+        return None
+
+    holdings = portfolio.get("holdings", [])
+    if not holdings:
+        return None
+
+    sections = []
+
+    # Add summary
+    total_holdings = len(holdings)
+    sections.append(f"Total Holdings: {total_holdings} {'stock' if total_holdings == 1 else 'stocks'}")
+
+    # Format holdings
+    holdings_lines = ["\nHoldings:"]
+    for holding in holdings:
+        ticker = holding.get("ticker", "???")
+        shares = holding.get("shares", 0)
+        avg_price = holding.get("avg_price")
+        asset_name = holding.get("asset_name")
+
+        # Format line: "- AAPL (Apple Inc.): 10 shares @ $175.50 avg"
+        line = f"- {ticker}"
+        if asset_name:
+            line += f" ({asset_name})"
+        line += f": {shares} shares"
+        if avg_price:
+            line += f" @ ${avg_price:.2f} avg"
+
+        holdings_lines.append(line)
+
+    sections.append("\n".join(holdings_lines))
+
+    # Build final portfolio string
+    portfolio_str = "\n".join(sections)
+    return portfolio_str
+
+
 def format_profile_for_prompt(profile: Dict[str, Any]) -> Optional[str]:
     """
     Format user profile data for system prompt injection.
@@ -217,16 +266,18 @@ def build_system_prompt(
     user_id: Optional[str] = None,
     platform: str = "api",
     include_tool_instructions: bool = True,
-    profile: Optional[Dict[str, Any]] = None
+    profile: Optional[Dict[str, Any]] = None,
+    portfolio: Optional[Dict[str, Any]] = None
 ) -> str:
     """
-    Build system prompt with optional user_id, profile, and platform-specific formatting.
+    Build system prompt with optional user_id, profile, portfolio, and platform-specific formatting.
 
     Args:
         user_id: Optional user identifier for tool usage instructions
         platform: Platform identifier ("telegram", "web", "api")
         include_tool_instructions: Whether to include tool usage instructions
         profile: Optional user profile dictionary from ProfileManager
+        portfolio: Optional user portfolio dictionary from PortfolioManager
 
     Returns:
         Complete system prompt string
@@ -243,6 +294,13 @@ def build_system_prompt(
         if profile_str:
             prompt_parts.append("\n\nUSER PROFILE:")
             prompt_parts.append(profile_str)
+
+    # Add user portfolio if provided
+    if portfolio:
+        portfolio_str = format_portfolio_for_prompt(portfolio)
+        if portfolio_str:
+            prompt_parts.append("\n\nUSER PORTFOLIO:")
+            prompt_parts.append(portfolio_str)
     
     # Get Pacific time with daylight saving adjustment
     pacific = pytz.timezone("US/Pacific")
