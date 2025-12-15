@@ -535,6 +535,9 @@ async def get_user_profile_tool_handler(
     The profile includes 21 fields across 5 categories (basics, preferences, goals,
     interests, background) that are automatically extracted from conversations.
     Profile extraction happens during /v1/store calls.
+    
+    This tool provides you structured data with a well-defined schema for consistent access
+    and integration across the system.
 
     Args:
         user_id: User identifier
@@ -726,7 +729,18 @@ async def get_user_profile_tool_handler(
 # Get user profile tool definition
 get_user_profile_tool = {
     "name": "get_user_profile",
-    "description": "Retrieve user profile from agentic-memories service. Returns 21 profile fields across 5 categories (basics, preferences, goals, interests, background) that are automatically extracted from conversations. Use this tool to get user context for personalized responses. Profile extraction happens automatically during conversation storage.",
+    "description": (
+        "Retrieve user profile with structured data automatically extracted from conversations. "
+        "Returns 21 fields across 5 categories: "
+        "(1) Basics - name, age, location, occupation, timezone; "
+        "(2) Preferences - communication style, topics of interest, language; "
+        "(3) Goals - short-term goals, long-term goals, values; "
+        "(4) Interests - hobbies, expertise areas; "
+        "(5) Background - education, work history, life events. "
+        "Includes a completeness percentage (0-100) indicating how much is known. "
+        "Use this to personalize responses, understand user context, tailor recommendations, "
+        "or reference what you know about them. Fields may be null if not yet learned. Profile extraction happens automatically during conversation storage, you can nudge the user to give you more information if the profile is incomplete."
+    ),
     "inputSchema": {
         "type": "object",
         "properties": {
@@ -782,11 +796,25 @@ async def get_portfolio_tool_handler(
     """
     Get user's investment portfolio holdings from agentic-memories service.
 
+    This tool provides structured data with a well-defined schema containing the user's
+    stock positions, quantities, and purchase information. Use this to:
+    - Answer questions about what stocks/assets the user owns
+    - Calculate portfolio value, gains/losses, and performance metrics
+    - Provide personalized investment insights based on their actual holdings
+    - Compare their positions against market trends or news
+    - Suggest rebalancing or diversification strategies
+    - Any other questions about stocks or investments the user may have.
+    - Use this tool in conjuction with other tools to get a comprehensive understanding of the user's investment situation.
+
+    The holdings data includes ticker symbols, share quantities, purchase prices,
+    and dates—everything needed to analyze their investment situation.
+
     Args:
         user_id: User identifier
 
     Returns:
-        dict: Portfolio with holdings array, total count, and last updated timestamp
+        dict: Portfolio with holdings array (ticker, shares, cost_basis, purchase_date),
+              total_holdings count, and last_updated timestamp
     """
     start_time = time.time()
 
@@ -929,7 +957,17 @@ async def get_portfolio_tool_handler(
 # Get portfolio tool definition
 get_portfolio_tool = {
     "name": "get_portfolio",
-    "description": "Get user's investment portfolio holdings. Returns all stocks, ETFs, and other assets the user owns with ticker symbols, share counts, and average purchase prices. Use this tool when the user asks about their portfolio, holdings, investments, or what stocks they own.",
+    "description": (
+        "Get user's investment portfolio holdings. Returns structured data with "
+        "ticker symbols, share counts, average purchase prices, and dates for all "
+        "stocks, ETFs, and assets the user owns. Use this to: "
+        "(1) Answer questions about what stocks/assets they own, "
+        "(2) Calculate portfolio value, gains/losses, and performance metrics, "
+        "(3) Provide personalized investment insights based on actual holdings, "
+        "(4) Compare positions against market trends or news, "
+        "(5) Suggest rebalancing or diversification strategies. "
+        "Combine with analyze_stock or get_stock_history for comprehensive analysis."
+    ),
     "inputSchema": {
         "type": "object",
         "properties": {
