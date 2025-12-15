@@ -739,3 +739,435 @@ get_user_profile_tool = {
     },
     "handler": get_user_profile_tool_handler
 }
+
+
+# =============================================================================
+# Portfolio Management Tools (Epic 10)
+# =============================================================================
+
+import re
+
+# Ticker validation pattern: 1-10 uppercase alphanumeric + dots (for BRK.B style)
+TICKER_PATTERN = re.compile(r'^[A-Z0-9\.]{1,10}$')
+
+
+def normalize_ticker(ticker: str) -> Optional[str]:
+    """
+    Normalize ticker to uppercase and validate format.
+
+    Args:
+        ticker: Stock ticker symbol (e.g., 'aapl', 'GOOGL', 'BRK.B')
+
+    Returns:
+        Normalized uppercase ticker or None if invalid
+    """
+    if not ticker:
+        return None
+
+    normalized = ticker.upper().strip()
+
+    if not normalized:
+        return None
+
+    if not TICKER_PATTERN.match(normalized):
+        logger.warning(f"Invalid ticker format rejected: {ticker}")
+        return None
+
+    return normalized
+
+
+async def get_portfolio_tool_handler(
+    user_id: str
+) -> Dict[str, Any]:
+    """
+    Get user's investment portfolio holdings from agentic-memories service.
+
+    Args:
+        user_id: User identifier
+
+    Returns:
+        dict: Portfolio with holdings array, total count, and last updated timestamp
+    """
+    start_time = time.time()
+
+    # Get agentic-memories URL from config
+    try:
+        config = get_config()
+        memories_url = config.get("AGENTIC_MEMORIES_URL", "http://host.docker.internal:8080")
+    except Exception as e:
+        logger.warning(f"Failed to load config, using default: {e}")
+        memories_url = "http://host.docker.internal:8080"
+
+    # Validate user_id
+    if not user_id or not isinstance(user_id, str):
+        logger.error(
+            "Invalid user_id for portfolio retrieval",
+            extra={"user_id": user_id, "error": "user_id must be non-empty string"}
+        )
+        return {
+            "status": "error",
+            "message": "Invalid user_id: must be non-empty string",
+            "user_id": user_id
+        }
+
+    try:
+        logger.info(
+            "Retrieving portfolio via MCP tool",
+            extra={
+                "user_id": user_id,
+                "url": memories_url
+            }
+        )
+
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(
+                f"{memories_url}/v1/portfolio",
+                params={"user_id": user_id}
+            )
+
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            if response.status_code == 200:
+                result = response.json()
+                holdings = result.get("holdings", [])
+
+                logger.info(
+                    "Portfolio retrieved successfully via MCP tool",
+                    extra={
+                        "user_id": user_id,
+                        "holdings_count": len(holdings),
+                        "duration_ms": duration_ms
+                    }
+                )
+
+                return {
+                    "status": "success",
+                    "user_id": result.get("user_id", user_id),
+                    "holdings": holdings,
+                    "total_holdings": result.get("total_holdings", len(holdings)),
+                    "last_updated": result.get("last_updated")
+                }
+
+            else:
+                error_msg = f"HTTP {response.status_code}"
+                try:
+                    error_data = response.json()
+                    error_msg = error_data.get("detail", error_msg)
+                except Exception:
+                    error_msg = response.text or error_msg
+
+                logger.error(
+                    "Portfolio retrieval failed via MCP tool",
+                    extra={
+                        "user_id": user_id,
+                        "status_code": response.status_code,
+                        "error": error_msg,
+                        "duration_ms": duration_ms
+                    }
+                )
+
+                return {
+                    "status": "error",
+                    "message": f"Failed to retrieve portfolio: {error_msg}",
+                    "error_code": response.status_code,
+                    "user_id": user_id
+                }
+
+    except httpx.TimeoutException as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+        logger.error(
+            "Portfolio retrieval timed out via MCP tool",
+            extra={
+                "user_id": user_id,
+                "error": str(e),
+                "duration_ms": duration_ms
+            }
+        )
+        return {
+            "status": "error",
+            "message": "Portfolio service timed out. Please try again.",
+            "error_code": "TIMEOUT",
+            "user_id": user_id
+        }
+
+    except (httpx.NetworkError, httpx.ConnectError) as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+        logger.error(
+            "Network error retrieving portfolio via MCP tool",
+            extra={
+                "user_id": user_id,
+                "error": str(e),
+                "duration_ms": duration_ms
+            }
+        )
+        return {
+            "status": "error",
+            "message": "Portfolio service unavailable. Please try again later.",
+            "error_code": "NETWORK_ERROR",
+            "user_id": user_id
+        }
+
+    except Exception as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+        logger.error(
+            "Unexpected error retrieving portfolio via MCP tool",
+            extra={
+                "user_id": user_id,
+                "error": str(e),
+                "duration_ms": duration_ms
+            },
+            exc_info=True
+        )
+        return {
+            "status": "error",
+            "message": f"Unexpected error: {str(e)}",
+            "error_code": "INTERNAL_ERROR",
+            "user_id": user_id
+        }
+
+
+# Get portfolio tool definition
+get_portfolio_tool = {
+    "name": "get_portfolio",
+    "description": "Get user's investment portfolio holdings. Returns all stocks, ETFs, and other assets the user owns with ticker symbols, share counts, and average purchase prices. Use this tool when the user asks about their portfolio, holdings, investments, or what stocks they own.",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "user_id": {
+                "type": "string",
+                "description": "User identifier"
+            }
+        },
+        "required": ["user_id"]
+    },
+    "handler": get_portfolio_tool_handler
+}
+
+
+async def add_holding_tool_handler(
+    user_id: str,
+    ticker: str,
+    asset_name: str = None,
+    shares: float = None,
+    avg_price: float = None
+) -> Dict[str, Any]:
+    """
+    Add or update a stock holding in user's portfolio.
+
+    Uses UPSERT behavior: creates new holding if ticker doesn't exist,
+    updates existing holding if it does.
+
+    Args:
+        user_id: User identifier
+        ticker: Stock ticker symbol (e.g., 'AAPL', 'GOOGL')
+        asset_name: Optional human-readable name (e.g., 'Apple Inc.')
+        shares: Optional number of shares
+        avg_price: Optional average purchase price per share
+
+    Returns:
+        dict: Result with holding details and created/updated flag
+    """
+    start_time = time.time()
+
+    # Get agentic-memories URL from config
+    try:
+        config = get_config()
+        memories_url = config.get("AGENTIC_MEMORIES_URL", "http://host.docker.internal:8080")
+    except Exception as e:
+        logger.warning(f"Failed to load config, using default: {e}")
+        memories_url = "http://host.docker.internal:8080"
+
+    # Validate user_id
+    if not user_id or not isinstance(user_id, str):
+        logger.error(
+            "Invalid user_id for add_holding",
+            extra={"user_id": user_id, "error": "user_id must be non-empty string"}
+        )
+        return {
+            "status": "error",
+            "message": "Invalid user_id: must be non-empty string"
+        }
+
+    # Normalize and validate ticker
+    normalized_ticker = normalize_ticker(ticker)
+    if normalized_ticker is None:
+        logger.warning(
+            "Invalid ticker format for add_holding",
+            extra={"user_id": user_id, "ticker": ticker}
+        )
+        return {
+            "status": "error",
+            "message": f"Invalid ticker format: '{ticker}'. Ticker must be 1-10 alphanumeric characters (e.g., AAPL, GOOGL, BRK.B)."
+        }
+
+    # Build request payload
+    payload = {
+        "user_id": user_id,
+        "ticker": normalized_ticker
+    }
+    if asset_name:
+        payload["asset_name"] = asset_name
+    if shares is not None:
+        payload["shares"] = shares
+    if avg_price is not None:
+        payload["avg_price"] = avg_price
+
+    try:
+        logger.info(
+            "Adding holding via MCP tool",
+            extra={
+                "user_id": user_id,
+                "ticker": normalized_ticker,
+                "shares": shares,
+                "avg_price": avg_price
+            }
+        )
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                f"{memories_url}/v1/portfolio/holding",
+                json=payload,
+                headers={"Content-Type": "application/json"}
+            )
+
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            if response.status_code in (200, 201):
+                result = response.json()
+                created = response.status_code == 201 or result.get("created", False)
+
+                logger.info(
+                    "Holding added/updated successfully via MCP tool",
+                    extra={
+                        "user_id": user_id,
+                        "ticker": normalized_ticker,
+                        "was_created": created,
+                        "duration_ms": duration_ms
+                    }
+                )
+
+                return {
+                    "status": "success",
+                    "holding": {
+                        "id": result.get("id"),
+                        "ticker": result.get("ticker"),
+                        "asset_name": result.get("asset_name"),
+                        "shares": result.get("shares"),
+                        "avg_price": result.get("avg_price"),
+                        "first_acquired": result.get("first_acquired"),
+                        "last_updated": result.get("last_updated")
+                    },
+                    "created": created,
+                    "message": f"{'Added' if created else 'Updated'} {normalized_ticker} in your portfolio."
+                }
+
+            else:
+                error_msg = f"HTTP {response.status_code}"
+                try:
+                    error_data = response.json()
+                    error_msg = error_data.get("detail", error_msg)
+                except Exception:
+                    error_msg = response.text or error_msg
+
+                logger.error(
+                    "Add holding failed via MCP tool",
+                    extra={
+                        "user_id": user_id,
+                        "ticker": normalized_ticker,
+                        "status_code": response.status_code,
+                        "error": error_msg,
+                        "duration_ms": duration_ms
+                    }
+                )
+
+                return {
+                    "status": "error",
+                    "message": f"Failed to add holding: {error_msg}",
+                    "error_code": response.status_code
+                }
+
+    except httpx.TimeoutException as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+        logger.error(
+            "Add holding timed out via MCP tool",
+            extra={
+                "user_id": user_id,
+                "ticker": normalized_ticker,
+                "error": str(e),
+                "duration_ms": duration_ms
+            }
+        )
+        return {
+            "status": "error",
+            "message": "Portfolio service timed out. Please try again.",
+            "error_code": "TIMEOUT"
+        }
+
+    except (httpx.NetworkError, httpx.ConnectError) as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+        logger.error(
+            "Network error adding holding via MCP tool",
+            extra={
+                "user_id": user_id,
+                "ticker": normalized_ticker,
+                "error": str(e),
+                "duration_ms": duration_ms
+            }
+        )
+        return {
+            "status": "error",
+            "message": "Portfolio service unavailable. Please try again later.",
+            "error_code": "NETWORK_ERROR"
+        }
+
+    except Exception as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+        logger.error(
+            "Unexpected error adding holding via MCP tool",
+            extra={
+                "user_id": user_id,
+                "ticker": normalized_ticker,
+                "error": str(e),
+                "duration_ms": duration_ms
+            },
+            exc_info=True
+        )
+        return {
+            "status": "error",
+            "message": f"Unexpected error: {str(e)}",
+            "error_code": "INTERNAL_ERROR"
+        }
+
+
+# Add holding tool definition
+add_holding_tool = {
+    "name": "add_holding",
+    "description": "Add or update a stock holding in user's portfolio. Use this tool when the user mentions buying stocks, adding to their portfolio, or wants to record a purchase. If the ticker already exists, it will update the existing holding (UPSERT behavior).",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "user_id": {
+                "type": "string",
+                "description": "User identifier"
+            },
+            "ticker": {
+                "type": "string",
+                "description": "Stock ticker symbol (e.g., 'AAPL', 'GOOGL', 'BRK.B'). Will be normalized to uppercase."
+            },
+            "asset_name": {
+                "type": "string",
+                "description": "Optional human-readable name for the asset (e.g., 'Apple Inc.')"
+            },
+            "shares": {
+                "type": "number",
+                "description": "Number of shares owned"
+            },
+            "avg_price": {
+                "type": "number",
+                "description": "Average purchase price per share in USD"
+            }
+        },
+        "required": ["user_id", "ticker"]
+    },
+    "handler": add_holding_tool_handler
+}
