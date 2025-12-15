@@ -803,7 +803,7 @@ async def batch_fetch_prices_with_cache(
     Fetch current prices for multiple tickers with Redis caching.
 
     Uses single batch call to yfinance for uncached tickers.
-    Caches fetched prices in Redis with 5-minute TTL.
+    Caches fetched prices in Redis with 15-minute TTL.
 
     Args:
         tickers: List of ticker symbols (already normalized to uppercase)

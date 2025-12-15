@@ -1,6 +1,6 @@
 # Story 10.5: Portfolio Value & Performance Tracking
 
-Status: ready-for-dev
+Status: done
 
 **Prerequisites:** Story 10.1 ✅, Story 10.6 ✅ (both complete)
 
@@ -226,3 +226,42 @@ Claude Opus 4.5 (claude-opus-4-5-20251101)
 
 **MODIFIED:** `mcp_server/requirements.txt`
 - Added `redis>=5.0.0` dependency for async Redis client
+
+## Code Review Record
+
+**Review Date:** 2025-12-15
+**Reviewer:** Claude Opus 4.5 (claude-opus-4-5-20251101)
+**Status:** ✅ APPROVED
+
+### Acceptance Criteria Verification
+
+| AC | Status | Notes |
+|----|--------|-------|
+| AC #1 | ✅ Pass | Holdings enriched with current_price, current_value, cost_basis, gain_loss, gain_loss_pct |
+| AC #2 | ✅ Pass | Default `include_prices=False` preserves backward compatibility |
+| AC #3 | ✅ Pass | Single batch `yf.download()` call, Redis caching with 15-min TTL |
+| AC #4 | ✅ Pass | Tool description guides LLM for "how is my portfolio doing?" queries |
+| AC #5 | ✅ Pass | Failed tickers return null values + `price_fetch_errors` array |
+
+### Code Quality Assessment
+
+**Strengths:**
+- Proper error handling (Redis failures don't break price fetching)
+- Correct DataFrame format handling for single/multi-ticker responses
+- Resource cleanup (Redis connection closed if created internally)
+- Comprehensive logging throughout
+- Defensive coding with null checks
+
+**Issues Found & Fixed:**
+- Minor: Docstring at line 806 said "5-minute TTL" but actual TTL is 15 minutes → Fixed
+
+### Test Evidence
+
+- Basic portfolio fetch (include_prices=false): ✅
+- Price enrichment (include_prices=true): ✅
+- Cache verification (15-min TTL, cache hits logged): ✅
+- Partial failure handling (FAKEXYZ → null + error list): ✅
+
+### Review Decision
+
+**APPROVED** - Implementation complete, all ACs met, code quality good.
