@@ -468,13 +468,9 @@ async def stream_response_to_telegram(
                         sent_messages.append(status_message_id)  # Track for later edits
                         last_update_time = current_time_ms
 
-                        # Cancel typing indicator
-                        if typing_task:
-                            typing_task.cancel()
-                            try:
-                                await typing_task
-                            except asyncio.CancelledError:
-                                pass
+                        # Keep typing indicator running during streaming
+                        # It will show between rate-limited message edits
+                        # Cancel happens when stream completes (done frame)
 
                         logger.info(
                             "Transitioned to response streaming",
@@ -619,6 +615,14 @@ async def stream_response_to_telegram(
 
             # Handle done and error frames
             elif chunk_type in ["done", "error"]:
+                # Cancel typing indicator now that stream is complete
+                if typing_task and not typing_task.done():
+                    typing_task.cancel()
+                    try:
+                        await typing_task
+                    except asyncio.CancelledError:
+                        pass
+
                 logger.info(
                     f"Stream {chunk_type} frame received",
                     extra={
