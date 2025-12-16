@@ -424,7 +424,11 @@ Given price fetch fails for some tickers, then:
 
 ### Story 10.7: Personalized Stock Recommendations
 
-**Goal:** Provide personalized stock recommendations based on user's portfolio, risk profile, and preferences.
+**Status:** ❌ REJECTED
+**Decision Date:** 2025-12-16
+**Rationale:** Redundant - LLM already handles personalized recommendations naturally via portfolio context injection (Story 10.3). With portfolio data, user profile, and stock analysis tools available in LLM context, a dedicated recommendation tool would constrain rather than enhance the LLM's reasoning capabilities.
+
+~~**Goal:** Provide personalized stock recommendations based on user's portfolio, risk profile, and preferences.~~
 
 **As a** user,
 **I want** Annie to give me personalized stock recommendations,
@@ -557,27 +561,27 @@ Given user asks "What should I invest in?", then Annie:
 ```
 10.1 Portfolio Access Tools (GET/POST) ✅
   │
-  ├──► 10.2 Watchlist & Intent
+  ├──► 10.2 Watchlist & Intent (BLOCKED)
   │
-  ├──► 10.3 Portfolio Context Injection
+  ├──► 10.3 Portfolio Context Injection ✅
   │
   └──► 10.6 Stock Market Analysis (Yahoo Finance) ✅
          │
-         ├──► 10.5 Portfolio Value & Performance (NEXT)
-         │
-         └──► 10.7 Personalized Recommendations
+         └──► 10.5 Portfolio Value & Performance ✅
 
 10.4 Update/Remove Tools ✅
+
+Note: 10.7 REJECTED - LLM handles recommendations naturally via context
 ```
 
 **Recommended Execution Order:**
 1. ~~10.1 - Portfolio Access Tools (foundation)~~ ✅ DONE
-2. 10.2 - Watchlist & Intent (quick win)
+2. 10.2 - Watchlist & Intent (BLOCKED - waiting on agentic-memories)
 3. ~~10.6 - Stock Market Analysis (Yahoo Finance - needed for prices)~~ ✅ DONE
 4. ~~10.4 - Update/Remove Tools~~ ✅ DONE
-5. 10.3 - Portfolio Context Injection (LLM awareness)
-6. 10.5 - Portfolio Value & Performance (enhance get_portfolio with prices)
-7. 10.7 - Personalized Recommendations (capstone)
+5. ~~10.3 - Portfolio Context Injection (LLM awareness)~~ ✅ DONE
+6. ~~10.5 - Portfolio Value & Performance (enhance get_portfolio with prices)~~ ✅ DONE
+7. ~~10.7 - Personalized Recommendations~~ ❌ REJECTED (LLM handles via context)
 
 ---
 
