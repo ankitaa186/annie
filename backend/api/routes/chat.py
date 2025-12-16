@@ -19,6 +19,7 @@ from api.memory import MemoryManager
 from api.mcp_client import MCPClient, MCPClientError, MCPNetworkError, MCPToolError
 from api.profile import ProfileManager
 from api.state import StateManager, StateError
+from api.status import emit_status
 
 try:
     from langfuse.decorators import observe, langfuse_context
@@ -469,6 +470,9 @@ async def create_chat(request: ChatRequest, background_tasks: BackgroundTasks):
                         }
                     )
 
+                    # Emit status: Starting memory retrieval
+                    emit_status("Retrieving your memories...", icon="🔍")
+
                     # Call retrieve_memories MCP tool
                     async with MCPClient() as mcp_client:
                         retrieval_result = await mcp_client.call_tool(
@@ -483,6 +487,12 @@ async def create_chat(request: ChatRequest, background_tasks: BackgroundTasks):
                     # Check if memories were retrieved
                     memories = retrieval_result.get("memories", [])
                     memory_count = retrieval_result.get("memory_count", 0)
+
+                    # Emit status: Memory retrieval complete
+                    if memory_count > 0:
+                        emit_status(f"Found {memory_count} relevant memories", icon="✅")
+                    else:
+                        emit_status("No relevant memories found", icon="✅")
 
                     logger.info(
                         "Memory retrieval completed",

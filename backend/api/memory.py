@@ -17,6 +17,7 @@ from api.config import get_config
 from api.logging import get_logger
 from api.memory_client import MemoryClient, MemoryNetworkError, MemoryAPIError
 from api.state import StateManager
+from api.status import emit_status
 
 try:
     from langfuse.decorators import observe

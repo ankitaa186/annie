@@ -1,0 +1,425 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <metadata>
+    <story-id>11-1-status-emitter-infrastructure</story-id>
+    <epic-id>epic-11-realtime-status-updates</epic-id>
+    <title>Status Emitter Infrastructure</title>
+    <generated-date>2025-12-16</generated-date>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <summary>
+    <description>
+      Create the core status emission system using contextvars for request-scoped status updates.
+      This provides a simple, fire-and-forget API for emitting status updates from any async function
+      without complex callback threading. The system mirrors the existing Langfuse tracing pattern
+      with contextvars for async-safe operation across concurrent requests.
+    </description>
+    <business-value>
+      Foundation for real-time status updates (Epic 11), enabling transparent visibility into Annie's
+      processing phases, tool calls, and memory operations. This builds user trust and reduces wait anxiety.
+    </business-value>
+  </summary>
+
+  <acceptance-criteria>
+    <criterion id="1">
+      <title>emit_status() Function</title>
+      <requirements>
+        - Callable from any async function without explicit parameters
+        - Uses contextvars to find active status context
+        - Fire-and-forget pattern with &lt;10ms overhead
+        - No-op if no context active (graceful degradation)
+        - Accepts message string and optional icon parameter (default: "🔄")
+      </requirements>
+    </criterion>
+    <criterion id="2">
+      <title>with_status() Decorator</title>
+      <requirements>
+        - Wraps async functions with status emission
+        - Emits status on function entry
+        - Supports string interpolation for dynamic messages (e.g., {tool_name})
+        - Preserves function signature and metadata using @wraps
+      </requirements>
+    </criterion>
+    <criterion id="3">
+      <title>StatusContext Manager</title>
+      <requirements>
+        - Context manager that initializes status context for a request
+        - Stores conversation_id for correlation
+        - Provides callback mechanism for status delivery to SSE stream
+        - Async-safe across concurrent requests using contextvars
+        - Properly cleans up context on exit
+      </requirements>
+    </criterion>
+    <criterion id="4">
+      <title>Langfuse Integration</title>
+      <requirements>
+        - Status emissions traced as spans in Langfuse
+        - Links to parent request trace via existing tracing context
+        - Non-blocking (follows existing fire-and-forget pattern)
+      </requirements>
+    </criterion>
+  </acceptance-criteria>
+
+  <architecture>
+    <pattern-reference>
+      <source>backend/api/observability/tracing.py</source>
+      <description>
+        The status system follows the exact same pattern as Langfuse tracing:
+        - Singleton ContextVar for request-scoped state (_status_context)
+        - Fire-and-forget emission with graceful error handling
+        - Async-safe isolation between concurrent requests
+        - No manual context passing required
+      </description>
+      <key-concepts>
+        - ContextVar isolation ensures each request has its own status emitter
+        - Context manager (StatusContext) sets/resets token on enter/exit
+        - emit_status() does contextvar lookup: _status_context.get(None)
+        - Graceful degradation: no-op when no context active
+      </key-concepts>
+    </pattern-reference>
+
+    <integration-points>
+      <point>
+        <component>SSE Streaming (Story 11.2)</component>
+        <description>
+          StatusContext callback will write status frames to SSE stream.
+          This story only creates the infrastructure - SSE integration happens in Story 11.2.
+        </description>
+      </point>
+      <point>
+        <component>Langfuse Tracing</component>
+        <description>
+          Reuse existing get_current_trace() from backend/api/observability/tracing.py
+          to link status emissions as spans under the active request trace.
+        </description>
+      </point>
+    </integration-points>
+
+    <performance-requirements>
+      <requirement>
+        <metric>emit_status() overhead</metric>
+        <target>&lt;10ms</target>
+        <implementation>
+          - No blocking I/O in emission path
+          - Simple contextvar lookup (O(1))
+          - Callback execution is caller's responsibility
+          - Try/except to prevent exceptions from propagating
+        </implementation>
+      </requirement>
+    </performance-requirements>
+  </architecture>
+
+  <code-patterns>
+    <pattern name="ContextVar Singleton">
+      <reference>backend/api/observability/tracing.py lines 64-67</reference>
+      <example><![CDATA[
+# Request-scoped context variables (async-safe)
+_current_trace: ContextVar[Optional[Any]] = ContextVar('current_trace', default=None)
+# Stack of spans to handle nesting safely (immutable tuple)
+_span_stack: ContextVar[tuple] = ContextVar('span_stack', default=())
+      ]]></example>
+      <application>
+        Create _status_context: ContextVar[Optional[StatusEmitter]] = ContextVar('status', default=None)
+      </application>
+    </pattern>
+
+    <pattern name="Fire-and-Forget Error Handling">
+      <reference>backend/api/observability/tracing.py lines 108-115</reference>
+      <example><![CDATA[
+try:
+    trace = client.trace(name=name, user_id=user_id, session_id=session_id, metadata=metadata or {})
+    _current_trace.set(trace)
+    logger.info(f"[LANGFUSE] Started trace: {name}", extra={...})
+    return trace
+except Exception as e:
+    # Fire-and-forget: log warning but don't crash
+    logger.warning(f"[LANGFUSE] Failed to start trace: {name}", extra={...})
+    return None
+      ]]></example>
+      <application>
+        StatusEmitter.emit() should catch all exceptions and never fail.
+        emit_status() should handle missing context gracefully.
+      </application>
+    </pattern>
+
+    <pattern name="Context Manager with Token">
+      <reference>backend/api/observability/tracing.py lines 124-135</reference>
+      <example><![CDATA[
+class StatusContext:
+    """Async context manager for status emission scope"""
+    def __init__(self, conversation_id: str, callback: Callable[[str], None]):
+        self.emitter = StatusEmitter(conversation_id, callback)
+        self.token = None
+
+    async def __aenter__(self):
+        self.token = _status_context.set(self.emitter)
+        return self.emitter
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        _status_context.reset(self.token)
+        return False
+      ]]></example>
+      <application>
+        Use token pattern to ensure proper cleanup even on exceptions.
+        Return False from __aexit__ to propagate exceptions.
+      </application>
+    </pattern>
+
+    <pattern name="Langfuse Client Singleton">
+      <reference>backend/api/observability/langfuse_client.py lines 23-94</reference>
+      <example><![CDATA[
+from api.observability.langfuse_client import get_langfuse_client
+
+client = get_langfuse_client()
+if client:
+    # Create span for status emission
+    span = client.span(name="status_emission", metadata={"message": message})
+      ]]></example>
+      <application>
+        Use get_langfuse_client() to check if tracing is enabled.
+        Use get_current_trace() from tracing.py to link spans to active trace.
+      </application>
+    </pattern>
+
+    <pattern name="Decorator with @wraps">
+      <reference>Standard Python pattern</reference>
+      <example><![CDATA[
+from functools import wraps
+
+def with_status(message: str, icon: str = "🔄"):
+    """Decorator for wrapping functions with status emission"""
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            emit_status(message, icon)
+            return await func(*args, **kwargs)
+        return wrapper
+    return decorator
+      ]]></example>
+      <application>
+        Use @wraps to preserve function metadata (name, docstring, signature).
+        Decorator should work with async functions only.
+      </application>
+    </pattern>
+  </code-patterns>
+
+  <implementation-plan>
+    <task id="1">
+      <description>Create status module structure</description>
+      <files-to-create>
+        <file>backend/api/status.py</file>
+      </files-to-create>
+      <steps>
+        - Create StatusEmitter class with conversation_id and callback
+        - Add emit() method with fire-and-forget pattern
+        - Define _status_context: ContextVar[Optional[StatusEmitter]]
+        - Add module imports: contextvars, functools, typing, logging
+      </steps>
+    </task>
+
+    <task id="2">
+      <description>Implement emit_status() function</description>
+      <files-to-modify>
+        <file>backend/api/status.py</file>
+      </files-to-modify>
+      <steps>
+        - Implement emit_status(message: str, icon: str = "🔄")
+        - Use _status_context.get() to retrieve emitter
+        - Handle None case gracefully (no-op)
+        - Format message as f"{icon} {message}"
+        - Call emitter.emit() if context exists
+      </steps>
+    </task>
+
+    <task id="3">
+      <description>Implement with_status() decorator</description>
+      <files-to-modify>
+        <file>backend/api/status.py</file>
+      </files-to-modify>
+      <steps>
+        - Create decorator factory accepting message and icon
+        - Use @wraps(func) to preserve function metadata
+        - Support async functions only
+        - Call emit_status() on function entry
+        - Return function result
+      </steps>
+    </task>
+
+    <task id="4">
+      <description>Implement StatusContext manager</description>
+      <files-to-modify>
+        <file>backend/api/status.py</file>
+      </files-to-modify>
+      <steps>
+        - Create async context manager class
+        - Accept conversation_id and status_callback parameters
+        - Create StatusEmitter in __init__
+        - Set contextvar token in __aenter__
+        - Reset contextvar in __aexit__
+        - Handle exceptions gracefully (return False to propagate)
+      </steps>
+    </task>
+
+    <task id="5">
+      <description>Add Langfuse tracing integration</description>
+      <files-to-modify>
+        <file>backend/api/status.py</file>
+      </files-to-modify>
+      <steps>
+        - Import get_current_trace from api.observability.tracing
+        - In StatusEmitter.emit(), create span for each emission
+        - Link span to current trace if available
+        - Use fire-and-forget pattern (non-blocking)
+        - Include message and icon in span metadata
+      </steps>
+    </task>
+
+    <task id="6">
+      <description>Write unit tests</description>
+      <files-to-create>
+        <file>backend/tests/unit/test_status.py</file>
+      </files-to-create>
+      <test-cases>
+        - test_emit_status_with_active_context: Verify callback invoked
+        - test_emit_status_without_context: Verify no-op behavior
+        - test_emit_status_custom_icon: Verify icon parameter works
+        - test_with_status_decorator: Verify decorator calls emit_status
+        - test_status_context_isolation: Verify concurrent requests isolated
+        - test_status_context_cleanup: Verify context reset on exit
+        - test_langfuse_span_creation: Verify spans created when tracing enabled
+        - test_emit_status_error_handling: Verify exceptions don't propagate
+      </test-cases>
+    </task>
+  </implementation-plan>
+
+  <testing-strategy>
+    <unit-tests>
+      <test>
+        <name>test_emit_status_with_active_context</name>
+        <description>
+          Setup StatusContext with mock callback, call emit_status(),
+          verify callback invoked with formatted message.
+        </description>
+      </test>
+      <test>
+        <name>test_emit_status_without_context</name>
+        <description>
+          Call emit_status() without setting up StatusContext,
+          verify no error raised (graceful no-op).
+        </description>
+      </test>
+      <test>
+        <name>test_status_context_isolation</name>
+        <description>
+          Create two concurrent async tasks with different StatusContexts,
+          emit status from both, verify each callback receives only its own messages.
+        </description>
+      </test>
+      <test>
+        <name>test_with_status_decorator</name>
+        <description>
+          Decorate async function with @with_status(),
+          setup StatusContext, call function,
+          verify status emitted on entry.
+        </description>
+      </test>
+    </unit-tests>
+
+    <performance-tests>
+      <test>
+        <name>test_emit_status_overhead</name>
+        <description>
+          Measure time for 1000 emit_status() calls,
+          verify average overhead is &lt;10ms per call.
+        </description>
+      </test>
+    </performance-tests>
+  </testing-strategy>
+
+  <files-to-modify>
+    <file>
+      <path>backend/api/status.py</path>
+      <action>CREATE</action>
+      <description>
+        New module containing StatusEmitter class, emit_status() function,
+        with_status() decorator, and StatusContext async context manager.
+      </description>
+    </file>
+    <file>
+      <path>backend/tests/unit/test_status.py</path>
+      <action>CREATE</action>
+      <description>
+        Unit tests for status emission infrastructure covering all acceptance criteria.
+      </description>
+    </file>
+  </files-to-modify>
+
+  <dependencies>
+    <prerequisite>
+      <component>Langfuse tracing infrastructure</component>
+      <status>COMPLETE</status>
+      <location>backend/api/observability/tracing.py</location>
+    </prerequisite>
+    <prerequisite>
+      <component>Langfuse client singleton</component>
+      <status>COMPLETE</status>
+      <location>backend/api/observability/langfuse_client.py</location>
+    </prerequisite>
+  </dependencies>
+
+  <references>
+    <reference>
+      <type>Epic</type>
+      <path>docs/epics/epic-11-realtime-status-updates.md</path>
+      <section>Story 11.1: Status Emitter Infrastructure</section>
+    </reference>
+    <reference>
+      <type>Pattern Reference</type>
+      <path>backend/api/observability/tracing.py</path>
+      <description>ContextVar pattern for request-scoped state</description>
+    </reference>
+    <reference>
+      <type>Pattern Reference</type>
+      <path>backend/api/observability/langfuse_client.py</path>
+      <description>Fire-and-forget pattern for observability</description>
+    </reference>
+    <reference>
+      <type>Integration Target</type>
+      <path>backend/api/routes/stream.py</path>
+      <description>Will integrate StatusContext in Story 11.2</description>
+    </reference>
+  </references>
+
+  <implementation-notes>
+    <note>
+      This story creates ONLY the infrastructure. No actual status emissions happen yet.
+      Story 11.2 will integrate StatusContext into the SSE streaming route.
+      Stories 11.4 and 11.5 will add status emissions to tool calls and memory operations.
+    </note>
+    <note>
+      The fire-and-forget pattern is critical: status emissions should NEVER block or crash
+      the main request flow. All exceptions must be caught and logged.
+    </note>
+    <note>
+      ContextVar provides automatic async-safe isolation. No locks or manual context passing needed.
+      Each concurrent request gets its own StatusEmitter via the context manager.
+    </note>
+    <note>
+      Langfuse integration is optional. If Langfuse is unavailable, status system still works
+      (just without trace spans for status emissions).
+    </note>
+  </implementation-notes>
+
+  <completion-checklist>
+    <item>[ ] backend/api/status.py created with all classes/functions</item>
+    <item>[ ] StatusEmitter class with fire-and-forget emit() method</item>
+    <item>[ ] emit_status() function with graceful degradation</item>
+    <item>[ ] with_status() decorator preserving function metadata</item>
+    <item>[ ] StatusContext async context manager with proper cleanup</item>
+    <item>[ ] Langfuse span creation for status emissions</item>
+    <item>[ ] Unit tests covering all acceptance criteria</item>
+    <item>[ ] Performance test verifying &lt;10ms overhead</item>
+    <item>[ ] No changes to existing files (pure infrastructure)</item>
+  </completion-checklist>
+</story-context>

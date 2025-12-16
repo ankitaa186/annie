@@ -1,0 +1,375 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <story-id>11-5-instrument-memory-profile-llm-phases</story-id>
+  <story-title>Instrument Memory, Profile, and LLM Phases</story-title>
+  <epic-id>epic-11-realtime-status-updates</epic-id>
+
+  <summary>
+    Add status emissions for memory operations, profile loading, and LLM composition phases
+    to provide users with visibility into the full processing pipeline. This builds on the
+    status emitter infrastructure from Story 11.1 and adds instrumentation for operations
+    that occur before and during LLM streaming.
+  </summary>
+
+  <acceptance-criteria>
+    <criterion id="AC1">
+      <title>Memory Operations</title>
+      <description>
+        - Retrieval: "🔍 Retrieving your memories..."
+        - Retrieval complete: "✅ Found 3 relevant memories" (or "No relevant memories found")
+        - Storage: "💾 Saving conversation to memory..."
+        - Storage complete: "✅ Memory saved"
+        - Background operations should be silent (no status for background refresh)
+      </description>
+    </criterion>
+
+    <criterion id="AC2">
+      <title>Profile Operations</title>
+      <description>
+        - Load: "👤 Loading your profile..."
+        - Load complete: "✅ Profile loaded (67% complete)"
+        - Background refresh: Silent (no status emission)
+        - Cache hit: Silent (no status - too fast to show)
+      </description>
+    </criterion>
+
+    <criterion id="AC3">
+      <title>LLM Phases</title>
+      <description>
+        - Just before streaming: "🧠 Composing response..."
+        - Emitted after all tool calls complete, before first token
+        - Marks transition from "gathering info" to "generating answer"
+      </description>
+    </criterion>
+
+    <criterion id="AC4">
+      <title>Grok Live Search (if applicable)</title>
+      <description>
+        - Search triggered: "🌐 Searching the web..."
+        - Search complete: "✅ Found {n} sources"
+        - Only emit if Grok Live Search is actually invoked
+      </description>
+    </criterion>
+  </acceptance-criteria>
+
+  <technical-context>
+    <dependencies>
+      <dependency>Story 11.1 - Status emitter infrastructure (emit_status function)</dependency>
+      <dependency>backend/api/status.py - Status emission API</dependency>
+    </dependencies>
+
+    <files-to-modify>
+      <file>
+        <path>backend/api/memory.py</path>
+        <purpose>Add status emissions for memory retrieval and storage operations</purpose>
+        <key-functions>
+          <function name="store_conversation_memory" line="61-159">
+            Current: Silent background storage
+            Add: emit_status() before/after storage (if not background)
+            Note: Storage often happens as background task - decide visibility
+          </function>
+          <function name="format_memories_for_llm" line="372-542">
+            Current: Silent formatting
+            Potential: Add status for retrieval context (not in this function)
+          </function>
+        </key-functions>
+        <notes>
+          Memory retrieval happens via memory_client.retrieve_memories() which is likely
+          called from chat/stream endpoints. Need to add status emissions at call sites.
+          Storage happens in store_conversation_memory() - add emissions there.
+        </notes>
+      </file>
+
+      <file>
+        <path>backend/api/memory_client.py</path>
+        <purpose>HTTP client for agentic-memories - potential status emission location</purpose>
+        <key-functions>
+          <function name="retrieve_memories" line="256-411">
+            Current: 300ms timeout, graceful degradation on failure
+            Consider: Add emit_status() wrapper at call sites (not in client itself)
+          </function>
+          <function name="store_memory" line="109-254">
+            Current: 240s timeout for LLM extraction
+            Consider: Add emit_status() wrapper at call sites
+          </function>
+        </key-functions>
+        <notes>
+          Client methods should remain pure HTTP operations. Status emissions should
+          be added at higher-level call sites in memory.py or route handlers.
+        </notes>
+      </file>
+
+      <file>
+        <path>backend/api/profile.py</path>
+        <purpose>Add status emissions for profile loading operations</purpose>
+        <key-functions>
+          <function name="load_profile_from_cache" line="108-215">
+            Current: Silent cache hit/miss, returns immediately (&lt;10ms)
+            Add: emit_status() ONLY on cache miss before MCP call
+            Skip: Cache hits (too fast), background refresh
+          </function>
+          <function name="refresh_profile_background" line="217-305">
+            Current: Background task with @observe trace
+            Add: NO STATUS - this is background operation, should be silent
+          </function>
+        </key-functions>
+        <notes>
+          Profile cache hits are &lt;10ms - too fast to show status.
+          Only emit status on cache miss when fetching from service.
+          Background refresh must be silent to avoid confusing user.
+        </notes>
+      </file>
+
+      <file>
+        <path>backend/api/routes/stream.py</path>
+        <purpose>Add LLM composition phase status and coordinate profile/memory status</purpose>
+        <key-functions>
+          <function name="stream_generator" line="47-684">
+            Current: Tool orchestration loop, LLM streaming
+            Add: emit_status("🧠 Composing response...") just before streaming starts
+            Location: After tool calls complete, before llm_client.stream_chat_completion()
+            Lines: ~315 (OpenAI/Grok), ~148 (Gemini) - before streaming
+          </function>
+          <function name="stream_response" line="704-930">
+            Current: Loads profile from cache, builds system prompt
+            Add: Check if profile_manager.load_profile_from_cache() was cache miss
+            Consider: Pass status context to profile/memory operations
+          </function>
+        </key-functions>
+        <notes>
+          LLM composition status marks transition from "gathering" to "generating".
+          Profile loading happens at line ~804-824 - need to coordinate with profile.py.
+          Memory retrieval likely happens in chat endpoint - check routes/chat.py.
+        </notes>
+      </file>
+    </files-to-modify>
+
+    <implementation-notes>
+      <note priority="high">
+        emit_status() function must be imported from backend/api/status.py
+        Example: from api.status import emit_status
+      </note>
+
+      <note priority="high">
+        Status emissions should only occur when operations take &gt;100ms.
+        Profile cache hits (&lt;10ms) should skip status emissions.
+      </note>
+
+      <note priority="medium">
+        Memory retrieval call site needs to be identified (likely in routes/chat.py
+        or stream.py). Search for memory_client.retrieve_memories() calls.
+      </note>
+
+      <note priority="medium">
+        For Grok Live Search detection, check if llm_client response metadata
+        includes live_search_sources_used field. May defer to future story if complex.
+      </note>
+
+      <note priority="low">
+        Background operations (profile refresh, memory retry worker) must remain
+        silent - they happen async and would confuse users.
+      </note>
+    </implementation-notes>
+
+    <code-snippets>
+      <snippet location="backend/api/memory.py:61-159">
+        <title>Memory Storage Function - Add Status Emissions</title>
+        <code><![CDATA[
+@observe(name="memory_storage", as_type="trace")
+async def store_conversation_memory(
+    self,
+    user_id: str,
+    conversation_id: str,
+    conversation_history: List[Dict[str, str]],
+    platform: str = "telegram"
+) -> bool:
+    """Store conversation turn in agentic-memories service."""
+    start_time = time.time()
+
+    # ... circuit breaker check ...
+
+    try:
+        # Build metadata
+        metadata = {
+            "platform": platform,
+            "conversation_id": conversation_id
+        }
+
+        # Attempt to store in agentic-memories
+        async with MemoryClient() as memory_client:
+            result = await memory_client.store_memory(user_id, conversation_history, metadata)
+
+        # ... success handling ...
+        return True
+
+    except (MemoryNetworkError, MemoryAPIError) as e:
+        # ... error handling ...
+        return False
+]]></code>
+        <action>
+          Add emit_status("💾 Saving conversation to memory...", icon="💾") before store_memory call
+          Add emit_status("✅ Memory saved", icon="✅") after successful storage
+          Note: This function is often called as background task - check call sites
+        </action>
+      </snippet>
+
+      <snippet location="backend/api/profile.py:108-215">
+        <title>Profile Cache Load - Add Status for Cache Miss</title>
+        <code><![CDATA[
+@observe(name="profile_cache_load", as_type="span")
+async def load_profile_from_cache(self, user_id: str) -> Dict[str, Any]:
+    """Load user profile from Redis cache (non-blocking, <10ms)."""
+    start_time = time.time()
+
+    try:
+        cache_key = f"profile:{user_id}"
+        cached_data = await self.redis_client.get(cache_key)
+
+        if cached_data:
+            # Cache hit - SILENT (too fast to show)
+            profile = json.loads(cached_data)
+            profile["cached"] = True
+            return profile
+        else:
+            # Cache miss - return empty profile
+            # Background refresh will populate it
+            empty_profile = {
+                "user_id": user_id,
+                "completeness": 0,
+                "cached": False,
+                ...
+            }
+            return empty_profile
+]]></code>
+        <action>
+          SKIP status emission on cache hit (too fast)
+          SKIP status emission on cache miss (background refresh is silent)
+          Profile loading status should only emit if doing synchronous fetch (not implemented currently)
+        </action>
+      </snippet>
+
+      <snippet location="backend/api/routes/stream.py:315-320">
+        <title>LLM Composition Phase - Add Status Before Streaming</title>
+        <code><![CDATA[
+if not tool_calls:
+    # No tool calls - LLM returned final content
+    # Now stream the final response
+    logger.info(
+        "No tool calls, streaming final response",
+        extra={
+            "conversation_id": conversation_id,
+            "tool_calls_made": tool_call_count
+        }
+    )
+
+    # Stream tokens from LLM
+    async for event in llm_client.stream_chat_completion(
+        conversation_messages,
+        tools=tools,
+        mcp_client=mcp_client
+    ):
+]]></code>
+        <action>
+          Add emit_status("🧠 Composing response...", icon="🧠") after logger.info and before streaming loop
+          Also add at line ~148 for Gemini path (before streaming starts)
+          This marks transition from "gathering info" to "generating answer"
+        </action>
+      </snippet>
+    </code-snippets>
+
+    <search-queries>
+      <query>
+        <description>Find memory retrieval call sites</description>
+        <pattern>memory_client.retrieve_memories|MemoryClient.*retrieve</pattern>
+        <files>backend/api/routes/*.py</files>
+      </query>
+
+      <query>
+        <description>Find where profile loading happens in routes</description>
+        <pattern>load_profile_from_cache|ProfileManager</pattern>
+        <files>backend/api/routes/*.py</files>
+      </query>
+
+      <query>
+        <description>Check for Grok Live Search detection</description>
+        <pattern>live_search|Live Search|sources_used</pattern>
+        <files>backend/api/llm_client.py</files>
+      </query>
+    </search-queries>
+  </technical-context>
+
+  <timing-considerations>
+    <timing>
+      <operation>Memory retrieval</operation>
+      <duration>200-500ms</duration>
+      <show-status>Yes - worth showing to user</show-status>
+    </timing>
+
+    <timing>
+      <operation>Profile cache miss</operation>
+      <duration>100-300ms</duration>
+      <show-status>Yes - if synchronous fetch (not current implementation)</show-status>
+    </timing>
+
+    <timing>
+      <operation>Profile cache hit</operation>
+      <duration>&lt;10ms</duration>
+      <show-status>No - too fast, skip status</show-status>
+    </timing>
+
+    <timing>
+      <operation>Profile background refresh</operation>
+      <duration>Async background task</duration>
+      <show-status>No - background operation, silent</show-status>
+    </timing>
+
+    <timing>
+      <operation>LLM composition</operation>
+      <duration>Signals phase transition</duration>
+      <show-status>Yes - important UX indicator</show-status>
+    </timing>
+  </timing-considerations>
+
+  <testing-approach>
+    <test-case>
+      <name>Memory retrieval status</name>
+      <steps>
+        1. Trigger memory retrieval with query
+        2. Verify "🔍 Retrieving your memories..." emitted
+        3. Verify completion status with count or "No relevant memories found"
+      </steps>
+    </test-case>
+
+    <test-case>
+      <name>Memory storage status</name>
+      <steps>
+        1. Trigger conversation storage
+        2. Verify "💾 Saving conversation to memory..." emitted
+        3. Verify "✅ Memory saved" on success
+      </steps>
+    </test-case>
+
+    <test-case>
+      <name>Profile cache hit - no status</name>
+      <steps>
+        1. Load profile with warm cache
+        2. Verify NO status emitted (too fast)
+      </steps>
+    </test-case>
+
+    <test-case>
+      <name>LLM composition phase</name>
+      <steps>
+        1. Complete all tool calls
+        2. Verify "🧠 Composing response..." emitted before first token
+        3. Verify timing: after tools, before streaming
+      </steps>
+    </test-case>
+  </testing-approach>
+
+  <related-documentation>
+    <doc>docs/epics/epic-11-realtime-status-updates.md - Epic context and UX flow</doc>
+    <doc>backend/api/status.py - Status emission API (Story 11.1)</doc>
+    <doc>backend/api/routes/stream.py - SSE streaming with status frames (Story 11.2)</doc>
+  </related-documentation>
+</story-context>

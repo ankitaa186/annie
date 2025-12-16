@@ -536,10 +536,25 @@ class GeminiProvider(BaseProvider):
 
                             # Check for finish reason (completion or function call)
                             if candidate.finish_reason:
-                                finish_reason_str = str(candidate.finish_reason)
+                                # finish_reason is an enum - check both value and name
+                                # glm.Candidate.FinishReason.STOP has value 1
+                                finish_reason_value = int(candidate.finish_reason) if candidate.finish_reason else 0
+                                finish_reason_name = candidate.finish_reason.name if hasattr(candidate.finish_reason, 'name') else str(candidate.finish_reason)
 
-                                # If STOP and no function calls, we're done
-                                if "STOP" in finish_reason_str and not function_calls:
+                                logger.debug(
+                                    "Gemini finish reason received",
+                                    extra={
+                                        "provider": "gemini-3-pro-preview",
+                                        "finish_reason": finish_reason_name,
+                                        "finish_reason_value": finish_reason_value,
+                                        "has_function_calls": bool(function_calls),
+                                        "token_count": token_count
+                                    }
+                                )
+
+                                # If STOP (value=1 or name="STOP") and no function calls, we're done
+                                is_stop = finish_reason_value == 1 or finish_reason_name == "STOP"
+                                if is_stop and not function_calls:
                                     duration_ms = int((time.time() - start_time) * 1000)
 
                                     logger.info(
@@ -548,7 +563,7 @@ class GeminiProvider(BaseProvider):
                                             "provider": "gemini-3-pro-preview",
                                             "duration_ms": duration_ms,
                                             "token_count": token_count,
-                                            "finish_reason": finish_reason_str,
+                                            "finish_reason": finish_reason_name,
                                             "tool_iterations": tool_iteration
                                         }
                                     )

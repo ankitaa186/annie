@@ -388,7 +388,8 @@ class GrokProvider(BaseProvider):
                                         "tokens_used": {
                                             "prompt": usage.get("prompt_tokens", 0),
                                             "completion": usage.get("completion_tokens", token_count)
-                                        }
+                                        },
+                                        "sources_used": sources_used  # Include Live Search sources for status emission
                                     }
 
                         except json.JSONDecodeError as e:

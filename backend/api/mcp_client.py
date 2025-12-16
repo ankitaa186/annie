@@ -14,6 +14,8 @@ import httpx
 
 from api.config import get_config
 from api.logging import get_logger
+from api.status import emit_status
+from api.status_summarizers import summarize_tool_result
 
 try:
     from langfuse.decorators import observe, langfuse_context
@@ -282,6 +284,9 @@ class MCPClient:
                 }
             )
 
+            # Emit status: Tool call start
+            emit_status(f"Calling {tool_name}...", icon="🔧")
+
             # Update Langfuse observation with metadata (decorator creates span automatically)
             if LANGFUSE_AVAILABLE:
                 try:
@@ -322,6 +327,10 @@ class MCPClient:
                     }
                 )
 
+                # Emit status: Tool error
+                brief_error = error_message[:50] if len(error_message) > 50 else error_message
+                emit_status(f"{tool_name} failed: {brief_error}", icon="⚠️")
+
                 raise MCPToolError(tool_name, error_message, error_code)
 
             # Check for HTTP error
@@ -337,6 +346,8 @@ class MCPClient:
                         "status_code": response.status_code
                     }
                 )
+                # Emit status: Tool error
+                emit_status(f"{tool_name} failed: {error_msg}", icon="⚠️")
                 raise MCPToolError(tool_name, error_msg)
 
             # Extract result from JSON-RPC response
@@ -365,6 +376,10 @@ class MCPClient:
                     "success": True
                 }
             )
+
+            # Emit status: Tool result success
+            summary = summarize_tool_result(tool_name, tool_result)
+            emit_status(f"{tool_name} complete: {summary}", icon="✅")
 
             # Update Langfuse observation with output (decorator captures return automatically)
             if LANGFUSE_AVAILABLE:
@@ -400,6 +415,8 @@ class MCPClient:
                     "timeout": self.timeout
                 }
             )
+            # Emit status: Tool error
+            emit_status(f"{tool_name} failed: Request timed out", icon="⚠️")
             # @observe() decorator automatically captures and logs the exception
             raise MCPNetworkError(f"Tool '{tool_name}' timed out", e)
 
@@ -414,6 +431,8 @@ class MCPClient:
                     "error": str(e)
                 }
             )
+            # Emit status: Tool error
+            emit_status(f"{tool_name} failed: Network error", icon="⚠️")
             # @observe() decorator automatically captures and logs the exception
             raise MCPNetworkError(f"MCP server unreachable for tool '{tool_name}'", e)
 
@@ -434,5 +453,8 @@ class MCPClient:
                     "error": str(e)
                 }
             )
+            # Emit status: Tool error
+            error_brief = str(e)[:50] if len(str(e)) > 50 else str(e)
+            emit_status(f"{tool_name} failed: {error_brief}", icon="⚠️")
             # @observe() decorator automatically captures and logs the exception
             raise MCPClientError(f"Unexpected error calling tool '{tool_name}': {type(e).__name__}")

@@ -1,0 +1,350 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <metadata>
+    <story-id>11-2-sse-status-frame-support</story-id>
+    <story-title>SSE Status Frame Support</story-title>
+    <epic-id>epic-11</epic-id>
+    <epic-title>Real-Time Status Updates</epic-title>
+    <generated-date>2025-12-16</generated-date>
+    <status>ready-for-dev</status>
+  </metadata>
+
+  <summary>
+    <user-story>
+      As a developer, I want status updates delivered via the existing SSE stream, so that the Telegram bot can receive status without a separate channel.
+    </user-story>
+    <description>
+      This story extends the existing SSE (Server-Sent Events) streaming protocol to include status frames. Status frames will be interleaved with existing token frames during streaming, allowing the Telegram bot to receive real-time status updates (e.g., "Annie is thinking...", "Calling get_portfolio...") through the same stream used for LLM response tokens.
+    </description>
+    <dependencies>
+      <dependency>Story 11.1 - Status Emitter Infrastructure must be complete before implementing this story</dependency>
+    </dependencies>
+  </summary>
+
+  <acceptance-criteria>
+    <criterion id="AC1">
+      <title>Status Frame Type</title>
+      <requirements>
+        - New SSE frame format: {"type": "status", "message": "..."}
+        - Interleaved with existing token frames during streaming
+        - Maintains frame ordering (status frames appear when emitted)
+        - JSON format consistent with existing token/done/error frames
+      </requirements>
+    </criterion>
+    <criterion id="AC2">
+      <title>Stream Route Updates</title>
+      <requirements>
+        - /api/stream/{conversation_id} endpoint emits status frames
+        - StatusContext initialized at stream start with SSE write callback
+        - Status callback writes formatted SSE event to response stream
+        - Status frames sent immediately (not buffered)
+      </requirements>
+    </criterion>
+    <criterion id="AC3">
+      <title>Backward Compatibility</title>
+      <requirements>
+        - Existing token frames unchanged: {"type": "token", "content": "..."}
+        - Existing done frames unchanged: {"type": "done", "tokens_used": {...}}
+        - Existing error frames unchanged: {"type": "error", "message": "..."}
+        - Clients ignoring status frames continue working without modification
+      </requirements>
+    </criterion>
+  </acceptance-criteria>
+
+  <current-implementation>
+    <section name="Existing SSE Frame Formats">
+      <description>
+        The backend currently uses three SSE frame types for streaming LLM responses. All frames are JSON objects sent as SSE "data:" events.
+      </description>
+      <code-reference file="/home/ankit/dev/annie/backend/api/routes/stream.py" lines="730-734">
+        <![CDATA[
+    SSE Event Format:
+        Token event: {"type":"token","content":"text chunk"}
+        Completion event: {"type":"done","tokens_used":{"prompt":N,"completion":M}}
+        Error event: {"type":"error","message":"error message","code":"ERROR_CODE"}
+        ]]>
+      </code-reference>
+      <implementation-examples>
+        <example provider="GrokProvider" file="/home/ankit/dev/annie/backend/api/providers/grok_provider.py" lines="274-278">
+          <![CDATA[
+                                    # Yield token in SSE format
+                                    yield {
+                                        "type": "token",
+                                        "content": content
+                                    }
+          ]]>
+        </example>
+        <example provider="GrokProvider" file="/home/ankit/dev/annie/backend/api/providers/grok_provider.py" lines="385-389">
+          <![CDATA[
+                                    # Yield completion event
+                                    yield {
+                                        "type": "done",
+                                        "tokens_used": {
+                                            "prompt": usage.get("prompt_tokens", 0),
+          ]]>
+        </example>
+        <example provider="GeminiProvider" file="/home/ankit/dev/annie/backend/api/providers/gemini_provider.py" lines="531-535">
+          <![CDATA[
+                                        # Yield token in OpenAI-compatible SSE format
+                                        yield {
+                                            "type": "token",
+                                            "content": content
+                                        }
+          ]]>
+        </example>
+        <example provider="GeminiProvider" file="/home/ankit/dev/annie/backend/api/providers/gemini_provider.py" lines="629-633">
+          <![CDATA[
+                                    # Yield completion event
+                                    yield {
+                                        "type": "done",
+                                        "tokens_used": {
+                                            "prompt": prompt_tokens,
+          ]]>
+        </example>
+      </implementation-examples>
+    </section>
+
+    <section name="Stream Generator Architecture">
+      <description>
+        The stream_generator() function in stream.py orchestrates SSE streaming. It yields SSE event dictionaries that are automatically formatted by EventSourceResponse. Each event has "event" and "data" fields.
+      </description>
+      <code-reference file="/home/ankit/dev/annie/backend/api/routes/stream.py" lines="47-78">
+        <![CDATA[
+@observe(name="llm_streaming", as_type="span")
+async def stream_generator(
+    conversation_id: str,
+    messages: List[Dict[str, Any]],
+    request: Request,
+    state_manager: Optional[StateManager] = None
+) -> AsyncGenerator[Dict[str, Any], None]:
+    """
+    Generate SSE events from LLM streaming response with tool orchestration.
+
+    Handles:
+    - Tool schema fetching from MCP server
+    - Function calling with LLM
+    - Tool execution via MCP client
+    - Multi-step tool calling (max 5 iterations)
+    - Error handling for tool failures
+    - Storing assistant response in Redis after completion
+
+    Args:
+        conversation_id: Unique conversation identifier
+        messages: List of chat messages to send to LLM
+        request: FastAPI request object for disconnection detection
+        state_manager: Optional StateManager for storing assistant response
+
+    Yields:
+        SSE event dictionaries with type, data, and optional event fields
+    """
+        ]]>
+      </code-reference>
+      <code-reference file="/home/ankit/dev/annie/backend/api/routes/stream.py" lines="232-236">
+        <![CDATA[
+                    # Yield SSE event
+                    yield {
+                        "event": "message",
+                        "data": json.dumps(event)
+                    }
+        ]]>
+      </code-reference>
+    </section>
+
+    <section name="SSE Endpoint">
+      <description>
+        The /api/stream/{conversation_id} endpoint returns an EventSourceResponse that streams events from stream_generator(). This endpoint is called by the Telegram bot after the chat endpoint creates a conversation.
+      </description>
+      <code-reference file="/home/ankit/dev/annie/backend/api/routes/stream.py" lines="704-735">
+        <![CDATA[
+@router.get("/stream/{conversation_id}")
+@observe(name="stream_request", as_type="trace")
+async def stream_response(conversation_id: str, request: Request):
+    """
+    Stream LLM response via Server-Sent Events (SSE).
+
+    This endpoint establishes an SSE connection, loads conversation context from Redis,
+    and streams tokens from the LLM in real-time. After streaming completes, stores
+    the assistant's response in conversation history.
+
+    Args:
+        conversation_id: Unique conversation identifier
+        request: FastAPI request object
+
+    Returns:
+        EventSourceResponse: SSE stream with token events
+
+    Raises:
+        HTTPException: 503 if concurrent stream limit exceeded
+        HTTPException: 500 if state management fails
+
+    SSE Event Format:
+        Token event: {"type":"token","content":"text chunk"}
+        Completion event: {"type":"done","tokens_used":{"prompt":N,"completion":M}}
+        Error event: {"type":"error","message":"error message","code":"ERROR_CODE"}
+    """
+        ]]>
+      </code-reference>
+      <code-reference file="/home/ankit/dev/annie/backend/api/routes/stream.py" lines="894-903">
+        <![CDATA[
+        # Return SSE response with state manager passed to generator
+        return EventSourceResponse(
+            stream_generator(conversation_id, messages, request, state_manager),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"  # Disable nginx buffering
+            }
+        )
+        ]]>
+      </code-reference>
+    </section>
+  </current-implementation>
+
+  <implementation-approach>
+    <technical-challenge>
+      <title>Callback in Generator Pattern</title>
+      <description>
+        The status callback needs to inject frames into an async generator. The recommended approach is to use an asyncio.Queue that the StatusContext writes to, and the generator periodically drains.
+      </description>
+      <recommended-solution>
+        <![CDATA[
+import asyncio
+
+class StatusContext:
+    def __init__(self, conversation_id: str):
+        self.conversation_id = conversation_id
+        self.queue: asyncio.Queue[str] = asyncio.Queue()
+
+    def emit(self, message: str):
+        """Called by emit_status() to queue status messages"""
+        self.queue.put_nowait(message)
+
+    async def drain_status(self) -> list[str]:
+        """Get all pending status messages without blocking"""
+        messages = []
+        while not self.queue.empty():
+            messages.append(self.queue.get_nowait())
+        return messages
+        ]]>
+      </recommended-solution>
+    </technical-challenge>
+
+    <implementation-steps>
+      <step number="1">
+        <title>Define SSE status frame format helper</title>
+        <location>/home/ankit/dev/annie/backend/api/routes/stream.py</location>
+        <description>
+          Create format_status_frame(message: str) helper function that returns SSE event dict in same format as token frames.
+        </description>
+        <code-example>
+          <![CDATA[
+def format_status_frame(message: str) -> Dict[str, Any]:
+    """Format status message as SSE event"""
+    return {
+        "event": "message",
+        "data": json.dumps({"type": "status", "message": message})
+    }
+          ]]>
+        </code-example>
+      </step>
+
+      <step number="2">
+        <title>Initialize StatusContext in stream_generator</title>
+        <location>/home/ankit/dev/annie/backend/api/routes/stream.py</location>
+        <description>
+          Import StatusContext from backend.api.status and initialize it at the start of stream_generator() with an async queue-based callback.
+        </description>
+        <code-example>
+          <![CDATA[
+from backend.api.status import StatusContext, emit_status
+
+# At start of stream_generator():
+status_queue = asyncio.Queue()
+
+def status_callback(message: str):
+    """Callback that queues status messages for emission"""
+    status_queue.put_nowait(message)
+
+async with StatusContext(conversation_id, status_callback):
+    # Emit initial thinking status
+    emit_status("Annie is thinking...")
+
+    # Existing streaming logic...
+    async for event in llm_client.stream_chat_completion(...):
+        # Before yielding each event, drain status queue
+        while not status_queue.empty():
+            status_msg = status_queue.get_nowait()
+            yield format_status_frame(status_msg)
+
+        yield {
+            "event": "message",
+            "data": json.dumps(event)
+        }
+          ]]>
+        </code-example>
+      </step>
+
+      <step number="3">
+        <title>Drain status queue before streaming events</title>
+        <location>/home/ankit/dev/annie/backend/api/routes/stream.py</location>
+        <description>
+          Before yielding each token/done/error event, drain the status queue to ensure status frames are interleaved correctly.
+        </description>
+      </step>
+
+      <step number="4">
+        <title>Emit initial "thinking" status</title>
+        <location>/home/ankit/dev/annie/backend/api/routes/stream.py</location>
+        <description>
+          Immediately after StatusContext initialization, emit "Annie is thinking..." status before any tool calls or LLM processing begins.
+        </description>
+      </step>
+
+      <step number="5">
+        <title>Add integration tests</title>
+        <location>/home/ankit/dev/annie/backend/tests/integration/</location>
+        <description>
+          Test status frame emission during stream, interleaving with token frames, multiple status frames in sequence, and backward compatibility.
+        </description>
+      </step>
+    </implementation-steps>
+  </implementation-approach>
+
+  <files-to-modify>
+    <file priority="primary">
+      <path>/home/ankit/dev/annie/backend/api/routes/stream.py</path>
+      <changes>
+        - Add import for StatusContext from backend.api.status
+        - Add format_status_frame() helper function
+        - Initialize StatusContext with async queue callback in stream_generator()
+        - Emit initial "thinking" status
+        - Drain status queue before yielding each event
+        - Handle status queue in both Gemini and OpenAI/Grok streaming paths
+      </changes>
+    </file>
+    <file priority="secondary">
+      <path>/home/ankit/dev/annie/backend/tests/integration/test_streaming_e2e.py</path>
+      <changes>
+        - Add test for status frame emission
+        - Add test for status frame interleaving with token frames
+        - Add test for backward compatibility (clients ignoring status frames)
+      </changes>
+    </file>
+  </files-to-modify>
+
+  <notes>
+    <note type="dependency">
+      This story requires Story 11.1 (Status Emitter Infrastructure) to be complete. The StatusContext class must exist in backend/api/status.py with emit_status() and context manager support.
+    </note>
+    <note type="architecture">
+      The stream_generator() function has two distinct code paths: one for Gemini (lines 138-243) and one for OpenAI/Grok (lines 245-617). Status queue draining must be added to both paths to ensure consistent behavior across all LLM providers.
+    </note>
+    <note type="performance">
+      Status frames should be sent immediately (not buffered). The asyncio.Queue pattern ensures that status messages are queued instantly and drained before each event yield, maintaining real-time status updates.
+    </note>
+    <note type="backward-compatibility">
+      Clients that only parse token/done/error frames will automatically ignore status frames since they check event["type"]. No client changes are required.
+    </note>
+  </notes>
+</story-context>

@@ -66,6 +66,8 @@ OPTIONAL_VARS = {
     "ENVIRONMENT": "dev",
     "POLLING_TIMEOUT": "30",
     "MAX_RETRIES": "3",
+    "REDIS_HOST": "redis",
+    "REDIS_PORT": "6379",
 }
 
 # Sensitive variables that should be masked in logs

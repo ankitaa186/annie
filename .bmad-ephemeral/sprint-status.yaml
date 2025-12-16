@@ -125,3 +125,13 @@ development_status:
   10-6-stock-market-analysis-tool: done  # Moved from Epic 4 Story 4.2 (Yahoo Finance)
   # 10-7: REJECTED - LLM handles recommendations naturally via portfolio context (10.3)
   epic-10-retrospective: optional
+
+  # Epic 11: Real-Time Status Updates (NEW - UX Enhancement)
+  epic-11: backlog
+  11-1-status-emitter-infrastructure: done
+  11-2-sse-status-frame-support: done
+  11-3-telegram-status-message-handler: done
+  11-4-instrument-mcp-tools-with-status: done
+  11-5-instrument-memory-profile-llm-phases: done
+  11-6-pending-message-slot: done
+  epic-11-retrospective: optional

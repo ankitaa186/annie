@@ -18,6 +18,7 @@ from sse_starlette.sse import EventSourceResponse
 from api.llm_client import LLMClient, LLMClientError
 from api.mcp_client import MCPClient, MCPClientError, MCPToolError, MCPNetworkError
 from api.state import StateManager, StateError
+from api.status import StatusContext, emit_status
 from api.logging import get_logger
 
 try:
@@ -44,6 +45,29 @@ active_streams: Dict[str, float] = {}  # conversation_id -> timestamp
 MAX_CONCURRENT_STREAMS = 100
 
 
+def format_status_frame(message: str) -> Dict[str, Any]:
+    """
+    Format status message as SSE event.
+
+    Creates a status frame that will be interleaved with token/done/error frames
+    during streaming. Status frames follow the same SSE format as existing frames.
+
+    Args:
+        message: Formatted status message (typically with icon prefix)
+
+    Returns:
+        SSE event dictionary with type "status"
+
+    Example:
+        >>> format_status_frame("🔄 Annie is thinking...")
+        {"event": "message", "data": '{"type":"status","message":"🔄 Annie is thinking..."}'}
+    """
+    return {
+        "event": "message",
+        "data": json.dumps({"type": "status", "message": message})
+    }
+
+
 @observe(name="llm_streaming", as_type="span")
 async def stream_generator(
     conversation_id: str,
@@ -66,6 +90,7 @@ async def stream_generator(
     - Multi-step tool calling (max 5 iterations)
     - Error handling for tool failures
     - Storing assistant response in Redis after completion
+    - Status emission via StatusContext (e.g., "Annie is thinking...")
 
     Args:
         conversation_id: Unique conversation identifier
@@ -74,7 +99,11 @@ async def stream_generator(
         state_manager: Optional StateManager for storing assistant response
 
     Yields:
-        SSE event dictionaries with type, data, and optional event fields
+        SSE event dictionaries with event="message" and data containing:
+        - Status frame: {"type": "status", "message": "..."}
+        - Token frame: {"type": "token", "content": "..."}
+        - Done frame: {"type": "done", "tokens_used": {...}}
+        - Error frame: {"type": "error", "message": "...", "code": "..."}
     """
     start_time = time.time()
     first_token_sent = False
@@ -94,9 +123,34 @@ async def stream_generator(
         except Exception:
             pass  # Fire-and-forget
 
+    # Create async queue for status messages
+    # StatusContext will write to this queue, and we'll drain it before each event
+    status_queue: asyncio.Queue[str] = asyncio.Queue()
+
+    def status_callback(message: str) -> None:
+        """Callback for StatusContext to queue status messages for SSE emission."""
+        try:
+            status_queue.put_nowait(message)
+        except asyncio.QueueFull:
+            # Queue should never fill (we drain before each event), but handle gracefully
+            logger.warning(
+                "Status queue full, dropping message",
+                extra={
+                    "conversation_id": conversation_id,
+                    "message": message
+                }
+            )
+
     try:
-        # Create clients
-        async with LLMClient() as llm_client, MCPClient() as mcp_client:
+        # Create clients and initialize status context
+        async with (
+            LLMClient() as llm_client,
+            MCPClient() as mcp_client,
+            StatusContext(conversation_id, status_callback)
+        ):
+            # Emit initial "thinking" status
+            emit_status("Annie is thinking...")
+
             logger.info(
                 "Starting SSE stream with tool orchestration",
                 extra={
@@ -145,6 +199,9 @@ async def stream_generator(
                     }
                 )
 
+                # Emit status: Starting LLM composition
+                emit_status("Composing response...", icon="🧠")
+
                 async for event in llm_client.stream_chat_completion(
                     conversation_messages,
                     tools=tools,
@@ -181,6 +238,19 @@ async def stream_generator(
                     # Handle Redis save BEFORE yielding done event
                     if event.get("type") == "done":
                         duration_ms = int((time.time() - start_time) * 1000)
+
+                        # Emit status for Grok Live Search if used
+                        sources_used = event.get("sources_used", 0)
+                        if sources_used > 0:
+                            emit_status(f"Found {sources_used} sources", icon="✅")
+                            # Drain status queue immediately to capture Live Search status
+                            while not status_queue.empty():
+                                try:
+                                    status_msg = status_queue.get_nowait()
+                                    yield format_status_frame(status_msg)
+                                except asyncio.QueueEmpty:
+                                    break
+
                         logger.info(
                             "Stream completed successfully",
                             extra={
@@ -229,6 +299,14 @@ async def stream_generator(
                                         exc_info=True
                                     )
 
+                    # Drain status queue before yielding event (ensures status frames are interleaved)
+                    while not status_queue.empty():
+                        try:
+                            status_msg = status_queue.get_nowait()
+                            yield format_status_frame(status_msg)
+                        except asyncio.QueueEmpty:
+                            break
+
                     # Yield SSE event
                     yield {
                         "event": "message",
@@ -273,6 +351,15 @@ async def stream_generator(
                         },
                         exc_info=True
                     )
+
+                    # Drain status queue before yielding error event
+                    while not status_queue.empty():
+                        try:
+                            status_msg = status_queue.get_nowait()
+                            yield format_status_frame(status_msg)
+                        except asyncio.QueueEmpty:
+                            break
+
                     yield {
                         "event": "message",
                         "data": json.dumps({
@@ -310,6 +397,9 @@ async def stream_generator(
                             "tool_calls_made": tool_call_count
                         }
                     )
+
+                    # Emit status: Starting LLM composition
+                    emit_status("Composing response...", icon="🧠")
 
                     # Stream tokens from LLM
                     async for event in llm_client.stream_chat_completion(
@@ -349,6 +439,19 @@ async def stream_generator(
                         # This prevents SSE framework cleanup from cancelling the Redis operation
                         if event.get("type") == "done":
                             duration_ms = int((time.time() - start_time) * 1000)
+
+                            # Emit status for Grok Live Search if used
+                            sources_used = event.get("sources_used", 0)
+                            if sources_used > 0:
+                                emit_status(f"Found {sources_used} sources", icon="✅")
+                                # Drain status queue immediately to capture Live Search status
+                                while not status_queue.empty():
+                                    try:
+                                        status_msg = status_queue.get_nowait()
+                                        yield format_status_frame(status_msg)
+                                    except asyncio.QueueEmpty:
+                                        break
+
                             logger.info(
                                 "Stream completed successfully",
                                 extra={
@@ -399,6 +502,14 @@ async def stream_generator(
                                             },
                                             exc_info=True
                                         )
+
+                        # Drain status queue before yielding event (ensures status frames are interleaved)
+                        while not status_queue.empty():
+                            try:
+                                status_msg = status_queue.get_nowait()
+                                yield format_status_frame(status_msg)
+                            except asyncio.QueueEmpty:
+                                break
 
                         # Yield SSE event (after Redis save for done events)
                         yield {
@@ -498,7 +609,24 @@ async def stream_generator(
                             )
                         else:
                             # All other tools: await completion
+                            # Emit status for memory and profile operations
+                            if function_name == "retrieve_memories":
+                                emit_status("Retrieving your memories...", icon="🔍")
+                            elif function_name == "get_user_profile":
+                                emit_status("Loading your profile...", icon="👤")
+
                             tool_result = await mcp_client.call_tool(function_name, arguments)
+
+                            # Emit completion status for memory and profile operations
+                            if function_name == "retrieve_memories":
+                                memory_count = tool_result.get("memory_count", 0)
+                                if memory_count > 0:
+                                    emit_status(f"Found {memory_count} relevant memories", icon="✅")
+                                else:
+                                    emit_status("No relevant memories found", icon="✅")
+                            elif function_name == "get_user_profile":
+                                completeness = tool_result.get("completeness", 0)
+                                emit_status(f"Profile loaded ({completeness}% complete)", icon="✅")
 
                         # Add tool result to conversation
                         tool_content = json.dumps(tool_result)
@@ -562,6 +690,9 @@ async def stream_generator(
                             "tool_calls": tool_call_count
                         }
                     )
+                    # Emit status: Starting LLM composition (max iterations)
+                    emit_status("Composing response...", icon="🧠")
+
                     # Stream final response anyway
                     async for event in llm_client.stream_chat_completion(conversation_messages, tools=tools, mcp_client=mcp_client):
                         if await request.is_disconnected():
@@ -574,6 +705,18 @@ async def stream_generator(
 
                         # Handle Redis save BEFORE yielding done event (prevents cancellation)
                         if event.get("type") == "done":
+                            # Emit status for Grok Live Search if used
+                            sources_used = event.get("sources_used", 0)
+                            if sources_used > 0:
+                                emit_status(f"Found {sources_used} sources", icon="✅")
+                                # Drain status queue immediately to capture Live Search status
+                                while not status_queue.empty():
+                                    try:
+                                        status_msg = status_queue.get_nowait()
+                                        yield format_status_frame(status_msg)
+                                    except asyncio.QueueEmpty:
+                                        break
+
                             # Store assistant response in Redis before yielding
                             if state_manager and assistant_response_content:
                                 full_response = "".join(assistant_response_content)
@@ -607,6 +750,14 @@ async def stream_generator(
                                         exc_info=True
                                     )
 
+                        # Drain status queue before yielding event (max iterations path)
+                        while not status_queue.empty():
+                            try:
+                                status_msg = status_queue.get_nowait()
+                                yield format_status_frame(status_msg)
+                            except asyncio.QueueEmpty:
+                                break
+
                         yield {
                             "event": "message",
                             "data": json.dumps(event)
@@ -626,6 +777,14 @@ async def stream_generator(
             },
             exc_info=True
         )
+
+        # Drain status queue before yielding error event (exception handler)
+        while not status_queue.empty():
+            try:
+                status_msg = status_queue.get_nowait()
+                yield format_status_frame(status_msg)
+            except asyncio.QueueEmpty:
+                break
 
         yield {
             "event": "message",
@@ -647,6 +806,14 @@ async def stream_generator(
             },
             exc_info=True
         )
+
+        # Drain status queue before yielding error event (generic exception handler)
+        while not status_queue.empty():
+            try:
+                status_msg = status_queue.get_nowait()
+                yield format_status_frame(status_msg)
+            except asyncio.QueueEmpty:
+                break
 
         yield {
             "event": "message",
@@ -729,6 +896,7 @@ async def stream_response(conversation_id: str, request: Request):
         HTTPException: 500 if state management fails
 
     SSE Event Format:
+        Status event: {"type":"status","message":"🔄 Annie is thinking..."}
         Token event: {"type":"token","content":"text chunk"}
         Completion event: {"type":"done","tokens_used":{"prompt":N,"completion":M}}
         Error event: {"type":"error","message":"error message","code":"ERROR_CODE"}
