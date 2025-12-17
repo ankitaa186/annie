@@ -13,31 +13,12 @@ from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from api.config import get_config
 from api.logging import get_logger
 from api.providers.base import BaseProvider
+from api.providers.grok_provider import ProviderError, RateLimitError
 from api.providers.gemini_tool_adapter import GeminiToolAdapter
 from api.observability.tracing import get_current_trace
 from api.observability.cost import calculate_llm_cost
 
 logger = get_logger(__name__)
-
-
-class ProviderError(Exception):
-    """Exception raised when a provider fails."""
-    def __init__(self, provider: str, message: str, original_error: Optional[Exception] = None):
-        self.provider = provider
-        self.message = message
-        self.original_error = original_error
-        super().__init__(f"{provider}: {message}")
-
-
-class RateLimitError(Exception):
-    """Exception raised when rate limit is hit."""
-    def __init__(self, provider: str, retry_after: Optional[int] = None):
-        self.provider = provider
-        self.retry_after = retry_after
-        message = f"{provider} rate limit exceeded"
-        if retry_after:
-            message += f". Retry after {retry_after} seconds"
-        super().__init__(message)
 
 
 class GeminiProvider(BaseProvider):

@@ -90,7 +90,7 @@ development_status:
   epic-6-retrospective: optional
 
   # Epic 7: User Profile & Personalization (IN PROGRESS - 1/2 stories done)
-  epic-7: backlog
+  epic-7: contexted
   7-1-profile-integration-smart-caching: done
   7-2-onboarding-enhancement-for-incomplete-profiles: backlog
   epic-7-retrospective: optional
@@ -116,7 +116,7 @@ development_status:
 
   # Epic 10: Portfolio Management & Financial Tools (Consolidated Stock Features)
   # Includes stories moved from Epic 4: 10.6 (was 4.2), 10.7 (was 4.3)
-  epic-10: backlog
+  epic-10: contexted
   10-1-portfolio-access-mcp-tools: done
   10-2-watchlist-intent-tracking: backlog  # BLOCKED: waiting on agentic-memories intent/watchlist endpoints
   10-3-portfolio-summary-llm-context: done
@@ -126,8 +126,8 @@ development_status:
   # 10-7: REJECTED - LLM handles recommendations naturally via portfolio context (10.3)
   epic-10-retrospective: optional
 
-  # Epic 11: Real-Time Status Updates (NEW - UX Enhancement)
-  epic-11: backlog
+  # Epic 11: Real-Time Status Updates (COMPLETED - All stories done)
+  epic-11: completed
   11-1-status-emitter-infrastructure: done
   11-2-sse-status-frame-support: done
   11-3-telegram-status-message-handler: done
