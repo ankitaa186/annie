@@ -75,7 +75,15 @@ def calculate_chatgpt_cost(prompt_tokens: int, completion_tokens: int) -> dict:
 
 def calculate_gemini_cost(prompt_tokens: int, completion_tokens: int, cached_tokens: int = 0) -> dict:
     """
-    Calculate cost for Gemini 3 Pro Preview API usage.
+    Calculate cost for Gemini 3 Pro Preview API usage with tiered pricing.
+
+    Tiered pricing (as of December 2025):
+    - Input tokens ≤200k: $2.00 per 1M tokens
+    - Input tokens >200k: $4.00 per 1M tokens (for excess)
+    - Output tokens ≤200k: $12.00 per 1M tokens
+    - Output tokens >200k: $18.00 per 1M tokens (for excess)
+    - Cached tokens ≤200k: $0.20 per 1M tokens
+    - Cached tokens >200k: $0.40 per 1M tokens (for excess)
 
     Args:
         prompt_tokens: Number of input tokens
@@ -83,23 +91,53 @@ def calculate_gemini_cost(prompt_tokens: int, completion_tokens: int, cached_tok
         cached_tokens: Number of cached input tokens (reduced pricing)
 
     Returns:
-        Dictionary with input_cost, output_cost, cached_cost, total_cost in USD
+        Dictionary with input_cost, output_cost, cached_cost, total_cost, tier in USD
     """
-    # Gemini 3 Pro Preview pricing as of December 2025
-    # Input: $2.00 per 1M tokens = $0.002 per 1K tokens
-    # Output: $12.00 per 1M tokens = $0.012 per 1K tokens
-    # Cached: 50% discount on input (estimated)
-    # Note: 2x pricing for contexts > 200K tokens (not implemented yet)
+    # Tiered pricing threshold
+    TIER_THRESHOLD = 200_000  # 200k tokens
 
-    input_cost = (prompt_tokens / 1000) * 0.002
-    output_cost = (completion_tokens / 1000) * 0.012
-    cached_cost = (cached_tokens / 1000) * 0.001  # 50% discount for cached
+    # Pricing per 1M tokens
+    INPUT_COST_LOW = 2.00      # $2.00 per 1M tokens (≤200k)
+    INPUT_COST_HIGH = 4.00     # $4.00 per 1M tokens (>200k)
+    OUTPUT_COST_LOW = 12.00    # $12.00 per 1M tokens (≤200k)
+    OUTPUT_COST_HIGH = 18.00   # $18.00 per 1M tokens (>200k)
+    CACHED_COST_LOW = 0.20     # $0.20 per 1M tokens (≤200k)
+    CACHED_COST_HIGH = 0.40    # $0.40 per 1M tokens (>200k)
+
+    # Calculate input cost (tiered)
+    if prompt_tokens <= TIER_THRESHOLD:
+        input_cost = (prompt_tokens / 1_000_000) * INPUT_COST_LOW
+    else:
+        low_tier = (TIER_THRESHOLD / 1_000_000) * INPUT_COST_LOW
+        high_tier = ((prompt_tokens - TIER_THRESHOLD) / 1_000_000) * INPUT_COST_HIGH
+        input_cost = low_tier + high_tier
+
+    # Calculate output cost (tiered)
+    if completion_tokens <= TIER_THRESHOLD:
+        output_cost = (completion_tokens / 1_000_000) * OUTPUT_COST_LOW
+    else:
+        low_tier = (TIER_THRESHOLD / 1_000_000) * OUTPUT_COST_LOW
+        high_tier = ((completion_tokens - TIER_THRESHOLD) / 1_000_000) * OUTPUT_COST_HIGH
+        output_cost = low_tier + high_tier
+
+    # Calculate cached cost (tiered)
+    if cached_tokens <= TIER_THRESHOLD:
+        cached_cost = (cached_tokens / 1_000_000) * CACHED_COST_LOW
+    else:
+        low_tier = (TIER_THRESHOLD / 1_000_000) * CACHED_COST_LOW
+        high_tier = ((cached_tokens - TIER_THRESHOLD) / 1_000_000) * CACHED_COST_HIGH
+        cached_cost = low_tier + high_tier
+
+    # Determine tier for metadata
+    total_tokens = prompt_tokens + completion_tokens + cached_tokens
+    tier = "low" if total_tokens <= TIER_THRESHOLD else "high"
 
     return {
         "input_cost": round(input_cost, 6),
         "output_cost": round(output_cost, 6),
         "cached_cost": round(cached_cost, 6),
-        "total_cost": round(input_cost + output_cost + cached_cost, 6)
+        "total_cost": round(input_cost + output_cost + cached_cost, 6),
+        "tier": tier
     }
 
 
