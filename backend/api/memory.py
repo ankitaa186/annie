@@ -370,6 +370,124 @@ class MemoryManager:
                 # Continue running even if one iteration fails
                 await asyncio.sleep(self.RETRY_INTERVAL)
 
+    @observe(name="stream_conversation_message", as_type="span")
+    async def stream_conversation_message(
+        self,
+        user_id: str,
+        conversation_id: str,
+        role: str,
+        content: str,
+        message_id: Optional[str] = None,
+        flush: bool = False,
+    ) -> Optional[List[Dict[str, Any]]]:
+        """
+        Stream a single message through the orchestrator for batched storage.
+
+        The orchestrator batches messages (2-8) before LLM extraction, providing
+        ~70% cost savings compared to direct /v1/store calls. Returns any relevant
+        memories that should be injected into context.
+
+        Args:
+            user_id: User identifier
+            conversation_id: Conversation identifier
+            role: Message role ("user", "assistant", "system", "tool")
+            content: Message content
+            message_id: Optional message ID for tracking
+            flush: Force immediate flush of batched messages (default: False)
+
+        Returns:
+            List of memory injections if successful, None on failure (graceful degradation)
+        """
+        start_time = time.time()
+
+        # Check circuit breaker
+        if self._is_circuit_breaker_open():
+            logger.warning(
+                "Circuit breaker is open, skipping orchestrator stream",
+                extra={
+                    "user_id": user_id,
+                    "conversation_id": conversation_id,
+                    "role": role
+                }
+            )
+            return None
+
+        try:
+            async with MemoryClient() as memory_client:
+                result = await memory_client.stream_message(
+                    conversation_id=conversation_id,
+                    role=role,
+                    content=content,
+                    user_id=user_id,
+                    message_id=message_id,
+                    flush=flush,
+                )
+
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            # Success - reset circuit breaker
+            self._circuit_breaker_failures = 0
+            self._circuit_breaker_opened_at = None
+
+            injections = result.get("injections", [])
+
+            logger.info(
+                "Message streamed through orchestrator",
+                extra={
+                    "user_id": user_id,
+                    "conversation_id": conversation_id,
+                    "role": role,
+                    "injections_count": len(injections),
+                    "duration_ms": duration_ms,
+                    "flush": flush
+                }
+            )
+
+            return injections
+
+        except (MemoryNetworkError, MemoryAPIError) as e:
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            # Increment circuit breaker failures
+            self._circuit_breaker_failures += 1
+            if self._circuit_breaker_failures >= self.CIRCUIT_BREAKER_THRESHOLD:
+                self._circuit_breaker_opened_at = time.time()
+                logger.error(
+                    f"Circuit breaker opened after {self._circuit_breaker_failures} failures",
+                    extra={"user_id": user_id, "conversation_id": conversation_id}
+                )
+
+            logger.warning(
+                f"Failed to stream message through orchestrator: {str(e)}",
+                extra={
+                    "user_id": user_id,
+                    "conversation_id": conversation_id,
+                    "role": role,
+                    "error_type": type(e).__name__,
+                    "duration_ms": duration_ms
+                }
+            )
+
+            # Graceful degradation - return None instead of raising
+            return None
+
+        except Exception as e:
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            logger.error(
+                f"Unexpected error streaming message through orchestrator: {str(e)}",
+                extra={
+                    "user_id": user_id,
+                    "conversation_id": conversation_id,
+                    "role": role,
+                    "duration_ms": duration_ms
+                },
+                exc_info=True
+            )
+
+            # Graceful degradation
+            return None
+
     @observe(name="format_memories", as_type="span")
     async def format_memories_for_llm(self, memories: List[Dict[str, Any]]) -> str:
         """

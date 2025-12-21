@@ -417,3 +417,211 @@ class TestFormatMemoriesForLLM:
         assert "Topics: topic1, topic2, topic3" in result
         assert "Relevance: 99%" in result
         assert "2025-11-10" in result
+
+
+class TestStreamConversationMessage:
+    """Test stream_conversation_message method for orchestrator integration."""
+
+    @pytest.mark.asyncio
+    async def test_stream_conversation_message_success(self, memory_manager):
+        """Test successful message streaming through orchestrator."""
+        mock_injections = [
+            {
+                "memory_id": "mem_abc",
+                "content": "User prefers tech stocks",
+                "source": "LONG_TERM",
+                "channel": "INLINE",
+                "score": 0.85,
+                "metadata": {}
+            }
+        ]
+
+        with patch('api.memory.MemoryClient') as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = None
+            mock_client.stream_message = AsyncMock(return_value={"injections": mock_injections})
+            mock_client_class.return_value = mock_client
+
+            result = await memory_manager.stream_conversation_message(
+                user_id="user_123",
+                conversation_id="conv_456",
+                role="user",
+                content="What stocks should I buy?"
+            )
+
+            # Verify result
+            assert result is not None
+            assert len(result) == 1
+            assert result[0]["memory_id"] == "mem_abc"
+            assert result[0]["score"] == 0.85
+
+            # Verify stream_message was called correctly
+            mock_client.stream_message.assert_called_once_with(
+                conversation_id="conv_456",
+                role="user",
+                content="What stocks should I buy?",
+                user_id="user_123",
+                message_id=None,
+                flush=False,
+            )
+
+    @pytest.mark.asyncio
+    async def test_stream_conversation_message_with_flush(self, memory_manager):
+        """Test message streaming with flush=True."""
+        with patch('api.memory.MemoryClient') as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = None
+            mock_client.stream_message = AsyncMock(return_value={"injections": []})
+            mock_client_class.return_value = mock_client
+
+            await memory_manager.stream_conversation_message(
+                user_id="user_123",
+                conversation_id="conv_456",
+                role="assistant",
+                content="Here is my response",
+                flush=True
+            )
+
+            # Verify flush parameter was passed
+            call_args = mock_client.stream_message.call_args
+            assert call_args[1]["flush"] is True
+
+    @pytest.mark.asyncio
+    async def test_stream_conversation_message_empty_injections(self, memory_manager):
+        """Test message streaming with no injections returned."""
+        with patch('api.memory.MemoryClient') as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = None
+            mock_client.stream_message = AsyncMock(return_value={"injections": []})
+            mock_client_class.return_value = mock_client
+
+            result = await memory_manager.stream_conversation_message(
+                user_id="user_123",
+                conversation_id="conv_456",
+                role="user",
+                content="Hello"
+            )
+
+            assert result == []
+
+    @pytest.mark.asyncio
+    async def test_stream_conversation_message_network_error_graceful_degradation(self, memory_manager):
+        """Test message streaming returns None on network error."""
+        with patch('api.memory.MemoryClient') as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = None
+            mock_client.stream_message = AsyncMock(
+                side_effect=MemoryNetworkError("Connection refused")
+            )
+            mock_client_class.return_value = mock_client
+
+            result = await memory_manager.stream_conversation_message(
+                user_id="user_123",
+                conversation_id="conv_456",
+                role="user",
+                content="Test"
+            )
+
+            # Should return None instead of raising
+            assert result is None
+            # Circuit breaker should increment
+            assert memory_manager._circuit_breaker_failures == 1
+
+    @pytest.mark.asyncio
+    async def test_stream_conversation_message_api_error_graceful_degradation(self, memory_manager):
+        """Test message streaming returns None on API error."""
+        with patch('api.memory.MemoryClient') as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = None
+            mock_client.stream_message = AsyncMock(
+                side_effect=MemoryAPIError("Internal server error", status_code=500)
+            )
+            mock_client_class.return_value = mock_client
+
+            result = await memory_manager.stream_conversation_message(
+                user_id="user_123",
+                conversation_id="conv_456",
+                role="user",
+                content="Test"
+            )
+
+            # Should return None instead of raising
+            assert result is None
+
+    @pytest.mark.asyncio
+    async def test_stream_conversation_message_circuit_breaker_open(self, memory_manager):
+        """Test message streaming returns None when circuit breaker is open."""
+        # Open circuit breaker
+        memory_manager._circuit_breaker_failures = 5
+        memory_manager._circuit_breaker_opened_at = time.time()
+
+        with patch('api.memory.MemoryClient') as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client_class.return_value = mock_client
+
+            result = await memory_manager.stream_conversation_message(
+                user_id="user_123",
+                conversation_id="conv_456",
+                role="user",
+                content="Test"
+            )
+
+            # Should return None immediately
+            assert result is None
+            # MemoryClient should not have been instantiated
+            mock_client_class.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_stream_conversation_message_resets_circuit_breaker_on_success(self, memory_manager):
+        """Test successful streaming resets circuit breaker."""
+        # Set some failures
+        memory_manager._circuit_breaker_failures = 3
+
+        with patch('api.memory.MemoryClient') as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = None
+            mock_client.stream_message = AsyncMock(return_value={"injections": []})
+            mock_client_class.return_value = mock_client
+
+            await memory_manager.stream_conversation_message(
+                user_id="user_123",
+                conversation_id="conv_456",
+                role="user",
+                content="Test"
+            )
+
+            # Circuit breaker should be reset
+            assert memory_manager._circuit_breaker_failures == 0
+            assert memory_manager._circuit_breaker_opened_at is None
+
+    @pytest.mark.asyncio
+    async def test_stream_conversation_message_opens_circuit_breaker_after_threshold(self, memory_manager):
+        """Test circuit breaker opens after threshold failures."""
+        with patch('api.memory.MemoryClient') as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = None
+            mock_client.stream_message = AsyncMock(
+                side_effect=MemoryNetworkError("Connection refused")
+            )
+            mock_client_class.return_value = mock_client
+
+            # Make 5 failing calls (threshold)
+            for i in range(5):
+                await memory_manager.stream_conversation_message(
+                    user_id="user_123",
+                    conversation_id="conv_456",
+                    role="user",
+                    content=f"Test {i}"
+                )
+
+            # Circuit breaker should be open
+            assert memory_manager._circuit_breaker_failures == 5
+            assert memory_manager._circuit_breaker_opened_at is not None
+            assert memory_manager._is_circuit_breaker_open() is True
