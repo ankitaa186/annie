@@ -53,23 +53,40 @@ class ToolRegistry:
         return self.tools.get(tool_name)
 
 
-def health_check_tool_handler() -> Dict[str, Any]:
+async def health_check_tool_handler() -> Dict[str, Any]:
     """
     Health check tool handler.
-    
+
+    Calls the backend's full health check endpoint to get real
+    component status (Redis, MCP, LLM API, agentic-memories, Langfuse).
+
     Returns:
-        Health status dictionary
+        Health status dictionary with component details
     """
-    return {
-        "status": "ok",
-        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get("http://backend:8000/health/full")
+
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return {
+                    "status": "degraded",
+                    "error": f"Health check returned status {response.status_code}",
+                    "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        }
 
 
 # Health check tool definition
 health_check_tool = {
     "name": "health_check",
-    "description": "Check the health status of the MCP (Model Context Protocol) server. Use this tool when asked about server health, status, or availability. Returns the current health status and timestamp.",
+    "description": "Check the full health status of all system components. Returns status of Redis, MCP server, LLM API, agentic-memories (with all its sub-components), and Langfuse. Use when asked about system health, status, or availability.",
     "inputSchema": {
         "type": "object",
         "properties": {},

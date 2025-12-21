@@ -9,6 +9,7 @@ import time
 from datetime import datetime, timezone
 from typing import Dict, Any
 
+import httpx
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -244,11 +245,52 @@ def check_llm_api_health() -> str:
         return "unavailable"
 
 
-def check_agentic_memories_health() -> str:
-    """Check agentic-memories service availability."""
-    # TODO: Implement actual agentic-memories health check in Story 3.1
-    # For now, return "ok" as placeholder
-    return "ok"
+async def check_agentic_memories_health() -> Dict[str, Any]:
+    """Check agentic-memories service availability with full component status.
+
+    Calls the /health/full endpoint to get detailed status of:
+    - env: API key configuration
+    - chroma: Vector database
+    - timescale: Time-series database
+    - neo4j: Graph database
+    - redis: Cache/queue
+    - portfolio: Portfolio tables
+    - langfuse: Observability
+
+    Returns:
+        Dictionary with status and component checks
+    """
+    agentic_memories_url = config.get("AGENTIC_MEMORIES_URL", "http://host.docker.internal:8080")
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(f"{agentic_memories_url}/health/full")
+
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return {
+                    "status": "degraded",
+                    "error": f"Health check returned status {response.status_code}"
+                }
+    except httpx.TimeoutException:
+        logger.warning("agentic-memories health check timed out")
+        return {
+            "status": "unavailable",
+            "error": "Connection timed out"
+        }
+    except httpx.ConnectError:
+        logger.warning("agentic-memories service not reachable")
+        return {
+            "status": "unavailable",
+            "error": "Service not reachable"
+        }
+    except Exception as e:
+        logger.warning(f"agentic-memories health check failed: {e}")
+        return {
+            "status": "unavailable",
+            "error": str(e)
+        }
 
 
 def check_langfuse_health() -> Dict[str, Any]:
@@ -345,10 +387,10 @@ async def health_check() -> JSONResponse:
     )
 
 
-@app.get("/health/detailed")
-async def detailed_health_check() -> JSONResponse:
+@app.get("/health/full")
+async def full_health_check() -> JSONResponse:
     """
-    Detailed health check endpoint with component status.
+    Full health check endpoint with component status.
 
     Returns component health status without failing if components are down.
     This allows monitoring to track individual component health.
@@ -361,7 +403,7 @@ async def detailed_health_check() -> JSONResponse:
         "mcp_server": await check_mcp_server_health(),
         "redis": check_redis_health(),
         "llm_api": check_llm_api_health(),
-        "agentic_memories": check_agentic_memories_health(),
+        "agentic_memories": await check_agentic_memories_health(),
         "langfuse": check_langfuse_health()
     }
 
@@ -370,7 +412,10 @@ async def detailed_health_check() -> JSONResponse:
     overall_status = "ok"
 
     # If any critical component is unavailable, set status to "degraded"
-    if components["mcp_server"] == "unavailable" or components["redis"] == "unavailable":
+    agentic_status = components["agentic_memories"].get("status", "ok")
+    if (components["mcp_server"] == "unavailable" or
+        components["redis"] == "unavailable" or
+        agentic_status in ("unavailable", "degraded")):
         overall_status = "degraded"
 
     return JSONResponse(

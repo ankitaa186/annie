@@ -256,19 +256,36 @@ LANGFUSE_HOST=https://us.cloud.langfuse.com  # Langfuse Cloud URL
 6. **Profile Management** (`backend/api/profile.py`): User profile cache and refresh
 
 ### Health Check
-Check Langfuse status via `/health/detailed` endpoint:
+Check full system status via `/health/full` endpoint:
 ```bash
-curl http://localhost:8000/health/detailed
+curl http://localhost:8001/health/full
 ```
 
 Returns:
 ```json
 {
-  "langfuse": {
-    "enabled": true,
-    "client_available": true,
-    "last_flush": null
-  }
+  "status": "ok",
+  "components": {
+    "mcp_server": "ok",
+    "redis": "ok",
+    "llm_api": "ok",
+    "agentic_memories": {
+      "status": "ok",
+      "checks": {
+        "chroma": {"ok": true},
+        "timescale": {"ok": true},
+        "neo4j": {"ok": true},
+        "redis": {"ok": true},
+        "langfuse": {"ok": true, "enabled": true}
+      }
+    },
+    "langfuse": {
+      "enabled": true,
+      "client_available": true,
+      "last_flush": null
+    }
+  },
+  "timestamp": "2025-12-21T04:31:59.857651Z"
 }
 ```
 
