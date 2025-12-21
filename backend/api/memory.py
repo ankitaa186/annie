@@ -50,6 +50,11 @@ class MemoryManager:
     CIRCUIT_BREAKER_THRESHOLD = 5  # Failures before circuit opens
     CIRCUIT_BREAKER_TIMEOUT = 900  # 15 minutes
 
+    # Flush worker constants (Story 12-5)
+    FLUSH_CHECK_INTERVAL = 300   # 5 minutes between flush checks
+    INACTIVE_THRESHOLD = 600     # 10 minutes of inactivity before flush
+    FLUSH_MARKER_TTL = 3600      # 1 hour TTL for "already flushed" marker
+
     def __init__(self):
         """Initialize Memory Manager."""
         self.config = get_config()
@@ -233,98 +238,184 @@ class MemoryManager:
                 }
             )
 
-    async def retry_queued_memories(self):
+    async def _queue_message_for_retry(
+        self,
+        user_id: str,
+        conversation_id: str,
+        role: str,
+        content: str,
+        message_id: Optional[str] = None,
+        flush: bool = False
+    ):
         """
-        Background worker to retry queued memories (runs every 5 minutes).
+        Queue a single message for retry in Redis fallback queue.
 
-        Scans all memory_queue:* keys and attempts to store queued conversations.
+        Used when orchestrator streaming fails. Messages are retried by the
+        retry worker which calls stream_message() again.
+
+        Args:
+            user_id: User identifier
+            conversation_id: Conversation identifier
+            role: Message role
+            content: Message content
+            message_id: Optional message ID
+            flush: Whether to flush on retry
         """
-        start_time = time.time()
+        queue_key = f"message_queue:{user_id}"
 
-        logger.info("Starting retry worker for queued memories")
+        # Build queue payload
+        queue_payload = {
+            "type": "orchestrator_message",  # Distinguish from old format
+            "user_id": user_id,
+            "conversation_id": conversation_id,
+            "role": role,
+            "content": content,
+            "message_id": message_id,
+            "flush": flush,
+            "queued_at": datetime.now(timezone.utc).isoformat()
+        }
 
         try:
             async with StateManager() as state_manager:
-                queue_pattern = "memory_queue:*"
+                # Push to Redis list (right push)
+                await state_manager.redis_client.rpush(queue_key, json.dumps(queue_payload))
+
+                # Set TTL on queue
+                await state_manager.redis_client.expire(queue_key, self.FALLBACK_QUEUE_TTL)
+
+            logger.info(
+                "Message queued for retry",
+                extra={
+                    "user_id": user_id,
+                    "conversation_id": conversation_id,
+                    "role": role,
+                    "queue_key": queue_key
+                }
+            )
+
+        except Exception as e:
+            logger.error(
+                f"Failed to queue message for retry: {str(e)}",
+                extra={
+                    "user_id": user_id,
+                    "conversation_id": conversation_id,
+                    "role": role
+                }
+            )
+
+    async def retry_queued_memories(self):
+        """
+        Background worker to retry queued messages (runs every 5 minutes).
+
+        Scans message_queue:* keys and attempts to stream queued messages
+        through the orchestrator.
+        """
+        start_time = time.time()
+
+        logger.info("Starting retry worker for queued messages")
+
+        try:
+            async with StateManager() as state_manager:
                 cursor = 0
                 total_retried = 0
                 total_success = 0
 
-                # Scan for all memory queue keys
+                # Scan for message queues (orchestrator messages)
                 while True:
                     cursor, keys = await state_manager.redis_client.scan(
                         cursor=cursor,
-                        match=queue_pattern,
+                        match="message_queue:*",
                         count=100
                     )
 
                     for queue_key in keys:
-                        user_id = queue_key.decode('utf-8').replace("memory_queue:", "")
+                        # Handle bytes or string keys
+                        if isinstance(queue_key, bytes):
+                            queue_key_str = queue_key.decode('utf-8')
+                        else:
+                            queue_key_str = queue_key
+
                         queue_length = await state_manager.redis_client.llen(queue_key)
 
                         logger.debug(
-                            f"Processing queue: {queue_key.decode('utf-8')} ({queue_length} items)"
+                            f"Processing queue: {queue_key_str} ({queue_length} items)"
                         )
 
-                        # Process each queued memory
+                        # Process each queued message
                         for _ in range(queue_length):
                             # Pop from left (FIFO)
                             queue_item_json = await state_manager.redis_client.lpop(queue_key)
                             if not queue_item_json:
                                 break
 
+                            # Handle bytes
+                            if isinstance(queue_item_json, bytes):
+                                queue_item_json = queue_item_json.decode('utf-8')
+
                             try:
                                 queue_item = json.loads(queue_item_json)
                                 total_retried += 1
 
-                                # Extract data
+                                # Extract data for orchestrator message
                                 user_id = queue_item["user_id"]
                                 conversation_id = queue_item["conversation_id"]
-                                history = queue_item["history"]
-                                platform = queue_item.get("platform", "telegram")
+                                role = queue_item["role"]
+                                content = queue_item["content"]
+                                message_id = queue_item.get("message_id")
+                                flush = queue_item.get("flush", False)
 
-                                # Build metadata
-                                metadata = {
-                                    "platform": platform,
-                                    "conversation_id": conversation_id
-                                }
-
-                                # Attempt to store
+                                # Attempt to stream through orchestrator
                                 async with MemoryClient() as memory_client:
-                                    result = await memory_client.store_memory(user_id, history, metadata)
+                                    result = await memory_client.stream_message(
+                                        conversation_id=conversation_id,
+                                        role=role,
+                                        content=content,
+                                        user_id=user_id,
+                                        message_id=message_id,
+                                        flush=flush,
+                                    )
 
                                 total_success += 1
                                 logger.info(
-                                    "Queued conversation stored successfully on retry",
+                                    "Queued message streamed successfully on retry",
                                     extra={
                                         "user_id": user_id,
                                         "conversation_id": conversation_id,
-                                        "memories_created": result.get("memories_created", 0)
+                                        "role": role,
+                                        "injections": len(result.get("injections", []))
                                     }
                                 )
 
                             except (MemoryNetworkError, MemoryAPIError) as e:
                                 logger.warning(
-                                    f"Retry failed for queued conversation: {str(e)}",
+                                    f"Retry failed for queued message: {str(e)}",
                                     extra={
                                         "user_id": queue_item.get("user_id"),
-                                        "conversation_id": queue_item.get("conversation_id")
+                                        "conversation_id": queue_item.get("conversation_id"),
+                                        "role": queue_item.get("role")
                                     }
                                 )
                                 # Push back to end of queue (right push)
-                                await state_manager.redis_client.rpush(queue_key, queue_item_json)
+                                await state_manager.redis_client.rpush(
+                                    queue_key,
+                                    queue_item_json if isinstance(queue_item_json, bytes) else queue_item_json.encode()
+                                )
 
                             except Exception as e:
                                 logger.error(
-                                    f"Unexpected error processing queued conversation: {str(e)}",
+                                    f"Unexpected error processing queued message: {str(e)}",
                                     extra={
                                         "user_id": queue_item.get("user_id"),
-                                        "conversation_id": queue_item.get("conversation_id")
+                                        "conversation_id": queue_item.get("conversation_id"),
+                                        "role": queue_item.get("role")
                                     },
                                     exc_info=True
                                 )
                                 # Push back to queue to avoid losing data
-                                await state_manager.redis_client.rpush(queue_key, queue_item_json)
+                                await state_manager.redis_client.rpush(
+                                    queue_key,
+                                    queue_item_json if isinstance(queue_item_json, bytes) else queue_item_json.encode()
+                                )
 
                     if cursor == 0:
                         break
@@ -370,6 +461,163 @@ class MemoryManager:
                 # Continue running even if one iteration fails
                 await asyncio.sleep(self.RETRY_INTERVAL)
 
+    async def flush_stale_sessions(self):
+        """
+        Background worker to flush orchestrator buffers for inactive sessions.
+
+        Scans all session:* keys and triggers flush for sessions inactive > 10 minutes.
+        This ensures single-message conversations or final messages are not lost.
+
+        Story 12-5: Flush Orchestrator Buffer on Session End
+        """
+        start_time = time.time()
+        logger.info("Starting stale session flush check")
+
+        try:
+            async with StateManager() as state_manager:
+                cursor = 0
+                total_checked = 0
+                total_flushed = 0
+
+                while True:
+                    cursor, keys = await state_manager.redis_client.scan(
+                        cursor=cursor,
+                        match="session:*",
+                        count=100
+                    )
+
+                    for session_key in keys:
+                        # Handle bytes or string keys
+                        if isinstance(session_key, bytes):
+                            session_key_str = session_key.decode('utf-8')
+                        else:
+                            session_key_str = session_key
+                        user_id = session_key_str.replace("session:", "")
+
+                        # Get session data
+                        session_json = await state_manager.redis_client.get(session_key)
+                        if not session_json:
+                            continue
+
+                        # Parse session
+                        if isinstance(session_json, bytes):
+                            session_json = session_json.decode('utf-8')
+                        session = json.loads(session_json)
+                        conversation_id = session.get("conversation_id")
+                        last_activity = session.get("last_activity")
+
+                        if not conversation_id or not last_activity:
+                            continue
+
+                        total_checked += 1
+
+                        # Check if already flushed
+                        flush_marker_key = f"flushed:{conversation_id}"
+                        already_flushed = await state_manager.redis_client.exists(flush_marker_key)
+                        if already_flushed:
+                            continue
+
+                        # Calculate inactivity
+                        try:
+                            last_activity_dt = datetime.fromisoformat(
+                                last_activity.replace('Z', '+00:00')
+                            )
+                        except ValueError:
+                            logger.warning(
+                                f"Invalid last_activity timestamp: {last_activity}",
+                                extra={"user_id": user_id, "conversation_id": conversation_id}
+                            )
+                            continue
+
+                        now = datetime.now(timezone.utc)
+                        inactive_seconds = (now - last_activity_dt).total_seconds()
+
+                        if inactive_seconds >= self.INACTIVE_THRESHOLD:
+                            # Trigger flush
+                            logger.info(
+                                "Flushing stale session",
+                                extra={
+                                    "user_id": user_id,
+                                    "conversation_id": conversation_id,
+                                    "inactive_seconds": int(inactive_seconds)
+                                }
+                            )
+
+                            try:
+                                # Call stream_conversation_message with flush=True
+                                # Empty content is fine - we just want to trigger the flush
+                                await self.stream_conversation_message(
+                                    user_id=user_id,
+                                    conversation_id=conversation_id,
+                                    role="system",
+                                    content="",
+                                    flush=True
+                                )
+
+                                # Mark as flushed to avoid double-flush
+                                await state_manager.redis_client.setex(
+                                    flush_marker_key,
+                                    self.FLUSH_MARKER_TTL,
+                                    "1"
+                                )
+                                total_flushed += 1
+
+                            except Exception as e:
+                                logger.warning(
+                                    f"Failed to flush stale session: {str(e)}",
+                                    extra={
+                                        "user_id": user_id,
+                                        "conversation_id": conversation_id
+                                    }
+                                )
+
+                    if cursor == 0:
+                        break
+
+            duration_ms = int((time.time() - start_time) * 1000)
+            logger.info(
+                "Stale session flush check completed",
+                extra={
+                    "total_checked": total_checked,
+                    "total_flushed": total_flushed,
+                    "duration_ms": duration_ms
+                }
+            )
+
+        except Exception as e:
+            duration_ms = int((time.time() - start_time) * 1000)
+            logger.error(
+                f"Stale session flush check failed: {str(e)}",
+                extra={"duration_ms": duration_ms},
+                exc_info=True
+            )
+
+    async def start_flush_worker(self):
+        """
+        Start background flush worker task.
+
+        Runs indefinitely, flushing stale sessions every FLUSH_CHECK_INTERVAL seconds.
+        This is a FALLBACK mechanism - most conversations have 2+ messages and batch normally.
+
+        Story 12-5: Flush Orchestrator Buffer on Session End
+        """
+        logger.info(
+            f"Starting stale session flush worker (interval: {self.FLUSH_CHECK_INTERVAL}s, "
+            f"threshold: {self.INACTIVE_THRESHOLD}s)"
+        )
+
+        while True:
+            try:
+                await asyncio.sleep(self.FLUSH_CHECK_INTERVAL)
+                await self.flush_stale_sessions()
+            except Exception as e:
+                logger.error(
+                    f"Error in flush worker loop: {str(e)}",
+                    exc_info=True
+                )
+                # Continue running even if one iteration fails
+                await asyncio.sleep(self.FLUSH_CHECK_INTERVAL)
+
     @observe(name="stream_conversation_message", as_type="span")
     async def stream_conversation_message(
         self,
@@ -403,12 +651,21 @@ class MemoryManager:
         # Check circuit breaker
         if self._is_circuit_breaker_open():
             logger.warning(
-                "Circuit breaker is open, skipping orchestrator stream",
+                "Circuit breaker is open, queueing message for retry",
                 extra={
                     "user_id": user_id,
                     "conversation_id": conversation_id,
                     "role": role
                 }
+            )
+            # Queue for retry instead of dropping
+            await self._queue_message_for_retry(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                role=role,
+                content=content,
+                message_id=message_id,
+                flush=flush
             )
             return None
 
@@ -458,7 +715,7 @@ class MemoryManager:
                 )
 
             logger.warning(
-                f"Failed to stream message through orchestrator: {str(e)}",
+                f"Failed to stream message through orchestrator, queueing for retry: {str(e)}",
                 extra={
                     "user_id": user_id,
                     "conversation_id": conversation_id,
@@ -468,7 +725,16 @@ class MemoryManager:
                 }
             )
 
-            # Graceful degradation - return None instead of raising
+            # Queue for retry instead of losing the message
+            await self._queue_message_for_retry(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                role=role,
+                content=content,
+                message_id=message_id,
+                flush=flush
+            )
+
             return None
 
         except Exception as e:

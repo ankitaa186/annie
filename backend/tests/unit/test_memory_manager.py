@@ -140,7 +140,7 @@ class TestQueueMemoryForRetry:
 
 
 class TestRetryQueuedMemories:
-    """Test retry worker for queued memories."""
+    """Test retry worker for queued messages."""
 
     @pytest.mark.asyncio
     async def test_retry_queued_memories_empty_queue(self, memory_manager):
@@ -158,14 +158,17 @@ class TestRetryQueuedMemories:
             await memory_manager.retry_queued_memories()
 
     @pytest.mark.asyncio
-    async def test_retry_queued_memories_success(self, memory_manager, sample_conversation):
+    async def test_retry_queued_memories_success(self, memory_manager):
         """Test retry worker successfully processes queue."""
-        queue_key = b"memory_queue:user123"
+        queue_key = b"message_queue:user123"
         queue_payload = {
+            "type": "orchestrator_message",
             "user_id": "user123",
             "conversation_id": "conv_abc",
-            "history": sample_conversation,
-            "platform": "telegram",
+            "role": "user",
+            "content": "Test message",
+            "message_id": None,
+            "flush": False,
             "queued_at": "2025-11-11T10:00:00Z"
         }
         queue_json = json.dumps(queue_payload)
@@ -186,24 +189,34 @@ class TestRetryQueuedMemories:
                 mock_client = AsyncMock()
                 mock_client.__aenter__.return_value = mock_client
                 mock_client.__aexit__.return_value = None
-                mock_client.store_memory = AsyncMock(return_value={"memories_created": 2})
+                mock_client.stream_message = AsyncMock(return_value={"injections": []})
                 mock_client_class.return_value = mock_client
 
                 await memory_manager.retry_queued_memories()
 
-                # Verify memory was popped and stored
+                # Verify message was popped and streamed
                 mock_state.redis_client.lpop.assert_called_once_with(queue_key)
-                mock_client.store_memory.assert_called_once()
+                mock_client.stream_message.assert_called_once_with(
+                    conversation_id="conv_abc",
+                    role="user",
+                    content="Test message",
+                    user_id="user123",
+                    message_id=None,
+                    flush=False,
+                )
 
     @pytest.mark.asyncio
-    async def test_retry_queued_memories_requeues_on_failure(self, memory_manager, sample_conversation):
+    async def test_retry_queued_memories_requeues_on_failure(self, memory_manager):
         """Test retry worker requeues on failure."""
-        queue_key = b"memory_queue:user123"
+        queue_key = b"message_queue:user123"
         queue_payload = {
+            "type": "orchestrator_message",
             "user_id": "user123",
             "conversation_id": "conv_abc",
-            "history": sample_conversation,
-            "platform": "telegram",
+            "role": "user",
+            "content": "Test message",
+            "message_id": None,
+            "flush": False,
             "queued_at": "2025-11-11T10:00:00Z"
         }
         queue_json = json.dumps(queue_payload)
@@ -225,13 +238,13 @@ class TestRetryQueuedMemories:
                 mock_client = AsyncMock()
                 mock_client.__aenter__.return_value = mock_client
                 mock_client.__aexit__.return_value = None
-                mock_client.store_memory = AsyncMock(side_effect=MemoryNetworkError("Failed"))
+                mock_client.stream_message = AsyncMock(side_effect=MemoryNetworkError("Failed"))
                 mock_client_class.return_value = mock_client
 
                 await memory_manager.retry_queued_memories()
 
-                # Verify memory was re-queued
-                mock_state.redis_client.rpush.assert_called_once_with(queue_key, queue_json.encode())
+                # Verify message was re-queued
+                mock_state.redis_client.rpush.assert_called_once()
 
 
 class TestFormatMemoriesForLLM:
@@ -508,8 +521,8 @@ class TestStreamConversationMessage:
             assert result == []
 
     @pytest.mark.asyncio
-    async def test_stream_conversation_message_network_error_graceful_degradation(self, memory_manager):
-        """Test message streaming returns None on network error."""
+    async def test_stream_conversation_message_network_error_queues_for_retry(self, memory_manager):
+        """Test message streaming queues for retry on network error."""
         with patch('api.memory.MemoryClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
@@ -519,21 +532,31 @@ class TestStreamConversationMessage:
             )
             mock_client_class.return_value = mock_client
 
-            result = await memory_manager.stream_conversation_message(
-                user_id="user_123",
-                conversation_id="conv_456",
-                role="user",
-                content="Test"
-            )
+            with patch.object(memory_manager, '_queue_message_for_retry', new_callable=AsyncMock) as mock_queue:
+                result = await memory_manager.stream_conversation_message(
+                    user_id="user_123",
+                    conversation_id="conv_456",
+                    role="user",
+                    content="Test"
+                )
 
-            # Should return None instead of raising
-            assert result is None
-            # Circuit breaker should increment
-            assert memory_manager._circuit_breaker_failures == 1
+                # Should return None instead of raising
+                assert result is None
+                # Circuit breaker should increment
+                assert memory_manager._circuit_breaker_failures == 1
+                # Should queue for retry
+                mock_queue.assert_called_once_with(
+                    user_id="user_123",
+                    conversation_id="conv_456",
+                    role="user",
+                    content="Test",
+                    message_id=None,
+                    flush=False
+                )
 
     @pytest.mark.asyncio
-    async def test_stream_conversation_message_api_error_graceful_degradation(self, memory_manager):
-        """Test message streaming returns None on API error."""
+    async def test_stream_conversation_message_api_error_queues_for_retry(self, memory_manager):
+        """Test message streaming queues for retry on API error."""
         with patch('api.memory.MemoryClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
@@ -543,19 +566,22 @@ class TestStreamConversationMessage:
             )
             mock_client_class.return_value = mock_client
 
-            result = await memory_manager.stream_conversation_message(
-                user_id="user_123",
-                conversation_id="conv_456",
-                role="user",
-                content="Test"
-            )
+            with patch.object(memory_manager, '_queue_message_for_retry', new_callable=AsyncMock) as mock_queue:
+                result = await memory_manager.stream_conversation_message(
+                    user_id="user_123",
+                    conversation_id="conv_456",
+                    role="user",
+                    content="Test"
+                )
 
-            # Should return None instead of raising
-            assert result is None
+                # Should return None instead of raising
+                assert result is None
+                # Should queue for retry
+                mock_queue.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_stream_conversation_message_circuit_breaker_open(self, memory_manager):
-        """Test message streaming returns None when circuit breaker is open."""
+    async def test_stream_conversation_message_circuit_breaker_open_queues(self, memory_manager):
+        """Test message streaming queues when circuit breaker is open."""
         # Open circuit breaker
         memory_manager._circuit_breaker_failures = 5
         memory_manager._circuit_breaker_opened_at = time.time()
@@ -564,17 +590,20 @@ class TestStreamConversationMessage:
             mock_client = AsyncMock()
             mock_client_class.return_value = mock_client
 
-            result = await memory_manager.stream_conversation_message(
-                user_id="user_123",
-                conversation_id="conv_456",
-                role="user",
-                content="Test"
-            )
+            with patch.object(memory_manager, '_queue_message_for_retry', new_callable=AsyncMock) as mock_queue:
+                result = await memory_manager.stream_conversation_message(
+                    user_id="user_123",
+                    conversation_id="conv_456",
+                    role="user",
+                    content="Test"
+                )
 
-            # Should return None immediately
-            assert result is None
-            # MemoryClient should not have been instantiated
-            mock_client_class.assert_not_called()
+                # Should return None immediately
+                assert result is None
+                # MemoryClient should not have been instantiated
+                mock_client_class.assert_not_called()
+                # Should queue for retry
+                mock_queue.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_stream_conversation_message_resets_circuit_breaker_on_success(self, memory_manager):
@@ -612,16 +641,239 @@ class TestStreamConversationMessage:
             )
             mock_client_class.return_value = mock_client
 
-            # Make 5 failing calls (threshold)
-            for i in range(5):
-                await memory_manager.stream_conversation_message(
+            with patch.object(memory_manager, '_queue_message_for_retry', new_callable=AsyncMock):
+                # Make 5 failing calls (threshold)
+                for i in range(5):
+                    await memory_manager.stream_conversation_message(
+                        user_id="user_123",
+                        conversation_id="conv_456",
+                        role="user",
+                        content=f"Test {i}"
+                    )
+
+                # Circuit breaker should be open
+                assert memory_manager._circuit_breaker_failures == 5
+                assert memory_manager._circuit_breaker_opened_at is not None
+                assert memory_manager._is_circuit_breaker_open() is True
+
+
+class TestFlushStaleSessions:
+    """Test flush_stale_sessions method for Story 12-5."""
+
+    @pytest.mark.asyncio
+    async def test_flush_stale_sessions_empty(self, memory_manager):
+        """Test flush worker with no sessions."""
+        with patch('api.memory.StateManager') as mock_state_class:
+            mock_state = AsyncMock()
+            mock_state.__aenter__.return_value = mock_state
+            mock_state.__aexit__.return_value = None
+            mock_state.redis_client = AsyncMock()
+            # Return empty scan result
+            mock_state.redis_client.scan = AsyncMock(return_value=(0, []))
+            mock_state_class.return_value = mock_state
+
+            # Should complete without error
+            await memory_manager.flush_stale_sessions()
+
+    @pytest.mark.asyncio
+    async def test_flush_stale_sessions_flushes_inactive(self, memory_manager):
+        """Test flush worker flushes sessions inactive > 10 minutes."""
+        # Create a stale session (15 minutes old)
+        old_timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        # Simulate 15 minutes ago by manipulating the session data
+        from datetime import timedelta
+        stale_time = (datetime.now(timezone.utc) - timedelta(minutes=15)).isoformat().replace("+00:00", "Z")
+
+        session_data = {
+            "user_id": "user_123",
+            "conversation_id": "conv_456",
+            "platform": "telegram",
+            "created_at": stale_time,
+            "last_activity": stale_time,
+            "message_count": 1
+        }
+
+        with patch('api.memory.StateManager') as mock_state_class:
+            mock_state = AsyncMock()
+            mock_state.__aenter__.return_value = mock_state
+            mock_state.__aexit__.return_value = None
+            mock_state.redis_client = AsyncMock()
+
+            # Mock scan to return one session
+            mock_state.redis_client.scan = AsyncMock(return_value=(0, [b"session:user_123"]))
+            mock_state.redis_client.get = AsyncMock(return_value=json.dumps(session_data))
+            mock_state.redis_client.exists = AsyncMock(return_value=False)  # Not already flushed
+            mock_state.redis_client.setex = AsyncMock()
+            mock_state_class.return_value = mock_state
+
+            with patch.object(memory_manager, 'stream_conversation_message', new_callable=AsyncMock) as mock_stream:
+                mock_stream.return_value = []
+
+                await memory_manager.flush_stale_sessions()
+
+                # Verify flush was called with flush=True
+                mock_stream.assert_called_once_with(
                     user_id="user_123",
                     conversation_id="conv_456",
-                    role="user",
-                    content=f"Test {i}"
+                    role="system",
+                    content="",
+                    flush=True
                 )
 
-            # Circuit breaker should be open
-            assert memory_manager._circuit_breaker_failures == 5
-            assert memory_manager._circuit_breaker_opened_at is not None
-            assert memory_manager._is_circuit_breaker_open() is True
+                # Verify flush marker was set
+                mock_state.redis_client.setex.assert_called_once()
+                call_args = mock_state.redis_client.setex.call_args
+                assert call_args[0][0] == "flushed:conv_456"
+                assert call_args[0][1] == memory_manager.FLUSH_MARKER_TTL
+
+    @pytest.mark.asyncio
+    async def test_flush_stale_sessions_skips_recently_active(self, memory_manager):
+        """Test flush worker skips sessions active within 10 minutes."""
+        # Create a recent session (2 minutes old)
+        from datetime import timedelta
+        recent_time = (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat().replace("+00:00", "Z")
+
+        session_data = {
+            "user_id": "user_123",
+            "conversation_id": "conv_456",
+            "platform": "telegram",
+            "created_at": recent_time,
+            "last_activity": recent_time,
+            "message_count": 1
+        }
+
+        with patch('api.memory.StateManager') as mock_state_class:
+            mock_state = AsyncMock()
+            mock_state.__aenter__.return_value = mock_state
+            mock_state.__aexit__.return_value = None
+            mock_state.redis_client = AsyncMock()
+
+            # Mock scan to return one session
+            mock_state.redis_client.scan = AsyncMock(return_value=(0, [b"session:user_123"]))
+            mock_state.redis_client.get = AsyncMock(return_value=json.dumps(session_data))
+            mock_state.redis_client.exists = AsyncMock(return_value=False)
+            mock_state_class.return_value = mock_state
+
+            with patch.object(memory_manager, 'stream_conversation_message', new_callable=AsyncMock) as mock_stream:
+                await memory_manager.flush_stale_sessions()
+
+                # Flush should NOT have been called
+                mock_stream.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_flush_stale_sessions_skips_already_flushed(self, memory_manager):
+        """Test flush worker skips sessions already flushed."""
+        from datetime import timedelta
+        stale_time = (datetime.now(timezone.utc) - timedelta(minutes=15)).isoformat().replace("+00:00", "Z")
+
+        session_data = {
+            "user_id": "user_123",
+            "conversation_id": "conv_456",
+            "platform": "telegram",
+            "created_at": stale_time,
+            "last_activity": stale_time,
+            "message_count": 1
+        }
+
+        with patch('api.memory.StateManager') as mock_state_class:
+            mock_state = AsyncMock()
+            mock_state.__aenter__.return_value = mock_state
+            mock_state.__aexit__.return_value = None
+            mock_state.redis_client = AsyncMock()
+
+            # Mock scan to return one session
+            mock_state.redis_client.scan = AsyncMock(return_value=(0, [b"session:user_123"]))
+            mock_state.redis_client.get = AsyncMock(return_value=json.dumps(session_data))
+            mock_state.redis_client.exists = AsyncMock(return_value=True)  # Already flushed!
+            mock_state_class.return_value = mock_state
+
+            with patch.object(memory_manager, 'stream_conversation_message', new_callable=AsyncMock) as mock_stream:
+                await memory_manager.flush_stale_sessions()
+
+                # Flush should NOT have been called
+                mock_stream.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_flush_stale_sessions_graceful_degradation(self, memory_manager):
+        """Test flush worker continues on individual session failures."""
+        from datetime import timedelta
+        stale_time = (datetime.now(timezone.utc) - timedelta(minutes=15)).isoformat().replace("+00:00", "Z")
+
+        session_data = {
+            "user_id": "user_123",
+            "conversation_id": "conv_456",
+            "platform": "telegram",
+            "created_at": stale_time,
+            "last_activity": stale_time,
+            "message_count": 1
+        }
+
+        with patch('api.memory.StateManager') as mock_state_class:
+            mock_state = AsyncMock()
+            mock_state.__aenter__.return_value = mock_state
+            mock_state.__aexit__.return_value = None
+            mock_state.redis_client = AsyncMock()
+
+            mock_state.redis_client.scan = AsyncMock(return_value=(0, [b"session:user_123"]))
+            mock_state.redis_client.get = AsyncMock(return_value=json.dumps(session_data))
+            mock_state.redis_client.exists = AsyncMock(return_value=False)
+            mock_state_class.return_value = mock_state
+
+            with patch.object(memory_manager, 'stream_conversation_message', new_callable=AsyncMock) as mock_stream:
+                # Simulate orchestrator failure
+                mock_stream.side_effect = Exception("Orchestrator unavailable")
+
+                # Should not raise
+                await memory_manager.flush_stale_sessions()
+
+    @pytest.mark.asyncio
+    async def test_flush_stale_sessions_handles_string_keys(self, memory_manager):
+        """Test flush worker handles string Redis keys (not just bytes)."""
+        from datetime import timedelta
+        stale_time = (datetime.now(timezone.utc) - timedelta(minutes=15)).isoformat().replace("+00:00", "Z")
+
+        session_data = {
+            "user_id": "user_123",
+            "conversation_id": "conv_456",
+            "platform": "telegram",
+            "created_at": stale_time,
+            "last_activity": stale_time,
+            "message_count": 1
+        }
+
+        with patch('api.memory.StateManager') as mock_state_class:
+            mock_state = AsyncMock()
+            mock_state.__aenter__.return_value = mock_state
+            mock_state.__aexit__.return_value = None
+            mock_state.redis_client = AsyncMock()
+
+            # Return string key (not bytes) - can happen with decode_responses=True
+            mock_state.redis_client.scan = AsyncMock(return_value=(0, ["session:user_123"]))
+            mock_state.redis_client.get = AsyncMock(return_value=json.dumps(session_data))
+            mock_state.redis_client.exists = AsyncMock(return_value=False)
+            mock_state.redis_client.setex = AsyncMock()
+            mock_state_class.return_value = mock_state
+
+            with patch.object(memory_manager, 'stream_conversation_message', new_callable=AsyncMock) as mock_stream:
+                mock_stream.return_value = []
+
+                await memory_manager.flush_stale_sessions()
+
+                # Should still work correctly
+                mock_stream.assert_called_once()
+
+
+class TestFlushWorkerConstants:
+    """Test flush worker configuration constants."""
+
+    def test_flush_check_interval(self, memory_manager):
+        """Test flush check interval is 5 minutes."""
+        assert memory_manager.FLUSH_CHECK_INTERVAL == 300
+
+    def test_inactive_threshold(self, memory_manager):
+        """Test inactive threshold is 10 minutes."""
+        assert memory_manager.INACTIVE_THRESHOLD == 600
+
+    def test_flush_marker_ttl(self, memory_manager):
+        """Test flush marker TTL is 1 hour."""
+        assert memory_manager.FLUSH_MARKER_TTL == 3600

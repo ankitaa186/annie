@@ -1,6 +1,6 @@
 # Story 12.5: Flush Orchestrator Buffer on Session End
 
-**Status:** drafted
+**Status:** done
 **Epic:** 12 - Memory Storage Enhancements
 **Sprint:** Current
 **Estimated Effort:** 0.5 days
@@ -179,25 +179,35 @@ FLUSH_MARKER_TTL = 3600      # 1 hour TTL for "already flushed" marker
 
 ### Context Reference
 
-<!-- Path(s) to story context XML will be added here by context workflow -->
+- `.bmad-ephemeral/story-contexts/12-5-flush-orchestrator-on-session-end.xml`
 
 ### Agent Model Used
 
-<!-- To be filled by dev agent -->
+Claude Opus 4.5
 
 ### Debug Log References
 
-<!-- To be filled during implementation -->
+- Backend startup logs show flush worker initialization
+- Log message: "Starting stale session flush worker (interval: 300s, threshold: 600s)"
 
 ### Completion Notes List
 
-<!-- To be filled after implementation -->
+1. Added flush worker constants to MemoryManager (FLUSH_CHECK_INTERVAL=300, INACTIVE_THRESHOLD=600, FLUSH_MARKER_TTL=3600)
+2. Added `flush_stale_sessions()` method that scans Redis for inactive sessions
+3. Added `start_flush_worker()` method for background worker loop
+4. Updated main.py startup event to launch both retry and flush workers
+5. Added 8 unit tests for flush functionality (all passing)
+6. Flush uses existing `stream_conversation_message()` with flush=True
+7. Redis marker key `flushed:{conversation_id}` prevents double-flush (1 hour TTL)
 
 ### File List
 
 | Status | File Path | Notes |
 |--------|-----------|-------|
-| | | |
+| Modified | backend/api/memory.py | Added flush_stale_sessions() and start_flush_worker() methods |
+| Modified | backend/api/main.py | Added flush worker to startup event |
+| Modified | backend/tests/unit/test_memory_manager.py | Added TestFlushStaleSessions and TestFlushWorkerConstants |
+| Created | .bmad-ephemeral/story-contexts/12-5-flush-orchestrator-on-session-end.xml | Story context |
 
 ---
 

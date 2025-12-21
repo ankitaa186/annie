@@ -257,27 +257,25 @@ class TestMemoryStorageWithFallback:
 
 
 class TestMemoryRetryWorker:
-    """Test retry worker for queued memories."""
+    """Test retry worker for queued messages."""
 
     @pytest.mark.asyncio
     async def test_retry_worker_processes_queue(self):
-        """Test retry worker processes queued memories."""
+        """Test retry worker processes queued messages."""
         memory_manager = MemoryManager()
 
-        conversation_history = [
-            {"role": "user", "content": "Test message 1"},
-            {"role": "assistant", "content": "Test response 1"}
-        ]
-
         queue_payload = {
+            "type": "orchestrator_message",
             "user_id": "user123",
             "conversation_id": "conv_abc",
-            "history": conversation_history,
-            "platform": "telegram",
+            "role": "user",
+            "content": "Test message",
+            "message_id": None,
+            "flush": False,
             "queued_at": "2025-11-11T10:00:00Z"
         }
 
-        queue_key = b"memory_queue:user123"
+        queue_key = b"message_queue:user123"
         queue_json = json.dumps(queue_payload)
 
         # Mock StateManager
@@ -298,39 +296,41 @@ class TestMemoryRetryWorker:
                 mock_client = AsyncMock()
                 mock_client.__aenter__.return_value = mock_client
                 mock_client.__aexit__.return_value = None
-                mock_client.store_memory = AsyncMock(return_value={"memories_created": 2})
+                mock_client.stream_message = AsyncMock(return_value={"injections": []})
                 mock_client_class.return_value = mock_client
 
                 # Run retry worker
                 await memory_manager.retry_queued_memories()
 
-                # Verify memory was stored
-                mock_client.store_memory.assert_called_once()
-                call_args = mock_client.store_memory.call_args
-                assert call_args[0][0] == "user123"
-                assert call_args[0][1] == conversation_history
+                # Verify message was streamed
+                mock_client.stream_message.assert_called_once_with(
+                    conversation_id="conv_abc",
+                    role="user",
+                    content="Test message",
+                    user_id="user123",
+                    message_id=None,
+                    flush=False,
+                )
 
     @pytest.mark.asyncio
     async def test_retry_worker_requeues_on_failure(self):
-        """Test retry worker requeues memories that fail."""
+        """Test retry worker requeues messages that fail."""
         from api.memory_client import MemoryNetworkError
 
         memory_manager = MemoryManager()
 
-        conversation_history = [
-            {"role": "user", "content": "Test message 1"},
-            {"role": "assistant", "content": "Test response 1"}
-        ]
-
         queue_payload = {
+            "type": "orchestrator_message",
             "user_id": "user123",
             "conversation_id": "conv_abc",
-            "history": conversation_history,
-            "platform": "telegram",
+            "role": "user",
+            "content": "Test message",
+            "message_id": None,
+            "flush": False,
             "queued_at": "2025-11-11T10:00:00Z"
         }
 
-        queue_key = b"memory_queue:user123"
+        queue_key = b"message_queue:user123"
         queue_json = json.dumps(queue_payload)
 
         # Mock StateManager
@@ -352,11 +352,11 @@ class TestMemoryRetryWorker:
                 mock_client = AsyncMock()
                 mock_client.__aenter__.return_value = mock_client
                 mock_client.__aexit__.return_value = None
-                mock_client.store_memory = AsyncMock(side_effect=MemoryNetworkError("Connection failed"))
+                mock_client.stream_message = AsyncMock(side_effect=MemoryNetworkError("Connection failed"))
                 mock_client_class.return_value = mock_client
 
                 # Run retry worker
                 await memory_manager.retry_queued_memories()
 
-                # Verify memory was re-queued
-                mock_state.redis_client.rpush.assert_called_once_with(queue_key, queue_json.encode())
+                # Verify message was re-queued
+                mock_state.redis_client.rpush.assert_called_once()

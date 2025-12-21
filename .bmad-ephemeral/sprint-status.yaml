@@ -50,12 +50,12 @@ development_status:
   # Epic 12: Memory Storage Enhancements (Use Orchestrator Batching)
   # Switch from direct /v1/store to /v1/orchestrator/message for cost savings
   # Orchestrator batches 2-8 messages before LLM extraction (~70% cost reduction)
-  epic-12: contexted  # Tech context exists, 4/5 stories done
+  epic-12: completed  # All 5/5 stories done
   12-1-add-stream-message-to-memory-client: done  # Add stream_message() method to MemoryClient
   12-2-update-memory-manager-for-orchestrator: done  # Add stream_conversation_message() to MemoryManager
   12-3-switch-chat-endpoint-to-orchestrator: done  # Update chat.py to use orchestrator instead of /v1/store
   12-4-remove-farewell-detection-code: done  # Remove unused FAREWELL_KEYWORDS and is_conversation_ending()
-  12-5-flush-orchestrator-on-session-end: drafted  # Flush buffer when session expires to prevent lost memories
+  12-5-flush-orchestrator-on-session-end: done  # Flush buffer when session expires to prevent lost memories
   epic-12-retrospective: optional
 
 # =============================================================================

@@ -1,6 +1,6 @@
 # Epic 12: Memory Storage Enhancements
 
-**Status:** Planned
+**Status:** Completed
 **Priority:** Medium (Cost Optimization)
 **Estimated Effort:** 1-2 days
 **Author:** Ankit
@@ -210,7 +210,7 @@ Single messages or final messages stay buffered indefinitely if user leaves.
 - [ ] ~70% reduction in LLM extraction calls (verify via Langfuse)
 - [x] Farewell detection code removed
 - [x] All existing tests pass
-- [ ] Single messages stored within ~15 minutes of inactivity (fallback)
+- [x] Single messages stored within ~15 minutes of inactivity (fallback) - Story 12-5 implemented
 - [ ] No regression in user experience
 
 ---

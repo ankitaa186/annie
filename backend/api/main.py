@@ -293,6 +293,7 @@ def check_langfuse_health() -> Dict[str, Any]:
 @app.on_event("startup")
 async def startup_event():
     """Application startup handler."""
+    import asyncio
     logger.info("Annie Backend API starting up...")
     logger.info(f"Environment: {config.get('ENVIRONMENT', 'unknown')}")
     logger.info(f"Log level: {config.get('LOG_LEVEL', 'INFO')}")
@@ -304,6 +305,21 @@ async def startup_event():
         get_langfuse_client()
     except Exception as e:
         logger.warning(f"Failed to initialize Langfuse on startup: {e}")
+
+    # Start background workers (Story 12-5)
+    try:
+        from api.memory import MemoryManager
+        memory_manager = MemoryManager()
+
+        # Start retry worker for queued memories
+        asyncio.create_task(memory_manager.start_retry_worker())
+        logger.info("Memory retry worker started")
+
+        # Start flush worker for stale sessions
+        asyncio.create_task(memory_manager.start_flush_worker())
+        logger.info("Stale session flush worker started")
+    except Exception as e:
+        logger.warning(f"Failed to start background workers: {e}")
 
 
 @app.on_event("shutdown")
