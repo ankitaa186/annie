@@ -25,6 +25,8 @@ EXPOSE 8002
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
     CMD python -c "import requests; requests.get('http://localhost:8002/health').raise_for_status()" || exit 1
 
-# Entrypoint for HTTP transport (FastAPI + Uvicorn)
-# PYTHONPATH includes /app so mcp_server package can be imported
-CMD ["sh", "-c", "PYTHONPATH=/app python -m uvicorn mcp_server.server:app --host 0.0.0.0 --port 8002"]
+# Copy and set entrypoint script
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+
+CMD ["/docker-entrypoint.sh"]
