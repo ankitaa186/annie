@@ -27,7 +27,7 @@ class TestLangfuseHealthEndpoint:
     """Test AC #3: Health endpoint includes Langfuse status."""
 
     def test_health_endpoint_includes_langfuse_when_enabled(self, test_client):
-        """Test that /health/detailed includes Langfuse status when enabled."""
+        """Test that /health/full includes Langfuse status when enabled."""
         with patch.dict(os.environ, {
             "LANGFUSE_PUBLIC_KEY": "pk-test-12345",
             "LANGFUSE_SECRET_KEY": "sk-test-67890"
@@ -50,7 +50,7 @@ class TestLangfuseHealthEndpoint:
                     "last_flush": None
                 }
 
-                response = test_client.get("/health/detailed")
+                response = test_client.get("/health/full")
 
                 # Verify response
                 assert response.status_code == 200
@@ -70,7 +70,7 @@ class TestLangfuseHealthEndpoint:
                 assert langfuse_status["client_available"] is True
 
     def test_health_endpoint_shows_langfuse_disabled(self, test_client):
-        """Test that /health/detailed shows Langfuse as disabled when keys missing."""
+        """Test that /health/full shows Langfuse as disabled when keys missing."""
         with patch.dict(os.environ, {}, clear=True):
             # Clear lru_cache for config functions
             from api.config import (
@@ -82,7 +82,7 @@ class TestLangfuseHealthEndpoint:
             get_langfuse_secret_key.cache_clear()
             is_langfuse_enabled.cache_clear()
 
-            response = test_client.get("/health/detailed")
+            response = test_client.get("/health/full")
 
             # Verify response
             assert response.status_code == 200
@@ -96,7 +96,7 @@ class TestLangfuseHealthEndpoint:
             assert langfuse_status["client_available"] is False
 
     def test_health_endpoint_handles_langfuse_unavailable(self, test_client):
-        """Test that /health/detailed handles Langfuse being unavailable."""
+        """Test that /health/full handles Langfuse being unavailable."""
         with patch.dict(os.environ, {
             "LANGFUSE_PUBLIC_KEY": "pk-test-12345",
             "LANGFUSE_SECRET_KEY": "sk-test-67890"
@@ -113,7 +113,7 @@ class TestLangfuseHealthEndpoint:
 
             # Mock Langfuse client initialization failure
             with patch("langfuse.Langfuse", side_effect=Exception("Connection refused")):
-                response = test_client.get("/health/detailed")
+                response = test_client.get("/health/full")
 
                 # Verify response (should still succeed with AC #5 fire-and-forget)
                 assert response.status_code == 200
@@ -139,8 +139,8 @@ class TestLangfuseHealthEndpoint:
         assert "timestamp" in data
 
     def test_health_endpoint_response_structure(self, test_client):
-        """Test that detailed health endpoint has expected structure."""
-        response = test_client.get("/health/detailed")
+        """Test that full health endpoint has expected structure."""
+        response = test_client.get("/health/full")
 
         assert response.status_code == 200
         data = response.json()

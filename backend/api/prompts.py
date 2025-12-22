@@ -32,8 +32,9 @@ BASE_SYSTEM_PROMPT = """You are Annie, a hyper-intelligent AI companion with a d
 - Tools aren't optional—they're your superpowers! 🚀
 - ALWAYS check if a tool can enhance your answer (memory, search, analysis).
 - Before answering, think: "What tool would make this response legendary?"
-- Use tools proactively—don't wait to be asked. See a question? Search for latest info!
+- Use tools proactively—don't wait to be asked. See a question? Search for latest info, dont be scared to search the web or use other tools to get the information you need.
 - Your motto: "Why guess when I can KNOW?"
+- At the end of every response, list the tools you used to generate the response, eg "Tools used: [tool1, tool2, tool3] . If you used no tools, say "Tools used: None"
 
 **💬 How You Engage (The Hook):**
 1. **Start Strong**: Open with something intriguing, unexpected, or delightfully on-point.
@@ -50,10 +51,13 @@ BASE_SYSTEM_PROMPT = """You are Annie, a hyper-intelligent AI companion with a d
 - **Surprise & Delight**: Add unexpected value—a relevant analogy, a fascinating connection, a helpful resource they didn't ask for but will love.
 
 **Core Principles:**
-- Privacy First: Guard user data like a dragon guards gold 🐉
+- Privacy First: Guard user data like a dragon guards gold 🐉.
 - Truth + Tact: Be honest but kind, direct but supportive.
 - Growth Mindset: Frame challenges as opportunities for leveling up.
 - Intellectual Humility: Brilliance means knowing when to say "let me look that up".
+- Tool Usage: Always check if a tool can enhance your answer (memory, search, analysis). You can use multiple tools in a single response, and also chain them together.
+- Tool Safety: Only use the user_id provided in the system message to make tool calls, DO NOT USE ANY OTHER USER_ID.
+- Tool Precedence: Tools like Profile & Portfolio tools provide you structured data, which takes precedence over memory data.
 
 Remember: You're not just an assistant—you're the hyper-intelligent, witty, slightly mischievous (in a good way) companion who makes every conversation memorable. Be the AI that users can't stop talking to (or about)!"""
 
@@ -97,6 +101,55 @@ TOOL_USAGE_INSTRUCTIONS = """
 IMPORTANT: When using memory tools (store_memory, retrieve_memories), ALWAYS use the exact user_id provided in the system message.
 Never use generic IDs like 'anonymous_user' - always use the specific user_id.
 """
+
+
+def format_portfolio_for_prompt(portfolio: Dict[str, Any]) -> Optional[str]:
+    """
+    Format user portfolio data for system prompt injection.
+
+    Args:
+        portfolio: Portfolio dictionary from PortfolioManager
+
+    Returns:
+        Formatted portfolio string or None if portfolio is empty
+    """
+    # Skip if portfolio is empty or not cached
+    if not portfolio:
+        return None
+
+    holdings = portfolio.get("holdings", [])
+    if not holdings:
+        return None
+
+    sections = []
+
+    # Add summary
+    total_holdings = len(holdings)
+    sections.append(f"Total Holdings: {total_holdings} {'stock' if total_holdings == 1 else 'stocks'}")
+
+    # Format holdings
+    holdings_lines = ["\nHoldings:"]
+    for holding in holdings:
+        ticker = holding.get("ticker", "???")
+        shares = holding.get("shares", 0)
+        avg_price = holding.get("avg_price")
+        asset_name = holding.get("asset_name")
+
+        # Format line: "- AAPL (Apple Inc.): 10 shares @ $175.50 avg"
+        line = f"- {ticker}"
+        if asset_name:
+            line += f" ({asset_name})"
+        line += f": {shares} shares"
+        if avg_price:
+            line += f" @ ${avg_price:.2f} avg"
+
+        holdings_lines.append(line)
+
+    sections.append("\n".join(holdings_lines))
+
+    # Build final portfolio string
+    portfolio_str = "\n".join(sections)
+    return portfolio_str
 
 
 def format_profile_for_prompt(profile: Dict[str, Any]) -> Optional[str]:
@@ -216,16 +269,18 @@ def build_system_prompt(
     user_id: Optional[str] = None,
     platform: str = "api",
     include_tool_instructions: bool = True,
-    profile: Optional[Dict[str, Any]] = None
+    profile: Optional[Dict[str, Any]] = None,
+    portfolio: Optional[Dict[str, Any]] = None
 ) -> str:
     """
-    Build system prompt with optional user_id, profile, and platform-specific formatting.
+    Build system prompt with optional user_id, profile, portfolio, and platform-specific formatting.
 
     Args:
         user_id: Optional user identifier for tool usage instructions
         platform: Platform identifier ("telegram", "web", "api")
         include_tool_instructions: Whether to include tool usage instructions
         profile: Optional user profile dictionary from ProfileManager
+        portfolio: Optional user portfolio dictionary from PortfolioManager
 
     Returns:
         Complete system prompt string
@@ -242,6 +297,13 @@ def build_system_prompt(
         if profile_str:
             prompt_parts.append("\n\nUSER PROFILE:")
             prompt_parts.append(profile_str)
+
+    # Add user portfolio if provided
+    if portfolio:
+        portfolio_str = format_portfolio_for_prompt(portfolio)
+        if portfolio_str:
+            prompt_parts.append("\n\nUSER PORTFOLIO:")
+            prompt_parts.append(portfolio_str)
     
     # Get Pacific time with daylight saving adjustment
     pacific = pytz.timezone("US/Pacific")

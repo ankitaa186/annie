@@ -380,3 +380,189 @@ class TestExceptionHierarchy:
         assert error.status_code == 500
         assert error.response_data == {"error": "test"}
         assert "500" in str(error)
+
+
+class TestStreamMessage:
+    """Test stream_message method for orchestrator integration."""
+
+    @pytest.mark.asyncio
+    async def test_stream_message_success(self, memory_client):
+        """Test successful message streaming to orchestrator."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "injections": [
+                {
+                    "memory_id": "mem_abc",
+                    "content": "User prefers tech stocks",
+                    "source": "LONG_TERM",
+                    "channel": "INLINE",
+                    "score": 0.85,
+                    "metadata": {}
+                }
+            ]
+        }
+
+        with patch.object(memory_client.client, 'post', new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = mock_response
+
+            result = await memory_client.stream_message(
+                conversation_id="conv_123",
+                role="user",
+                content="What stocks should I buy?",
+                user_id="user_456"
+            )
+
+            # Verify result structure
+            assert "injections" in result
+            assert len(result["injections"]) == 1
+            assert result["injections"][0]["memory_id"] == "mem_abc"
+            assert result["injections"][0]["score"] == 0.85
+
+            # Verify POST was called correctly
+            mock_post.assert_called_once()
+            call_args = mock_post.call_args
+            assert call_args[0][0] == "http://test-memories:8080/v1/orchestrator/message"
+            payload = call_args[1]["json"]
+            assert payload["conversation_id"] == "conv_123"
+            assert payload["role"] == "user"
+            assert payload["content"] == "What stocks should I buy?"
+            assert payload["metadata"]["user_id"] == "user_456"
+            assert payload["flush"] is False
+
+    @pytest.mark.asyncio
+    async def test_stream_message_with_flush(self, memory_client):
+        """Test message streaming with flush=True."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"injections": []}
+
+        with patch.object(memory_client.client, 'post', new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = mock_response
+
+            await memory_client.stream_message(
+                conversation_id="conv_123",
+                role="assistant",
+                content="Here is my response",
+                user_id="user_456",
+                flush=True
+            )
+
+            # Verify flush parameter was passed
+            call_args = mock_post.call_args
+            payload = call_args[1]["json"]
+            assert payload["flush"] is True
+            assert payload["role"] == "assistant"
+
+    @pytest.mark.asyncio
+    async def test_stream_message_with_message_id(self, memory_client):
+        """Test message streaming with optional message_id."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"injections": []}
+
+        with patch.object(memory_client.client, 'post', new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = mock_response
+
+            await memory_client.stream_message(
+                conversation_id="conv_123",
+                role="user",
+                content="Test message",
+                user_id="user_456",
+                message_id="msg_789"
+            )
+
+            # Verify message_id was included
+            call_args = mock_post.call_args
+            payload = call_args[1]["json"]
+            assert payload["message_id"] == "msg_789"
+
+    @pytest.mark.asyncio
+    async def test_stream_message_empty_injections(self, memory_client):
+        """Test message streaming with no injections returned."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"injections": []}
+
+        with patch.object(memory_client.client, 'post', new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = mock_response
+
+            result = await memory_client.stream_message(
+                conversation_id="conv_new",
+                role="user",
+                content="Hello",
+                user_id="new_user"
+            )
+
+            assert result["injections"] == []
+
+    @pytest.mark.asyncio
+    async def test_stream_message_api_error(self, memory_client):
+        """Test message streaming with API error."""
+        mock_response = Mock()
+        mock_response.status_code = 422
+        mock_response.json.return_value = {"detail": "Invalid role"}
+        mock_response.text = "Invalid role"
+
+        with patch.object(memory_client.client, 'post', new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = mock_response
+
+            with pytest.raises(MemoryAPIError) as exc_info:
+                await memory_client.stream_message(
+                    conversation_id="conv_123",
+                    role="invalid_role",
+                    content="Test",
+                    user_id="user_456"
+                )
+
+            assert exc_info.value.status_code == 422
+            assert "Invalid role" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_stream_message_network_error(self, memory_client):
+        """Test message streaming with network error."""
+        with patch.object(memory_client.client, 'post', new_callable=AsyncMock) as mock_post:
+            mock_post.side_effect = httpx.ConnectError("Connection refused")
+
+            with pytest.raises(MemoryNetworkError) as exc_info:
+                await memory_client.stream_message(
+                    conversation_id="conv_123",
+                    role="user",
+                    content="Test",
+                    user_id="user_456"
+                )
+
+            assert "Failed to connect to orchestrator" in str(exc_info.value)
+            assert exc_info.value.original_error is not None
+
+    @pytest.mark.asyncio
+    async def test_stream_message_timeout(self, memory_client):
+        """Test message streaming with timeout."""
+        with patch.object(memory_client.client, 'post', new_callable=AsyncMock) as mock_post:
+            mock_post.side_effect = httpx.TimeoutException("Request timed out")
+
+            with pytest.raises(MemoryNetworkError) as exc_info:
+                await memory_client.stream_message(
+                    conversation_id="conv_123",
+                    role="user",
+                    content="Test",
+                    user_id="user_456"
+                )
+
+            assert "timed out" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_stream_message_http_error(self, memory_client):
+        """Test message streaming with generic HTTP error."""
+        with patch.object(memory_client.client, 'post', new_callable=AsyncMock) as mock_post:
+            mock_post.side_effect = httpx.HTTPError("Generic HTTP error")
+
+            with pytest.raises(MemoryNetworkError) as exc_info:
+                await memory_client.stream_message(
+                    conversation_id="conv_123",
+                    role="user",
+                    content="Test",
+                    user_id="user_456"
+                )
+
+            assert "HTTP error" in str(exc_info.value)

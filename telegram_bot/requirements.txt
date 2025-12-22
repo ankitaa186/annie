@@ -18,3 +18,7 @@ redis==5.0.0
 
 # Debugging (dev environment only)
 debugpy>=1.8.0
+
+# Testing
+pytest>=8.0.0
+pytest-asyncio>=0.23.0

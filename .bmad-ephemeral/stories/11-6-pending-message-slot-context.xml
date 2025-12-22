@@ -1,0 +1,411 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <metadata>
+    <story-id>11-6-pending-message-slot</story-id>
+    <story-title>Pending Message Slot</story-title>
+    <epic-id>epic-11</epic-id>
+    <epic-title>Real-Time Status Updates</epic-title>
+    <generated-date>2025-12-16</generated-date>
+    <status>ready-for-dev</status>
+  </metadata>
+
+  <summary>
+    <description>
+      Implement single pending message slot that allows users to send follow-up messages while Annie is processing,
+      preventing concurrent request conflicts and ensuring messages are handled sequentially after completion.
+    </description>
+    <user-story>
+      As a user, I want to send follow-up messages while Annie is working,
+      so that I can add context without waiting for the response.
+    </user-story>
+  </summary>
+
+  <acceptance-criteria>
+    <criterion id="AC1">
+      <title>Processing Flag</title>
+      <description>Redis key `processing:{user_id}` indicates active request, set to "1" on start, deleted on completion, TTL 3 minutes, atomic operations for concurrency safety</description>
+    </criterion>
+    <criterion id="AC2">
+      <title>Single Pending Slot</title>
+      <description>Redis key `pending_message:{user_id}` stores pending messages (newline separated), max 4000 chars, TTL 5 minutes, NOT a queue - single concatenated string</description>
+    </criterion>
+    <criterion id="AC3">
+      <title>Status Update for Pending</title>
+      <description>First pending: "📝 Got it - will handle after current request...", Subsequent: "📝 Added to pending ({n} follow-up messages)..."</description>
+    </criterion>
+    <criterion id="AC4">
+      <title>Auto-Pickup on Completion</title>
+      <description>After response completes, check pending, atomically clear and process as new request, LLM sees natural chat history flow, recursive handling</description>
+    </criterion>
+    <criterion id="AC5">
+      <title>Concurrent Request Safety</title>
+      <description>Only one active processing per user, pending slot prevents races, Redis atomic operations (SETNX, pipeline GET+DELETE)</description>
+    </criterion>
+  </acceptance-criteria>
+
+  <technical-context>
+    <architecture>
+      <component name="telegram_bot">
+        <file path="/home/ankit/dev/annie/telegram_bot/handlers/message.py">
+          <purpose>Message handler - MAIN MODIFICATION TARGET</purpose>
+          <current-implementation>
+            - handle_message(): Main entry point for text messages (line 491)
+            - Authorization check via auth_module (line 525)
+            - Typing indicator task started (line 561)
+            - Backend client sends message (line 578)
+            - stream_response_to_telegram() handles streaming (line 597)
+            - No Redis interaction currently - communicates only with Backend API
+          </current-implementation>
+          <required-changes>
+            - Add Redis client initialization (follow StateManager pattern)
+            - Check processing flag before sending to backend
+            - If processing, append to pending_message, send status, return
+            - If not processing, set processing flag with SETNX
+            - After stream completes, clear processing flag and check pending
+            - Implement recursive pending message handling
+          </required-changes>
+        </file>
+      </component>
+
+      <component name="redis">
+        <connection-pattern>
+          <example from="/home/ankit/dev/annie/backend/api/state.py" lines="86-112">
+            <code><![CDATA[
+import redis.asyncio as redis
+
+def __init__(self, redis_client: Optional[redis.Redis] = None):
+    if redis_client:
+        self.redis_client = redis_client
+        self._should_close = False
+    else:
+        config = get_config()
+        redis_host = config.get("REDIS_HOST", "redis")
+        redis_port = int(config.get("REDIS_PORT", 6379))
+        self.redis_client = redis.Redis(
+            host=redis_host,
+            port=redis_port,
+            db=0,
+            decode_responses=True,
+            socket_timeout=5,
+            socket_connect_timeout=5
+        )
+        self._should_close = True
+]]></code>
+          </example>
+          <note>Use redis.asyncio.Redis with decode_responses=True for string operations</note>
+        </connection-pattern>
+
+        <key-schema>
+          <key name="processing:{user_id}">
+            <type>String</type>
+            <value>"1"</value>
+            <ttl>180 seconds (3 minutes)</ttl>
+            <operation>SET with NX flag (atomic set-if-not-exists)</operation>
+            <usage>Indicates user has active request being processed</usage>
+          </key>
+          <key name="pending_message:{user_id}">
+            <type>String</type>
+            <value>Newline-separated messages ("msg1\nmsg2")</value>
+            <ttl>300 seconds (5 minutes)</ttl>
+            <max-size>4000 characters</max-size>
+            <operation>GET/SET for append, pipeline GET+DELETE for atomic retrieval</operation>
+            <usage>Stores messages sent while processing active</usage>
+          </key>
+        </key-schema>
+
+        <atomic-operations>
+          <operation name="Set Processing Flag">
+            <command>await redis.set(f"processing:{user_id}", "1", ex=180, nx=True)</command>
+            <description>Atomically set flag only if not exists (NX flag), with 180s TTL</description>
+            <return>True if set, False if already exists</return>
+          </operation>
+          <operation name="Clear Processing Flag">
+            <command>await redis.delete(f"processing:{user_id}")</command>
+            <description>Remove processing flag on completion</description>
+          </operation>
+          <operation name="Check Processing Flag">
+            <command>is_processing = await redis.get(f"processing:{user_id}")</command>
+            <description>Returns "1" if processing, None if not</description>
+          </operation>
+          <operation name="Append Pending Message">
+            <command>
+              existing = await redis.get(f"pending_message:{user_id}") or ""
+              combined = f"{existing}\n{message}" if existing else message
+              if len(combined) > 4000:
+                  combined = combined[-4000:]  # Keep most recent
+              await redis.set(f"pending_message:{user_id}", combined, ex=300)
+            </command>
+            <description>Append to existing pending, truncate if too large</description>
+          </operation>
+          <operation name="Atomic Get and Clear Pending">
+            <command>
+              pipe = redis.pipeline()
+              pipe.get(f"pending_message:{user_id}")
+              pipe.delete(f"pending_message:{user_id}")
+              results = await pipe.execute()
+              pending = results[0]  # The GET result
+            </command>
+            <description>Atomically retrieve and clear pending messages using pipeline</description>
+          </operation>
+        </atomic-operations>
+
+        <existing-patterns>
+          <pattern name="ProfileManager Atomic Operations" file="/home/ankit/dev/annie/backend/api/profile.py">
+            <example lines="414-421">
+              <code><![CDATA[
+# Use HINCRBY for atomic increment (avoids read-modify-write race)
+await self.redis_client.hincrby(
+    f"profile_meta:{user_id}",
+    "message_count",
+    1
+)
+]]></code>
+            </example>
+            <lesson>Use atomic operations like HINCRBY/SETNX to avoid race conditions</lesson>
+          </pattern>
+        </existing-patterns>
+      </component>
+    </architecture>
+
+    <implementation-plan>
+      <task id="1" priority="high">
+        <title>Add Redis Client to Message Handler</title>
+        <files>
+          <file>/home/ankit/dev/annie/telegram_bot/handlers/message.py</file>
+        </files>
+        <steps>
+          <step>Import redis.asyncio as redis at top of file</step>
+          <step>Import get_config from telegram_bot.config</step>
+          <step>Create global Redis client or initialize per-handler</step>
+          <step>Follow StateManager pattern for connection (lines 86-112 in state.py)</step>
+        </steps>
+      </task>
+
+      <task id="2" priority="high">
+        <title>Implement Processing Flag Logic</title>
+        <files>
+          <file>/home/ankit/dev/annie/telegram_bot/handlers/message.py</file>
+        </files>
+        <steps>
+          <step>After authorization (line 547), check processing flag</step>
+          <step>If processing, call append_pending_message() and send status</step>
+          <step>If not processing, set flag with SETNX before backend call (line 578)</step>
+          <step>In finally block after streaming (line 638), delete processing flag</step>
+        </steps>
+      </task>
+
+      <task id="3" priority="medium">
+        <title>Implement Pending Message Functions</title>
+        <files>
+          <file>/home/ankit/dev/annie/telegram_bot/handlers/message.py</file>
+        </files>
+        <functions>
+          <function name="append_pending_message">
+            <signature>async def append_pending_message(redis, user_id: str, message: str)</signature>
+            <description>Append message to pending slot, enforce 4000 char limit</description>
+          </function>
+          <function name="count_pending_messages">
+            <signature>async def count_pending_messages(redis, user_id: str) -> int</signature>
+            <description>Count messages by splitting on newline</description>
+          </function>
+          <function name="get_and_clear_pending">
+            <signature>async def get_and_clear_pending(redis, user_id: str) -> Optional[str]</signature>
+            <description>Atomically GET and DELETE pending messages using pipeline</description>
+          </function>
+        </functions>
+      </task>
+
+      <task id="4" priority="high">
+        <title>Implement Auto-Pickup Logic</title>
+        <files>
+          <file>/home/ankit/dev/annie/telegram_bot/handlers/message.py</file>
+        </files>
+        <steps>
+          <step>After stream completes (line 636), check for pending messages</step>
+          <step>If pending exists, call handle_pending_messages() recursively</step>
+          <step>handle_pending_messages() should set processing flag, send status, and process</step>
+          <step>After processing pending, check again for more pending (recursive)</step>
+        </steps>
+      </task>
+
+      <task id="5" priority="medium">
+        <title>Add Status Message Handling</title>
+        <files>
+          <file>/home/ankit/dev/annie/telegram_bot/handlers/message.py</file>
+        </files>
+        <steps>
+          <step>On first pending, send: "📝 Got it - will handle after current request..."</step>
+          <step>On subsequent pending, send: "📝 Added to pending (n follow-up messages)..."</step>
+          <step>Use message.reply_text() for status messages</step>
+        </steps>
+      </task>
+
+      <task id="6" priority="low">
+        <title>Write Integration Tests</title>
+        <files>
+          <file>/home/ankit/dev/annie/telegram_bot/tests/test_pending_messages.py</file>
+        </files>
+        <test-cases>
+          <case>Single message processing (no pending)</case>
+          <case>Message during processing (creates pending)</case>
+          <case>Multiple messages during processing (appends)</case>
+          <case>Auto-pickup after completion</case>
+          <case>Concurrent message handling safety</case>
+          <case>Max size truncation (4000 chars)</case>
+        </test-cases>
+      </task>
+    </implementation-plan>
+
+    <code-snippets>
+      <snippet id="current-handler-structure">
+        <file>/home/ankit/dev/annie/telegram_bot/handlers/message.py</file>
+        <lines>491-672</lines>
+        <description>Current handle_message() flow: auth check → typing indicator → backend send → stream response → error handling</description>
+      </snippet>
+
+      <snippet id="redis-init-pattern">
+        <file>/home/ankit/dev/annie/backend/api/state.py</file>
+        <lines>86-112</lines>
+        <description>Redis client initialization pattern with config, connection pooling, timeouts</description>
+      </snippet>
+
+      <snippet id="stream-completion">
+        <file>/home/ankit/dev/annie/telegram_bot/handlers/message.py</file>
+        <lines>627-636</lines>
+        <description>Point where streaming completes - INSERT pending check here</description>
+      </snippet>
+    </code-snippets>
+
+    <concurrency-safety>
+      <concern id="1">
+        <issue>Multiple users sending messages simultaneously</issue>
+        <solution>User-scoped keys (processing:{user_id}) isolate per-user state</solution>
+      </concern>
+      <concern id="2">
+        <issue>Same user sending rapid messages</issue>
+        <solution>SETNX ensures only one message processes at a time, others go to pending</solution>
+      </concern>
+      <concern id="3">
+        <issue>Processing flag expires during long request</issue>
+        <solution>3-minute TTL is safety net; normal requests complete faster. Flag deleted on completion regardless.</solution>
+      </concern>
+      <concern id="4">
+        <issue>Race between GET and DELETE pending</issue>
+        <solution>Use Redis pipeline to atomically GET and DELETE in single round-trip</solution>
+      </concern>
+      <concern id="5">
+        <issue>Network failure after GET pending but before DELETE</issue>
+        <solution>5-minute TTL on pending ensures eventual cleanup. Duplicate processing acceptable over message loss.</solution>
+      </concern>
+    </concurrency-safety>
+
+    <dependencies>
+      <dependency>
+        <package>redis</package>
+        <version>>=5.0.0</version>
+        <status>Already installed (mcp_server/requirements.txt, backend/requirements.txt)</status>
+        <action>Add to telegram_bot/requirements.txt if not present</action>
+      </dependency>
+      <dependency>
+        <service>Redis</service>
+        <status>Running in Docker Compose</status>
+        <config>REDIS_HOST=redis, REDIS_PORT=6379 (from .env)</config>
+      </dependency>
+    </dependencies>
+  </technical-context>
+
+  <edge-cases>
+    <case id="1">
+      <scenario>User sends 100 messages while processing</scenario>
+      <handling>Max size 4000 chars truncates oldest, keeping most recent messages</handling>
+    </case>
+    <case id="2">
+      <scenario>Processing flag expires mid-request (after 3 min)</scenario>
+      <handling>Flag still deleted on completion. TTL is safety net only. New request could start but backend likely handles gracefully.</handling>
+    </case>
+    <case id="3">
+      <scenario>Pending message expires (after 5 min)</scenario>
+      <handling>Message lost. Acceptable tradeoff - user can resend. Prevents indefinite queueing.</handling>
+    </case>
+    <case id="4">
+      <scenario>Redis connection fails</scenario>
+      <handling>Gracefully degrade - allow message through without pending logic. Log error. Follow StateManager error patterns.</handling>
+    </case>
+    <case id="5">
+      <scenario>Messages arrive during pending processing</scenario>
+      <handling>Processing flag set during pending processing, so new messages append to pending. Recursive pickup handles.</handling>
+    </case>
+  </edge-cases>
+
+  <testing-strategy>
+    <unit-tests>
+      <test>append_pending_message() with empty and existing pending</test>
+      <test>count_pending_messages() with 0, 1, N messages</test>
+      <test>get_and_clear_pending() atomicity</test>
+      <test>Max size truncation (4000 chars)</test>
+    </unit-tests>
+    <integration-tests>
+      <test>Single message flow (no pending)</test>
+      <test>Message during processing creates pending</test>
+      <test>Multiple messages append to pending</test>
+      <test>Auto-pickup after completion</test>
+      <test>Recursive pending handling</test>
+      <test>Processing flag prevents concurrent processing</test>
+    </integration-tests>
+    <manual-tests>
+      <test>Send message, immediately send follow-up</test>
+      <test>Send 5 messages rapid-fire, verify sequential processing</test>
+      <test>Verify status messages show correct count</test>
+    </manual-tests>
+  </testing-strategy>
+
+  <files-to-modify>
+    <file path="/home/ankit/dev/annie/telegram_bot/handlers/message.py">
+      <changes>
+        <change type="add">Redis client initialization</change>
+        <change type="add">Processing flag check and set</change>
+        <change type="add">Pending message functions (append, count, get_and_clear)</change>
+        <change type="add">Pending message handling logic</change>
+        <change type="add">Status message sending</change>
+        <change type="modify">handle_message() flow to check processing before backend</change>
+        <change type="modify">Add pending check after stream completion</change>
+      </changes>
+    </file>
+    <file path="/home/ankit/dev/annie/telegram_bot/requirements.txt">
+      <changes>
+        <change type="verify">Ensure redis>=5.0.0 is present</change>
+      </changes>
+    </file>
+  </files-to-modify>
+
+  <references>
+    <reference>
+      <title>Epic 11: Real-Time Status Updates</title>
+      <file>/home/ankit/dev/annie/docs/epics/epic-11-realtime-status-updates.md</file>
+      <lines>401-442</lines>
+    </reference>
+    <reference>
+      <title>StateManager Redis Patterns</title>
+      <file>/home/ankit/dev/annie/backend/api/state.py</file>
+      <lines>60-120</lines>
+    </reference>
+    <reference>
+      <title>ProfileManager Atomic Operations</title>
+      <file>/home/ankit/dev/annie/backend/api/profile.py</file>
+      <lines>403-470</lines>
+    </reference>
+    <reference>
+      <title>Telegram Message Handler</title>
+      <file>/home/ankit/dev/annie/telegram_bot/handlers/message.py</file>
+      <lines>491-672</lines>
+    </reference>
+  </references>
+
+  <dev-notes>
+    <note>This story is independent of Stories 11.1-11.5 and can be implemented in parallel</note>
+    <note>No changes to Backend API required - all logic in Telegram bot</note>
+    <note>LLM will naturally handle multi-line concatenated messages from pending slot</note>
+    <note>Design choice: Single slot (not queue) simplifies implementation and meets requirements</note>
+    <note>Recursive handling ensures all pending messages eventually processed</note>
+  </dev-notes>
+</story-context>

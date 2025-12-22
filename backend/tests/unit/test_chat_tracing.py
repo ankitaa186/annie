@@ -187,40 +187,5 @@ class TestChatEndpointTracing:
             # Verify request succeeded despite tracing being disabled
             assert response.status_code == 200
 
-    @patch("api.routes.chat.start_trace")
-    def test_trace_includes_conversation_ending_flag(self, mock_start_trace, test_client):
-        """Test that trace metadata includes conversation_ending flag."""
-        mock_trace = Mock()
-        mock_start_trace.return_value = mock_trace
-
-        with patch("api.routes.chat.StateManager") as mock_state, \
-             patch("api.routes.chat.ProfileManager") as mock_profile:
-
-            mock_state_instance = MagicMock()
-            mock_state.__aenter__ = MagicMock(return_value=mock_state_instance)
-            mock_state.__aexit__ = MagicMock(return_value=None)
-
-            mock_state_instance.get_session = MagicMock(return_value={
-                "conversation_id": "conv_123",
-                "platform": "api"
-            })
-            mock_state_instance.add_message = MagicMock()
-
-            mock_profile_instance = MagicMock()
-            mock_profile.return_value = mock_profile_instance
-            mock_profile_instance.get_profile = MagicMock(return_value={})
-
-            # Make request with farewell
-            response = test_client.post(
-                "/api/chat",
-                json={
-                    "user_id": "test_user",
-                    "platform": "api",
-                    "message": "Thanks for your help!"
-                }
-            )
-
-            # Verify conversation_ending in metadata
-            call_args = mock_start_trace.call_args
-            assert "conversation_ending" in call_args[1]["metadata"]
-            assert call_args[1]["metadata"]["conversation_ending"] is True
+    # test_trace_includes_conversation_ending_flag removed - farewell detection no longer exists
+    # (Story 12.4: Memory storage now happens on every message via orchestrator batching)

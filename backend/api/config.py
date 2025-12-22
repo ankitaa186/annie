@@ -75,6 +75,7 @@ OPTIONAL_VARS = {
 SENSITIVE_VARS = [
     "GROK_API_KEY",
     "CHATGPT_API_KEY",
+    "GEMINI_API_KEY",  # Story 9.2
     "TELEGRAM_BOT_TOKEN",
     "BRAVE_SEARCH_API_KEY",
     "STOCK_API_KEY",
@@ -133,9 +134,25 @@ def validate_environment() -> dict:
             )
         else:
             config["CHATGPT_API_KEY"] = chatgpt_key
+    elif llm_provider == "gemini-3-pro-preview":
+        # Story 9.2: Gemini 3 Pro support
+        gemini_key = get_env_var("GEMINI_API_KEY")
+        if not gemini_key or gemini_key == "REPLACE_ME":
+            raise ValueError(
+                "GEMINI_API_KEY is required when LLM_PROVIDER is set to 'gemini-3-pro-preview'. "
+                "Get your API key from https://aistudio.google.com/app/apikey"
+            )
+        else:
+            config["GEMINI_API_KEY"] = gemini_key
+            # Load Gemini-specific configuration
+            config["GEMINI_MODEL"] = get_env_var("GEMINI_MODEL", default="gemini-3-pro-preview")
+            config["GEMINI_MAX_OUTPUT_TOKENS"] = get_env_var("GEMINI_MAX_OUTPUT_TOKENS", default="8192")
+            config["GEMINI_TEMPERATURE"] = get_env_var("GEMINI_TEMPERATURE", default="1.0")
+            config["GEMINI_SAFETY_SETTING"] = get_env_var("GEMINI_SAFETY_SETTING", default="BLOCK_NONE")
+            config["GEMINI_CONTEXT_CACHE_TTL"] = get_env_var("GEMINI_CONTEXT_CACHE_TTL", default="300")
     else:
         logger.warning(
-            f"Invalid LLM_PROVIDER '{llm_provider}'. Must be 'grok-4' or 'chatgpt-5'. "
+            f"Invalid LLM_PROVIDER '{llm_provider}'. Must be 'grok-4', 'chatgpt-5', or 'gemini-3-pro-preview'. "
             f"LLM functionality will not work until configured properly."
         )
 
@@ -147,7 +164,12 @@ def validate_environment() -> dict:
     chatgpt_key = get_env_var("CHATGPT_API_KEY")
     if chatgpt_key and chatgpt_key != "REPLACE_ME":
         config["CHATGPT_API_KEY"] = chatgpt_key
-    
+
+    # Load optional Gemini API key (Story 9.2)
+    gemini_key = get_env_var("GEMINI_API_KEY")
+    if gemini_key and gemini_key != "REPLACE_ME":
+        config["GEMINI_API_KEY"] = gemini_key
+
     # Raise errors if any validation failed
     if errors:
         error_msg = "Environment validation failed:\n" + "\n".join(f"  - {e}" for e in errors)

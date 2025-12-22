@@ -19,6 +19,7 @@ from api.memory import MemoryManager
 from api.mcp_client import MCPClient, MCPClientError, MCPNetworkError, MCPToolError
 from api.profile import ProfileManager
 from api.state import StateManager, StateError
+from api.status import emit_status
 
 try:
     from langfuse.decorators import observe, langfuse_context
@@ -36,13 +37,6 @@ except ImportError:
 
 logger = get_logger(__name__)
 
-# Farewell keywords for conversation end detection
-FAREWELL_KEYWORDS = {
-    "thanks", "thank you", "thanks!", "thank you!", "thx", "ty",
-    "bye", "goodbye", "bye!", "goodbye!", "see you", "cya",
-    "that's all", "thats all", "done", "i'm done", "im done"
-}
-
 # Decision support keywords for memory retrieval
 DECISION_SUPPORT_KEYWORDS = {
     "should i", "recommend", "advice", "help me decide", "what do you think",
@@ -52,26 +46,6 @@ DECISION_SUPPORT_KEYWORDS = {
 
 # Create router
 router = APIRouter(prefix="/api", tags=["chat"])
-
-
-def is_conversation_ending(message: str) -> bool:
-    """
-    Detect if user message indicates conversation is ending.
-
-    Args:
-        message: User message content
-
-    Returns:
-        bool: True if message contains farewell keywords
-    """
-    message_lower = message.lower().strip()
-
-    # Check for exact match or keyword at end of message
-    for keyword in FAREWELL_KEYWORDS:
-        if message_lower == keyword or message_lower.endswith(keyword):
-            return True
-
-    return False
 
 
 def is_decision_support_request(message: str) -> bool:
@@ -129,71 +103,68 @@ def extract_decision_query(message: str) -> str:
 
 async def store_conversation_memory_background(
     user_id: str,
-    conversation_id: str
+    conversation_id: str,
+    message_content: str,
+    role: str = "user"
 ):
     """
-    Background task to store conversation memory.
+    Background task to stream message through orchestrator for batched memory storage.
 
     This runs asynchronously and doesn't block the chat response.
+    Uses the orchestrator's intelligent batching (2-8 messages before LLM extraction)
+    for ~70% cost savings compared to direct /v1/store calls.
 
     Args:
         user_id: User identifier
         conversation_id: Conversation identifier
+        message_content: The message content to stream
+        role: Message role ("user" or "assistant")
     """
     try:
         logger.info(
-            "Starting background memory storage",
-            extra={"user_id": user_id, "conversation_id": conversation_id}
+            "Starting background orchestrator stream",
+            extra={
+                "user_id": user_id,
+                "conversation_id": conversation_id,
+                "role": role,
+                "content_length": len(message_content)
+            }
         )
 
-        # Get only the most recent conversation turn (last 2 messages: user + assistant)
-        # This stores each message incrementally instead of entire conversation history
-        async with StateManager() as state:
-            conversation_history = await state.get_conversation_history(
-                conversation_id,
-                limit=2  # Only get last 2 messages (most recent turn)
-            )
-
-        if not conversation_history or len(conversation_history) < 2:
-            logger.info(
-                "Conversation too short for memory storage, skipping",
-                extra={"user_id": user_id, "message_count": len(conversation_history)}
-            )
-            return
-
-        # Store conversation memory (agentic-memories handles extraction)
+        # Stream message through orchestrator (batches 2-8 messages before extraction)
         memory_manager = MemoryManager()
-        success = await memory_manager.store_conversation_memory(
+        injections = await memory_manager.stream_conversation_message(
             user_id=user_id,
             conversation_id=conversation_id,
-            conversation_history=conversation_history,
-            platform="telegram"
+            role=role,
+            content=message_content
         )
 
-        if success:
+        if injections is not None:
             logger.info(
-                "Conversation memory stored successfully in background (fire-and-forget)",
+                "Message streamed to orchestrator successfully (fire-and-forget)",
                 extra={
                     "user_id": user_id,
                     "conversation_id": conversation_id,
-                    "message_count": len(conversation_history),
-                    "status": "stored"
+                    "role": role,
+                    "injections_count": len(injections),
+                    "status": "streamed"
                 }
             )
         else:
             logger.warning(
-                "Conversation memory queued for retry (agentic-memories unavailable)",
+                "Orchestrator stream failed (graceful degradation)",
                 extra={
                     "user_id": user_id,
                     "conversation_id": conversation_id,
-                    "message_count": len(conversation_history),
-                    "status": "queued_for_retry"
+                    "role": role,
+                    "status": "degraded"
                 }
             )
 
     except Exception as e:
         logger.error(
-            f"Error in background memory storage: {str(e)}",
+            f"Error in background orchestrator stream: {str(e)}",
             exc_info=True,
             extra={"user_id": user_id, "conversation_id": conversation_id}
         )
@@ -302,8 +273,7 @@ async def create_chat(request: ChatRequest, background_tasks: BackgroundTasks):
             "timestamp": "2025-11-11T10:00:00Z"
         }
     """
-    # Detect conversation ending and decision support request
-    conversation_is_ending = is_conversation_ending(request.message)
+    # Detect decision support request for memory retrieval
     needs_decision_support = is_decision_support_request(request.message)
 
     logger.info(
@@ -312,7 +282,6 @@ async def create_chat(request: ChatRequest, background_tasks: BackgroundTasks):
             "user_id": request.user_id,
             "platform": request.platform,
             "message_length": len(request.message),
-            "conversation_ending": conversation_is_ending,
             "needs_decision_support": needs_decision_support
         }
     )
@@ -325,7 +294,6 @@ async def create_chat(request: ChatRequest, background_tasks: BackgroundTasks):
                 metadata={
                     "platform": request.platform,
                     "message_length": len(request.message),
-                    "conversation_ending": conversation_is_ending,
                     "needs_decision_support": needs_decision_support,
                     "message": request.message[:100]  # First 100 chars for context
                 }
@@ -469,6 +437,9 @@ async def create_chat(request: ChatRequest, background_tasks: BackgroundTasks):
                         }
                     )
 
+                    # Emit status: Starting memory retrieval
+                    emit_status("Retrieving your memories...", icon="🔍")
+
                     # Call retrieve_memories MCP tool
                     async with MCPClient() as mcp_client:
                         retrieval_result = await mcp_client.call_tool(
@@ -483,6 +454,12 @@ async def create_chat(request: ChatRequest, background_tasks: BackgroundTasks):
                     # Check if memories were retrieved
                     memories = retrieval_result.get("memories", [])
                     memory_count = retrieval_result.get("memory_count", 0)
+
+                    # Emit status: Memory retrieval complete
+                    if memory_count > 0:
+                        emit_status(f"Found {memory_count} relevant memories", icon="✅")
+                    else:
+                        emit_status("No relevant memories found", icon="✅")
 
                     logger.info(
                         "Memory retrieval completed",
@@ -557,16 +534,18 @@ async def create_chat(request: ChatRequest, background_tasks: BackgroundTasks):
                 "Triggering automatic memory storage",
                 extra={
                     "user_id": request.user_id,
-                    "conversation_id": conversation_id,
-                    "conversation_ending": conversation_is_ending
+                    "conversation_id": conversation_id
                 }
             )
 
             # Add background task (runs after response is sent)
+            # Streams user message through orchestrator for batched memory storage
             background_tasks.add_task(
                 store_conversation_memory_background,
                 request.user_id,
-                conversation_id
+                conversation_id,
+                request.message,  # Pass message content for orchestrator
+                "user"  # Role is always "user" for incoming chat messages
             )
 
             logger.info(

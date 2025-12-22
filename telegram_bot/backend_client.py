@@ -183,7 +183,7 @@ class BackendClient:
         self,
         conversation_id: str,
         user_id: int
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[dict, None]:
         """
         Stream LLM response from backend using Server-Sent Events (SSE).
 
@@ -195,7 +195,7 @@ class BackendClient:
             user_id: Telegram user ID (for logging)
 
         Yields:
-            Response chunks as they arrive
+            Structured frames as dicts: {"type": "status|token|done|error", "content": "...", ...}
 
         Raises:
             asyncio.TimeoutError: If first token not received within timeout
@@ -246,13 +246,26 @@ class BackendClient:
                             )
                             break
 
-                        # Parse JSON and extract text content
+                        # Parse JSON and yield structured frames
                         try:
                             chunk_data = json.loads(data)
                             chunk_type = chunk_data.get("type")
 
-                            # Only yield text tokens, skip metadata
-                            if chunk_type == "token":
+                            # Yield status frames (NEW for Story 11.3)
+                            if chunk_type == "status":
+                                logger.debug(
+                                    "Status frame received",
+                                    extra={
+                                        "user_id": user_id,
+                                        "conversation_id": conversation_id,
+                                        "status": chunk_data.get("message", ""),
+                                        "event": "stream_status"
+                                    }
+                                )
+                                yield chunk_data
+
+                            # Yield token frames
+                            elif chunk_type == "token":
                                 content = chunk_data.get("content", "")
                                 if content:
                                     chunk_count += 1
@@ -269,7 +282,7 @@ class BackendClient:
                                             }
                                         )
 
-                                    yield content
+                                    yield chunk_data
 
                                     logger.debug(
                                         "Stream chunk received",
@@ -281,6 +294,8 @@ class BackendClient:
                                             "event": "stream_chunk"
                                         }
                                     )
+
+                            # Yield done frames
                             elif chunk_type == "done":
                                 # Stream completed with metadata
                                 tokens_used = chunk_data.get("tokens_used", {})
@@ -294,7 +309,10 @@ class BackendClient:
                                         "event": "stream_completed"
                                     }
                                 )
+                                yield chunk_data
                                 break
+
+                            # Handle error frames
                             elif chunk_type == "error":
                                 # Backend error - log and raise exception to trigger error handling
                                 error_message = chunk_data.get("message", "Unknown error")
@@ -309,6 +327,7 @@ class BackendClient:
                                         "event": "stream_error"
                                     }
                                 )
+                                yield chunk_data
                                 # Raise exception to trigger error handler and cancel typing
                                 raise Exception(f"Backend error: {error_message}")
 

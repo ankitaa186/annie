@@ -26,3 +26,6 @@ debugpy>=1.8.0
 
 # Observability - LLM tracing (Story 8.1)
 langfuse==2.36.0
+
+# Gemini 3.0 Pro Provider (Story 9.2)
+google-generativeai>=0.3.0

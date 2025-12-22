@@ -1,16 +1,22 @@
 """
 Cost calculation utilities for LLM provider token usage.
 
-Pricing as of November 2025:
+Pricing as of December 2025:
 - Grok-4: Free until November 21, 2025 (promotional period)
           After: TBD (will be updated)
           Live Search: $0.025 per source (currently free during promo)
 - ChatGPT-5 (GPT-4):
           Input: $0.03 per 1K tokens
           Output: $0.06 per 1K tokens
+- Gemini 3 Pro Preview:
+          Input: $2.00 per 1M tokens ($0.002 per 1K tokens)
+          Output: $12.00 per 1M tokens ($0.012 per 1K tokens)
+          Note: 2x pricing for contexts > 200K tokens (not implemented yet)
 
-Source: https://openai.com/api/pricing/
-Last Updated: November 2025
+Sources:
+- OpenAI: https://openai.com/api/pricing/
+- Google: https://ai.google.dev/gemini-api/docs/pricing
+Last Updated: December 2025
 """
 
 
@@ -67,15 +73,84 @@ def calculate_chatgpt_cost(prompt_tokens: int, completion_tokens: int) -> dict:
     }
 
 
-def calculate_llm_cost(provider: str, prompt_tokens: int, completion_tokens: int, sources_used: int = 0) -> dict:
+def calculate_gemini_cost(prompt_tokens: int, completion_tokens: int, cached_tokens: int = 0) -> dict:
+    """
+    Calculate cost for Gemini 3 Pro Preview API usage with tiered pricing.
+
+    Tiered pricing (as of December 2025):
+    - Input tokens ≤200k: $2.00 per 1M tokens
+    - Input tokens >200k: $4.00 per 1M tokens (for excess)
+    - Output tokens ≤200k: $12.00 per 1M tokens
+    - Output tokens >200k: $18.00 per 1M tokens (for excess)
+    - Cached tokens ≤200k: $0.20 per 1M tokens
+    - Cached tokens >200k: $0.40 per 1M tokens (for excess)
+
+    Args:
+        prompt_tokens: Number of input tokens
+        completion_tokens: Number of output tokens
+        cached_tokens: Number of cached input tokens (reduced pricing)
+
+    Returns:
+        Dictionary with input_cost, output_cost, cached_cost, total_cost, tier in USD
+    """
+    # Tiered pricing threshold
+    TIER_THRESHOLD = 200_000  # 200k tokens
+
+    # Pricing per 1M tokens
+    INPUT_COST_LOW = 2.00      # $2.00 per 1M tokens (≤200k)
+    INPUT_COST_HIGH = 4.00     # $4.00 per 1M tokens (>200k)
+    OUTPUT_COST_LOW = 12.00    # $12.00 per 1M tokens (≤200k)
+    OUTPUT_COST_HIGH = 18.00   # $18.00 per 1M tokens (>200k)
+    CACHED_COST_LOW = 0.20     # $0.20 per 1M tokens (≤200k)
+    CACHED_COST_HIGH = 0.40    # $0.40 per 1M tokens (>200k)
+
+    # Calculate input cost (tiered)
+    if prompt_tokens <= TIER_THRESHOLD:
+        input_cost = (prompt_tokens / 1_000_000) * INPUT_COST_LOW
+    else:
+        low_tier = (TIER_THRESHOLD / 1_000_000) * INPUT_COST_LOW
+        high_tier = ((prompt_tokens - TIER_THRESHOLD) / 1_000_000) * INPUT_COST_HIGH
+        input_cost = low_tier + high_tier
+
+    # Calculate output cost (tiered)
+    if completion_tokens <= TIER_THRESHOLD:
+        output_cost = (completion_tokens / 1_000_000) * OUTPUT_COST_LOW
+    else:
+        low_tier = (TIER_THRESHOLD / 1_000_000) * OUTPUT_COST_LOW
+        high_tier = ((completion_tokens - TIER_THRESHOLD) / 1_000_000) * OUTPUT_COST_HIGH
+        output_cost = low_tier + high_tier
+
+    # Calculate cached cost (tiered)
+    if cached_tokens <= TIER_THRESHOLD:
+        cached_cost = (cached_tokens / 1_000_000) * CACHED_COST_LOW
+    else:
+        low_tier = (TIER_THRESHOLD / 1_000_000) * CACHED_COST_LOW
+        high_tier = ((cached_tokens - TIER_THRESHOLD) / 1_000_000) * CACHED_COST_HIGH
+        cached_cost = low_tier + high_tier
+
+    # Determine tier for metadata
+    total_tokens = prompt_tokens + completion_tokens + cached_tokens
+    tier = "low" if total_tokens <= TIER_THRESHOLD else "high"
+
+    return {
+        "input_cost": round(input_cost, 6),
+        "output_cost": round(output_cost, 6),
+        "cached_cost": round(cached_cost, 6),
+        "total_cost": round(input_cost + output_cost + cached_cost, 6),
+        "tier": tier
+    }
+
+
+def calculate_llm_cost(provider: str, prompt_tokens: int, completion_tokens: int, sources_used: int = 0, cached_tokens: int = 0) -> dict:
     """
     Calculate cost for LLM API usage based on provider.
 
     Args:
-        provider: LLM provider name ("grok-4" or "chatgpt-5")
+        provider: LLM provider name ("grok-4", "chatgpt-5", or "gemini-3-pro-preview")
         prompt_tokens: Number of input tokens
         completion_tokens: Number of output tokens
         sources_used: Number of Live Search sources accessed (Grok-4 only)
+        cached_tokens: Number of cached input tokens (Gemini only)
 
     Returns:
         Dictionary with cost breakdown in USD
@@ -87,5 +162,7 @@ def calculate_llm_cost(provider: str, prompt_tokens: int, completion_tokens: int
         return calculate_grok_cost(prompt_tokens, completion_tokens, sources_used)
     elif provider == "chatgpt-5":
         return calculate_chatgpt_cost(prompt_tokens, completion_tokens)
+    elif provider == "gemini-3-pro-preview":
+        return calculate_gemini_cost(prompt_tokens, completion_tokens, cached_tokens)
     else:
         raise ValueError(f"Unknown provider: {provider}")

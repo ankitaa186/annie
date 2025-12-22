@@ -1,28 +1,34 @@
 # Annie - Personal AI Companion
 
-> An AI companion chatbot inspired by Grok's Annie, designed to help friends and relatives make better decisions and achieve prosperity through intelligent, context-aware advice powered by real-time information, persistent memory, and specialized decision-making tools.
+> A personal AI companion chatbot that provides decision-making support through intelligent, context-aware advice powered by real-time information, persistent memory, and specialized investment tools.
 
 ## Overview
 
-Annie is a personal AI companion chatbot that provides decision-making support across financial, career, life, and business decisions. Built with advanced LLM integration, persistent memory, and real-time information access, Annie helps users make better decisions with 80% trust and coverage.
+Annie is a personal AI companion chatbot that provides decision-making support across financial, career, life, and business decisions. Built with advanced LLM integration, persistent memory, and real-time information access.
 
-**Key Features:**
-- **Decision-Making Support** - AI-powered analysis and recommendations for 80% of day-to-day decisions
-- **MCP Server Integration** - Tool hosting for internet access and memory management
-- **Intelligent Memory** - Powered by agentic-memories for persistent, context-aware conversations
-- **Multi-Platform Access** - Telegram bot (V1), web interface (V1.1), iOS app (V1.2)
-- **Advanced LLM Support** - Grok-4 primary, ChatGPT-5 fallback with streaming responses
-- **Real-time Information** - Internet access via Brave Search for current data
+**Implemented Features (V1.0):**
+- **LLM Integration** - Grok-4 (primary), Gemini 3 Pro, ChatGPT-5 with streaming responses
+- **Persistent Memory** - agentic-memories integration for context-aware conversations
+- **User Profiles** - Automatic extraction of preferences, goals, and background from conversations
+- **Portfolio Management** - Track stock holdings, calculate performance, gain/loss metrics
+- **Stock Analysis** - Real-time prices, technicals (RSI, moving averages), fundamentals via yfinance
+- **Grok Live Search** - Real-time internet access for time-sensitive queries
+- **LLM Observability** - Full tracing via Langfuse (costs, latency, token usage)
+- **Telegram Interface** - Primary user interface with streaming responses
 
 ## Project Status
 
-**Current Phase**: V1.0 MVP - Implementation In Progress 🚧
+**Current Phase**: V1.0 MVP - Feature Complete, Optimizing
 
-- [x] Planning complete (PRD, Architecture, Epic/Story breakdown)
-- [x] Sprint planning complete
-- [x] Epic 1 tech context created
-- [x] Story 1.1 drafted and ready for development
-- [ ] V1.0 implementation (in progress)
+- [x] Core infrastructure (Docker, Redis, health checks)
+- [x] LLM integration with streaming (Grok-4, Gemini, ChatGPT-5)
+- [x] Memory storage and retrieval (agentic-memories)
+- [x] User profile extraction and caching
+- [x] Portfolio management tools (CRUD + price enrichment)
+- [x] Stock market analysis tools
+- [x] Langfuse observability integration
+- [x] Telegram bot with SSE streaming
+- [ ] Architecture simplification (in planning - see below)
 
 ## Documentation
 
@@ -100,93 +106,140 @@ make clean
 
 ## Architecture
 
+### Current Architecture (4 Containers)
+
 ```
+┌─────────────────┐
+│  Telegram Bot   │ Container 3
+└────────┬────────┘
+         │ HTTP
+         ▼
+┌─────────────────┐     ┌─────────────┐
+│  Backend API    │────▶│    Redis    │ Container 4
+│   (Port 8001)   │     │ (Port 6380) │
+└────────┬────────┘     └─────────────┘
+         │ HTTP (JSON-RPC 2.0)
+         ▼
+┌─────────────────┐
+│   MCP Server    │ Container 2
+│   (Port 8002)   │
+└────────┬────────┘
+         │ HTTP
+         ▼
+┌─────────────────────────────────┐
+│       External Services         │
+│  - agentic-memories (6+ containers)
+│  - Grok-4 / Gemini / ChatGPT-5 APIs
+│  - Yahoo Finance (yfinance)
+│  - Langfuse (observability)
+└─────────────────────────────────┘
+```
+
+**Container Summary:**
+| Container | Purpose | Port |
+|-----------|---------|------|
+| Backend | FastAPI - chat logic, LLM integration, streaming | 8001 |
+| MCP Server | FastAPI - tool hosting (11 tools) | 8002 |
+| Telegram Bot | User interface, message forwarding | - |
+| Redis | Session state, price caching | 6380 |
+
+### Planned Simplification
+
+**Problem**: Running Annie requires 4 containers + agentic-memories (6+ containers) = 10+ containers for a personal app. This is resource-heavy for single-user deployment.
+
+**Solution**: Merge MCP Server into Backend (in-process tool calls instead of HTTP).
+
+```
+Target Architecture (3 Containers):
 ┌─────────────────┐
 │  Telegram Bot   │
 └────────┬────────┘
          │ HTTP
          ▼
-┌─────────────────┐
-│  Backend API    │
+┌─────────────────┐     ┌─────────────┐
+│  Backend API    │────▶│    Redis    │
+│  + MCP Tools    │     └─────────────┘
+│  (in-process)   │
 └────────┬────────┘
-         │
-    ┌────┴────┐
-    │         │
-    ▼         ▼
-┌────────┐ ┌──────────┐
-│  Redis │ │   MCP    │
-└────────┘ └────┬─────┘
-                │
-         ┌──────┴──────┐
-         │   Tools     │
-         │ - Internet  │
-         │ - Memories  │
-         └─────────────┘
+         │ HTTP
+         ▼
+    External Services
 ```
+
+**Benefits**: -1 container, -1 network hop, simpler deployment, lower memory footprint.
 
 ## Technology Stack
 
 **Backend**:
 - FastAPI (Python 3.12+)
-- Redis (state management)
+- Redis (state management, price caching)
 - Docker / Docker Compose
 
 **LLM Integration**:
-- Grok-4 (primary) / ChatGPT-5 (fallback)
+- Grok-4 (primary) with Live Search
+- Gemini 3 Pro (alternative)
+- ChatGPT-5 (fallback)
 - Streaming via SSE
 
-**MCP Server**:
-- Python MCP SDK
-- Stdio transport
-- Docker exec communication
+**MCP Server** (11 tools):
+- FastAPI with JSON-RPC 2.0
+- HTTP transport between containers
+- Tools: health_check, store_memory, retrieve_memories, get_user_profile, get_portfolio, add_holding, update_holding, remove_holding, clear_portfolio, analyze_stock, get_stock_history
+
+**Observability**:
+- Langfuse for LLM tracing
+- Automatic cost tracking
+- Session-linked traces
 
 **External Services**:
-- Brave Search API (internet access)
-- agentic-memories (memory management)
+- agentic-memories (memory management, user profiles, portfolios)
 - Telegram Bot API
+- Yahoo Finance (stock data via yfinance)
 
 ## Project Structure
 
 ```
 annie/
-├── backend/           # FastAPI backend service (Python 3.12+)
+├── backend/              # FastAPI backend service
+│   ├── api/              # API routes, LLM client, memory manager
+│   │   ├── routes/       # chat.py, stream.py, health.py
+│   │   ├── llm_client.py # Grok/Gemini/ChatGPT integration
+│   │   ├── mcp_client.py # HTTP client for MCP server
+│   │   ├── memory.py     # MemoryManager orchestration
+│   │   └── profile.py    # User profile caching
+│   ├── Dockerfile
 │   └── requirements.txt
-├── mcp_server/        # MCP server with tools (Python 3.12+)
+├── mcp_server/           # MCP tool server (11 tools)
+│   ├── server.py         # FastAPI + JSON-RPC 2.0
+│   ├── tools.py          # Tool implementations (~2400 lines)
+│   ├── config.py
+│   ├── Dockerfile
 │   └── requirements.txt
-├── telegram_bot/      # Telegram bot service (Python 3.12+)
+├── telegram_bot/         # Telegram interface
+│   ├── bot.py            # Message handling, SSE streaming
+│   ├── Dockerfile
 │   └── requirements.txt
-├── scripts/           # Operational scripts (run_docker.sh, etc.)
-├── docs/              # Documentation
-│   ├── 01-product/    # Product requirements and planning
-│   ├── 02-architecture/ # Architecture and design
-│   ├── 03-technical/  # Technical specifications
-│   ├── 04-implementation/ # Implementation plans and tasks
-│   ├── 05-deployment/ # Deployment guides
-│   └── 06-reference/  # Research and reference materials
-├── .gitignore         # Git exclusions
-├── .dockerignore      # Docker build exclusions
-├── README.md          # This file
-├── docker-compose.yml # (Will be created in Story 1.2)
-├── Dockerfile.*       # Service Dockerfiles (will be created in Story 1.2)
-├── run_docker.sh      # Main startup script (will be created in Story 1.5)
-├── Makefile           # Common commands (will be created in Story 1.5)
-└── env.example        # Environment template (already exists)
+├── scripts/              # Operational scripts
+│   └── run_docker.sh     # Main startup script
+├── docs/                 # Documentation
+├── docker-compose.yml    # 4-service orchestration
+├── Makefile              # Development commands
+├── CLAUDE.md             # AI assistant context
+└── env.example           # Environment template
 ```
 
-**Directory Purpose**:
-- **backend/**: FastAPI application handling HTTP requests, LLM integration, and state management
-- **mcp_server/**: MCP protocol server hosting tools (internet search, memories, stock trading)
-- **telegram_bot/**: Telegram bot service forwarding messages to backend and streaming responses
-- **scripts/**: Operational scripts for development workflow automation
-- **docs/**: Comprehensive project documentation including PRD, architecture, and implementation plans
-
-**Development Commands** (once implemented):
-- `make start` - Start all services via Docker Compose
-- `make stop` - Stop all services gracefully
-- `make logs` - View logs from all services
-- `make logs SERVICE=backend` - View logs from specific service
-- `make test` - Run test suite for all services
-- `make clean` - Clean up Docker containers, volumes, and temporary files
+**Development Commands**:
+```bash
+make start              # Start all services
+make stop               # Stop all services
+make restart            # Restart services
+make rebuild            # Rebuild containers
+make logs               # View all logs
+make logs SERVICE=backend  # View specific service logs
+make health             # Check service health
+make shell SERVICE=backend # Debug shell access
+make clean              # Clean up Docker resources
+```
 
 ## Environment Setup
 
@@ -217,22 +270,27 @@ annie/
 ### Environment Variables
 
 **Required**:
-- `TELEGRAM_BOT_TOKEN` - Telegram bot token (required)
-- `AGENTIC_MEMORIES_URL` - agentic-memories service URL (required)
-- `GROK_API_KEY` - Grok-4 API key (required if `LLM_PROVIDER=grok-4`)
-- `CHATGPT_API_KEY` - ChatGPT-5 API key (required if `LLM_PROVIDER=chatgpt-5`)
+- `TELEGRAM_BOT_TOKEN` - Telegram bot token
+- `AGENTIC_MEMORIES_URL` - agentic-memories service URL
+- `AUTHORIZED_USER_IDS` - Comma-separated Telegram user IDs allowed to use the bot
+
+**LLM Provider** (at least one required):
+- `LLM_PROVIDER` - Primary provider: `grok-4`, `gemini`, or `chatgpt-5` (default: `grok-4`)
+- `GROK_API_KEY` - Required if using Grok-4
+- `GEMINI_API_KEY` - Required if using Gemini
+- `CHATGPT_API_KEY` - Required if using ChatGPT-5
+
+**Observability** (recommended):
+- `LANGFUSE_PUBLIC_KEY` - Langfuse public key
+- `LANGFUSE_SECRET_KEY` - Langfuse secret key
+- `LANGFUSE_HOST` - Langfuse host (default: `https://us.cloud.langfuse.com`)
 
 **Optional** (with defaults):
-- `LLM_PROVIDER` - Primary LLM provider: `grok-4` or `chatgpt-5` (default: `grok-4`)
-- `LOG_LEVEL` - Logging level: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` (default: `INFO`)
-- `ENVIRONMENT` - Environment type: `dev`, `staging`, `prod` (default: `dev`)
-- `BACKEND_PORT` - Backend API port (default: `8000`)
-- `REDIS_HOST` - Redis hostname (default: `redis`)
-- `REDIS_PORT` - Redis port (default: `6379`)
-
-**Tool API Keys** (required for specific features):
-- `BRAVE_SEARCH_API_KEY` - Required for internet access tool
-- `STOCK_API_KEY` - Required for stock trader tool
+- `LOG_LEVEL` - `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` (default: `INFO`)
+- `ENVIRONMENT` - `dev`, `staging`, `prod` (default: `dev`)
+- `BACKEND_PORT` - Backend API port (default: `8001`)
+- `GROK_LIVE_SEARCH_MODE` - `auto`, `on`, `off` (default: `auto`)
+- `GEMINI_MODEL` - Gemini model ID (default: `gemini-3-pro-preview`)
 
 ### Environment-Specific Configuration
 
@@ -258,7 +316,7 @@ The `ENVIRONMENT` variable controls runtime behavior:
 
 ## Contributing
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for contribution guidelines and [V1 Implementation Plan](./docs/04-implementation/V1_IMPLEMENTATION_PLAN.md) for development roadmap.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for contribution guidelines.
 
 ## License
 
@@ -269,17 +327,8 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for contribution guidelines and [V1 Imp
 - [xAI Grok](https://grok.x.ai/) - Inspiration
 - [agentic-memories](https://github.com/yourusername/agentic-memories) - Memory system
 - [Model Context Protocol](https://modelcontextprotocol.io) - MCP specification
+- [Langfuse](https://langfuse.com) - LLM observability
 
 ---
 
-## Contributing
-
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for contribution guidelines.
-
-## License
-
-[MIT License](./LICENSE)
-
----
-
-**Status**: V1.0 MVP - Implementation in progress. Story 1.1 (Project Structure) complete ✅
+**Status**: V1.0 MVP Feature Complete - Architecture simplification in planning

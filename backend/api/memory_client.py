@@ -410,6 +410,173 @@ class MemoryClient:
             # Graceful degradation: return empty list on HTTP error
             return []
 
+    async def stream_message(
+        self,
+        conversation_id: str,
+        role: str,
+        content: str,
+        user_id: str,
+        message_id: Optional[str] = None,
+        flush: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Stream a single message through the orchestrator for batched storage.
+
+        The orchestrator batches messages (2-8) before triggering LLM extraction,
+        providing ~70% cost savings compared to direct /v1/store calls.
+
+        Args:
+            conversation_id: Conversation identifier
+            role: Message role ("user", "assistant", "system", "tool")
+            content: Message content
+            user_id: User ID (passed in metadata for storage)
+            message_id: Optional message ID for tracking
+            flush: Force immediate flush of batched messages (default: False)
+
+        Returns:
+            dict: Response with "injections" list of relevant memories
+                {
+                    "injections": [
+                        {
+                            "memory_id": str,
+                            "content": str,
+                            "source": str,
+                            "channel": str,
+                            "score": float,
+                            "metadata": dict
+                        }
+                    ]
+                }
+
+        Raises:
+            MemoryNetworkError: If agentic-memories service is unreachable
+            MemoryAPIError: If API returns an error
+        """
+        start_time = time.time()
+        url = f"{self.memories_url}/v1/orchestrator/message"
+
+        try:
+            logger.debug(
+                "Streaming message to orchestrator",
+                extra={
+                    "conversation_id": conversation_id,
+                    "role": role,
+                    "user_id": user_id,
+                    "url": url,
+                    "flush": flush
+                }
+            )
+
+            # Build request payload matching orchestrator schema
+            payload: Dict[str, Any] = {
+                "conversation_id": conversation_id,
+                "role": role,
+                "content": content,
+                "metadata": {"user_id": user_id},
+                "flush": flush
+            }
+            if message_id:
+                payload["message_id"] = message_id
+
+            # Send POST request
+            response = await self.client.post(url, json=payload)
+
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            # Check for errors
+            if response.status_code != 200:
+                error_msg = f"HTTP {response.status_code}"
+                try:
+                    error_data = response.json()
+                    error_msg = error_data.get("detail", error_data.get("message", error_msg))
+                except Exception:
+                    error_msg = response.text or error_msg
+
+                logger.error(
+                    "Orchestrator stream_message failed",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "user_id": user_id,
+                        "status_code": response.status_code,
+                        "error": error_msg,
+                        "duration_ms": duration_ms
+                    }
+                )
+                raise MemoryAPIError(
+                    message=error_msg,
+                    status_code=response.status_code,
+                    response_data=error_data if 'error_data' in locals() else None
+                )
+
+            # Parse successful response
+            response_data = response.json()
+            injections = response_data.get("injections", [])
+
+            logger.info(
+                "Message streamed to orchestrator successfully",
+                extra={
+                    "conversation_id": conversation_id,
+                    "user_id": user_id,
+                    "role": role,
+                    "injections_count": len(injections),
+                    "duration_ms": duration_ms,
+                    "flush": flush
+                }
+            )
+
+            return response_data
+
+        except httpx.TimeoutException as e:
+            duration_ms = int((time.time() - start_time) * 1000)
+            logger.error(
+                "Orchestrator stream_message timed out",
+                extra={
+                    "conversation_id": conversation_id,
+                    "user_id": user_id,
+                    "url": url,
+                    "timeout": self.timeout,
+                    "duration_ms": duration_ms
+                }
+            )
+            raise MemoryNetworkError(
+                f"Request timed out after {self.timeout}s",
+                original_error=e
+            )
+
+        except (httpx.NetworkError, httpx.ConnectError) as e:
+            duration_ms = int((time.time() - start_time) * 1000)
+            logger.error(
+                "Failed to connect to orchestrator",
+                extra={
+                    "conversation_id": conversation_id,
+                    "user_id": user_id,
+                    "url": url,
+                    "error": str(e),
+                    "duration_ms": duration_ms
+                }
+            )
+            raise MemoryNetworkError(
+                f"Failed to connect to orchestrator: {str(e)}",
+                original_error=e
+            )
+
+        except httpx.HTTPError as e:
+            duration_ms = int((time.time() - start_time) * 1000)
+            logger.error(
+                "HTTP error during orchestrator stream_message",
+                extra={
+                    "conversation_id": conversation_id,
+                    "user_id": user_id,
+                    "url": url,
+                    "error": str(e),
+                    "duration_ms": duration_ms
+                }
+            )
+            raise MemoryNetworkError(
+                f"HTTP error: {str(e)}",
+                original_error=e
+            )
+
     async def health_check(self) -> bool:
         """
         Check if agentic-memories service is available.
