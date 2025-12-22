@@ -32,7 +32,7 @@ workflow_status:
   # Phase 0: Discovery (Optional)
   product-brief: "docs/bmm-product-brief-annie-2025-11-10.md"  # agent: analyst
   brainstorm-project: skipped  # agent: analyst
-  research: skipped  # agent: analyst
+  research: "docs/research-technical-2025-12-21.md"  # agent: analyst
 
   # Phase 1: Planning
   prd: "docs/01-product/PRODUCT_REQUIREMENTS.md"  # agent: pm
