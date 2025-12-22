@@ -7,6 +7,7 @@ Provides graceful degradation with Redis fallback queue and retry logic.
 
 import asyncio
 import json
+import os
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -54,6 +55,11 @@ class MemoryManager:
     FLUSH_CHECK_INTERVAL = 300   # 5 minutes between flush checks
     INACTIVE_THRESHOLD = 600     # 10 minutes of inactivity before flush
     FLUSH_MARKER_TTL = 3600      # 1 hour TTL for "already flushed" marker
+
+    # Distributed lock constants (for multi-worker environments)
+    RETRY_WORKER_LOCK_KEY = "worker_lock:retry_memories"
+    FLUSH_WORKER_LOCK_KEY = "worker_lock:flush_sessions"
+    WORKER_LOCK_TTL = 120        # 2 minutes max lock duration
 
     def __init__(self):
         """Initialize Memory Manager."""
@@ -444,15 +450,47 @@ class MemoryManager:
         Start background retry worker task.
 
         Runs indefinitely, processing queued memories every RETRY_INTERVAL seconds.
+        Uses distributed lock to ensure only one worker runs at a time.
         """
+        worker_id = f"worker-{os.getpid()}"
         logger.info(
-            f"Starting memory retry worker (interval: {self.RETRY_INTERVAL}s)"
+            f"Starting memory retry worker (interval: {self.RETRY_INTERVAL}s, id: {worker_id})"
         )
 
         while True:
             try:
                 await asyncio.sleep(self.RETRY_INTERVAL)
-                await self.retry_queued_memories()
+
+                # Try to acquire distributed lock
+                async with StateManager() as state_manager:
+                    acquired = await state_manager.redis_client.set(
+                        self.RETRY_WORKER_LOCK_KEY,
+                        worker_id,
+                        nx=True,
+                        ex=self.WORKER_LOCK_TTL
+                    )
+
+                    if not acquired:
+                        logger.debug(
+                            f"Retry worker skipped: another worker holds lock",
+                            extra={"worker_id": worker_id}
+                        )
+                        continue
+
+                    logger.debug(
+                        f"Retry worker lock acquired",
+                        extra={"worker_id": worker_id}
+                    )
+
+                    try:
+                        await self.retry_queued_memories()
+                    finally:
+                        await state_manager.redis_client.delete(self.RETRY_WORKER_LOCK_KEY)
+                        logger.debug(
+                            f"Retry worker lock released",
+                            extra={"worker_id": worker_id}
+                        )
+
             except Exception as e:
                 logger.error(
                     f"Error in retry worker loop: {str(e)}",
@@ -597,19 +635,51 @@ class MemoryManager:
         Start background flush worker task.
 
         Runs indefinitely, flushing stale sessions every FLUSH_CHECK_INTERVAL seconds.
+        Uses distributed lock to ensure only one worker runs at a time.
         This is a FALLBACK mechanism - most conversations have 2+ messages and batch normally.
 
         Story 12-5: Flush Orchestrator Buffer on Session End
         """
+        worker_id = f"worker-{os.getpid()}"
         logger.info(
             f"Starting stale session flush worker (interval: {self.FLUSH_CHECK_INTERVAL}s, "
-            f"threshold: {self.INACTIVE_THRESHOLD}s)"
+            f"threshold: {self.INACTIVE_THRESHOLD}s, id: {worker_id})"
         )
 
         while True:
             try:
                 await asyncio.sleep(self.FLUSH_CHECK_INTERVAL)
-                await self.flush_stale_sessions()
+
+                # Try to acquire distributed lock
+                async with StateManager() as state_manager:
+                    acquired = await state_manager.redis_client.set(
+                        self.FLUSH_WORKER_LOCK_KEY,
+                        worker_id,
+                        nx=True,
+                        ex=self.WORKER_LOCK_TTL
+                    )
+
+                    if not acquired:
+                        logger.debug(
+                            f"Flush worker skipped: another worker holds lock",
+                            extra={"worker_id": worker_id}
+                        )
+                        continue
+
+                    logger.debug(
+                        f"Flush worker lock acquired",
+                        extra={"worker_id": worker_id}
+                    )
+
+                    try:
+                        await self.flush_stale_sessions()
+                    finally:
+                        await state_manager.redis_client.delete(self.FLUSH_WORKER_LOCK_KEY)
+                        logger.debug(
+                            f"Flush worker lock released",
+                            extra={"worker_id": worker_id}
+                        )
+
             except Exception as e:
                 logger.error(
                     f"Error in flush worker loop: {str(e)}",
