@@ -210,8 +210,9 @@ async def test_processing_flag_lifecycle(redis_client):
     assert 170 < ttl <= 180
 
     # Try to set again (should fail due to NX flag)
+    # Redis returns None when key exists and nx=True
     flag_set_again = await redis_client.set(processing_key, "1", ex=180, nx=True)
-    assert flag_set_again is False
+    assert flag_set_again is None
 
     # Clear flag
     await redis_client.delete(processing_key)
@@ -232,8 +233,9 @@ async def test_concurrent_message_safety(redis_client):
     assert flag_set is True
 
     # Simulate second message trying to process (should fail)
+    # Redis returns None when key exists and nx=True
     flag_set_second = await redis_client.set(processing_key, "1", ex=180, nx=True)
-    assert flag_set_second is False
+    assert flag_set_second is None
 
     # Second message should go to pending instead
     await append_pending_message(redis_client, user_id, "Second message")

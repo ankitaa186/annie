@@ -97,16 +97,22 @@ format-check: venv ## Check code formatting without changes
 # TESTING - All Services
 # ============================================================
 
-test: venv ## Run all tests (unit + integration)
+test: venv ## Run all tests (unit + integration, excludes e2e)
 	$(VENV) pytest backend/tests mcp_server/tests telegram_bot/tests -v $(PYTEST_ARGS)
 
 test-unit: venv ## Run unit tests only
 	$(VENV) pytest backend/tests/unit mcp_server/tests telegram_bot/tests/unit -v $(PYTEST_ARGS)
 
-test-integration: venv ## Run integration tests only
+test-integration: venv ## Run integration tests only (excludes e2e)
 	$(VENV) pytest backend/tests/integration telegram_bot/tests/integration -v $(PYTEST_ARGS)
 
-coverage: venv ## Run tests with coverage report
+test-e2e: venv ## Run e2e tests (requires running services)
+	$(VENV) pytest backend/tests/e2e mcp_server/tests/e2e telegram_bot/tests/e2e -v --ignore="" $(PYTEST_ARGS)
+
+test-all: venv ## Run ALL tests including e2e
+	$(VENV) pytest backend/tests mcp_server/tests telegram_bot/tests -v --ignore="" $(PYTEST_ARGS)
+
+coverage: venv ## Run tests with coverage (excludes e2e)
 	$(VENV) pip install -q pytest-cov
 	$(VENV) pytest backend/tests mcp_server/tests telegram_bot/tests --cov=backend/api --cov=mcp_server --cov=telegram_bot --cov-report=term-missing --cov-report=html $(PYTEST_ARGS)
 	@echo "HTML coverage report: htmlcov/index.html"

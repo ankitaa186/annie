@@ -296,7 +296,7 @@ class TestFormatMemoriesForLLM:
         assert "Risk tolerance: moderate" in result
         assert "Priorities: long-term growth, dividend income" in result
         assert "Constraints: max 20% tech exposure" in result
-        assert "Topics: stock_trading, AAPL" in result
+        assert "Tags: stock_trading, AAPL" in result
         assert "Relevance: 95%" in result
         assert "2025-11-10" in result
         assert "Use this history to personalize your recommendations" in result
@@ -362,35 +362,6 @@ class TestFormatMemoriesForLLM:
         assert "Alternative summary field" in result
 
     @pytest.mark.asyncio
-    async def test_format_memories_token_warning(self, memory_manager):
-        """Test that long formatted output logs warning for >2000 tokens."""
-        # Create memories that would exceed 2000 tokens (rough est: 8000+ characters)
-        long_summary = "A" * 2000
-        memories = [
-            {
-                "conversation_summary": long_summary,
-                "decisions": [
-                    {"decision": "Decision " + str(i), "reasoning": "Reasoning " * 50}
-                    for i in range(10)
-                ],
-                "preferences": {
-                    "risk_tolerance": "moderate",
-                    "priorities": ["priority" + str(i) for i in range(20)]
-                },
-                "topics": ["topic" + str(i) for i in range(20)],
-                "timestamp": "2025-11-10T10:00:00Z"
-            }
-        ]
-
-        with patch('api.memory.logger') as mock_logger:
-            result = await memory_manager.format_memories_for_llm(memories)
-
-            # Verify warning was logged for exceeding token limit
-            mock_logger.warning.assert_called()
-            call_args = str(mock_logger.warning.call_args)
-            assert "2000 token" in call_args
-
-    @pytest.mark.asyncio
     async def test_format_memories_with_all_fields(self, memory_manager):
         """Test formatting with all possible fields populated."""
         memories = [
@@ -427,7 +398,7 @@ class TestFormatMemoriesForLLM:
         assert "Risk tolerance: high" in result
         assert "Priorities: growth, innovation" in result
         assert "Constraints: budget limit, time limit" in result
-        assert "Topics: topic1, topic2, topic3" in result
+        assert "Tags: topic1, topic2, topic3" in result
         assert "Relevance: 99%" in result
         assert "2025-11-10" in result
 

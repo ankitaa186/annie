@@ -21,9 +21,9 @@ class TestStoreMemoryToolHandler:
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
-            "status": "success",
-            "memory_id": "mem_abc123",
-            "stored_at": "2025-11-11T10:00:00Z"
+            "memories_created": 2,
+            "ids": ["mem_abc123", "mem_def456"],
+            "summary": "User discussed investment strategies"
         }
 
         with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
@@ -35,48 +35,42 @@ class TestStoreMemoryToolHandler:
 
             result = await store_memory_tool_handler(
                 user_id="user123",
-                conversation_summary="User asked for investment advice",
-                decisions=[
-                    {
-                        "decision": "Buy AAPL",
-                        "options_considered": ["AAPL", "MSFT"],
-                        "reasoning": "Strong fundamentals",
-                        "outcome": None
-                    }
+                history=[
+                    {"role": "user", "content": "Should I invest in AAPL?"},
+                    {"role": "assistant", "content": "Based on your risk tolerance..."}
                 ],
-                preferences={
-                    "risk_tolerance": "moderate",
-                    "priorities": ["growth"],
-                    "constraints": []
-                },
-                topics=["investing", "stocks"],
-                sentiment="positive"
+                metadata={"platform": "telegram", "conversation_id": "conv_123"}
             )
 
             # Verify result
             assert result["status"] == "success"
-            assert result["memory_id"] == "mem_abc123"
+            assert result["memories_created"] == 2
+            assert result["memory_ids"] == ["mem_abc123", "mem_def456"]
+            assert result["summary"] == "User discussed investment strategies"
 
             # Verify HTTP call
             mock_client.post.assert_called_once()
             call_args = mock_client.post.call_args
-            assert "/memories" in call_args[0][0]
+            assert "/v1/store" in call_args[0][0]
 
             # Verify payload structure
             payload = call_args[1]["json"]
             assert payload["user_id"] == "user123"
-            assert "memory" in payload
-            assert payload["memory"]["conversation_summary"] == "User asked for investment advice"
+            assert payload["history"] == [
+                {"role": "user", "content": "Should I invest in AAPL?"},
+                {"role": "assistant", "content": "Based on your risk tolerance..."}
+            ]
+            assert payload["metadata"] == {"platform": "telegram", "conversation_id": "conv_123"}
 
     @pytest.mark.asyncio
-    async def test_store_memory_auto_generates_memory_id(self):
-        """Test that memory_id is auto-generated if not provided."""
+    async def test_store_memory_without_metadata(self):
+        """Test memory storage without optional metadata."""
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
-            "status": "success",
-            "memory_id": "mem_generated",
-            "stored_at": "2025-11-11T10:00:00Z"
+            "memories_created": 1,
+            "ids": ["mem_generated"],
+            "summary": "Test conversation"
         }
 
         with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
@@ -88,23 +82,26 @@ class TestStoreMemoryToolHandler:
 
             result = await store_memory_tool_handler(
                 user_id="user123",
-                conversation_summary="Test summary"
+                history=[{"role": "user", "content": "Hello"}]
             )
 
-            # Verify memory_id was generated
+            # Verify result
+            assert result["status"] == "success"
+
+            # Verify payload doesn't include metadata
             call_args = mock_client.post.call_args
             payload = call_args[1]["json"]
-            assert payload["memory"]["memory_id"].startswith("mem_")
+            assert "metadata" not in payload
 
     @pytest.mark.asyncio
-    async def test_store_memory_auto_generates_timestamp(self):
-        """Test that timestamp is auto-generated if not provided."""
+    async def test_store_memory_with_empty_metadata(self):
+        """Test memory storage with None metadata."""
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
-            "status": "success",
-            "memory_id": "mem_test",
-            "stored_at": "2025-11-11T10:00:00Z"
+            "memories_created": 1,
+            "ids": ["mem_test"],
+            "summary": "Test"
         }
 
         with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
@@ -116,46 +113,17 @@ class TestStoreMemoryToolHandler:
 
             result = await store_memory_tool_handler(
                 user_id="user123",
-                conversation_summary="Test summary"
+                history=[{"role": "user", "content": "Test message"}],
+                metadata=None
             )
 
-            # Verify timestamp was generated
+            # Verify result
+            assert result["status"] == "success"
+
+            # Verify payload doesn't include metadata when None
             call_args = mock_client.post.call_args
             payload = call_args[1]["json"]
-            assert "timestamp" in payload["memory"]
-            assert payload["memory"]["timestamp"].endswith("Z")
-
-    @pytest.mark.asyncio
-    async def test_store_memory_defaults_optional_fields(self):
-        """Test that optional fields default to empty values."""
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "status": "success",
-            "memory_id": "mem_test",
-            "stored_at": "2025-11-11T10:00:00Z"
-        }
-
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
-            mock_client = AsyncMock()
-            mock_client.__aenter__.return_value = mock_client
-            mock_client.__aexit__.return_value = None
-            mock_client.post = AsyncMock(return_value=mock_response)
-            mock_client_class.return_value = mock_client
-
-            result = await store_memory_tool_handler(
-                user_id="user123",
-                conversation_summary="Test summary"
-                # No decisions, preferences, topics, sentiment
-            )
-
-            # Verify defaults
-            call_args = mock_client.post.call_args
-            memory = call_args[1]["json"]["memory"]
-            assert memory["decisions"] == []
-            assert memory["preferences"] == {}
-            assert memory["topics"] == []
-            assert memory["sentiment"] is None
+            assert "metadata" not in payload
 
     @pytest.mark.asyncio
     async def test_store_memory_retries_on_server_error(self):
@@ -169,9 +137,9 @@ class TestStoreMemoryToolHandler:
         mock_response_success = Mock()
         mock_response_success.status_code = 200
         mock_response_success.json.return_value = {
-            "status": "success",
-            "memory_id": "mem_test",
-            "stored_at": "2025-11-11T10:00:00Z"
+            "memories_created": 1,
+            "ids": ["mem_test"],
+            "summary": "Test"
         }
 
         with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
@@ -189,7 +157,7 @@ class TestStoreMemoryToolHandler:
             with patch('mcp_server.tools.asyncio.sleep', new_callable=AsyncMock):
                 result = await store_memory_tool_handler(
                     user_id="user123",
-                    conversation_summary="Test summary"
+                    history=[{"role": "user", "content": "Test"}]
                 )
 
                 # Should succeed on third attempt
@@ -213,7 +181,7 @@ class TestStoreMemoryToolHandler:
 
             result = await store_memory_tool_handler(
                 user_id="user123",
-                conversation_summary="Test summary"
+                history=[{"role": "user", "content": "Test"}]
             )
 
             # Should return error immediately without retry
@@ -228,9 +196,9 @@ class TestStoreMemoryToolHandler:
         mock_response_success = Mock()
         mock_response_success.status_code = 200
         mock_response_success.json.return_value = {
-            "status": "success",
-            "memory_id": "mem_test",
-            "stored_at": "2025-11-11T10:00:00Z"
+            "memories_created": 1,
+            "ids": ["mem_test"],
+            "summary": "Test"
         }
 
         with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
@@ -247,7 +215,7 @@ class TestStoreMemoryToolHandler:
             with patch('mcp_server.tools.asyncio.sleep', new_callable=AsyncMock):
                 result = await store_memory_tool_handler(
                     user_id="user123",
-                    conversation_summary="Test summary"
+                    history=[{"role": "user", "content": "Test"}]
                 )
 
                 # Should succeed on third attempt
@@ -268,7 +236,7 @@ class TestStoreMemoryToolHandler:
             with patch('mcp_server.tools.asyncio.sleep', new_callable=AsyncMock):
                 result = await store_memory_tool_handler(
                     user_id="user123",
-                    conversation_summary="Test summary"
+                    history=[{"role": "user", "content": "Test"}]
                 )
 
                 # Should fail after 3 attempts
@@ -290,7 +258,7 @@ class TestStoreMemoryToolHandler:
 
             result = await store_memory_tool_handler(
                 user_id="user123",
-                conversation_summary="Test summary"
+                history=[{"role": "user", "content": "Test"}]
             )
 
             # Should return error
@@ -304,9 +272,9 @@ class TestStoreMemoryToolHandler:
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
-            "status": "success",
-            "memory_id": "mem_test",
-            "stored_at": "2025-11-11T10:00:00Z"
+            "memories_created": 1,
+            "ids": ["mem_test"],
+            "summary": "Test"
         }
 
         with patch('mcp_server.tools.get_config') as mock_config:
@@ -321,12 +289,40 @@ class TestStoreMemoryToolHandler:
 
                 result = await store_memory_tool_handler(
                     user_id="user123",
-                    conversation_summary="Test summary"
+                    history=[{"role": "user", "content": "Test"}]
                 )
 
                 # Verify custom URL was used
                 call_args = mock_client.post.call_args
                 assert call_args[0][0].startswith("http://custom:9000")
+
+    @pytest.mark.asyncio
+    async def test_store_memory_handles_zero_memories_created(self):
+        """Test handling when no memories are extracted."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "memories_created": 0,
+            "ids": [],
+            "summary": ""
+        }
+
+        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = None
+            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client_class.return_value = mock_client
+
+            result = await store_memory_tool_handler(
+                user_id="user123",
+                history=[{"role": "user", "content": "Hi"}]
+            )
+
+            # Should still return success with 0 memories
+            assert result["status"] == "success"
+            assert result["memories_created"] == 0
+            assert result["memory_ids"] == []
 
 
 class TestStoreMemoryToolSchema:
@@ -365,7 +361,7 @@ class TestStoreMemoryToolSchema:
         schema = store_memory_tool["inputSchema"]
         required = schema["required"]
         assert "user_id" in required
-        assert "conversation_summary" in required
+        assert "history" in required
 
     def test_input_schema_properties(self):
         """Test input schema properties."""
@@ -373,56 +369,51 @@ class TestStoreMemoryToolSchema:
 
         # Check all expected properties exist
         assert "user_id" in properties
-        assert "conversation_summary" in properties
-        assert "decisions" in properties
-        assert "preferences" in properties
-        assert "topics" in properties
-        assert "sentiment" in properties
-        assert "memory_id" in properties
-        assert "timestamp" in properties
+        assert "history" in properties
+        assert "metadata" in properties
 
         # Check types
         assert properties["user_id"]["type"] == "string"
-        assert properties["conversation_summary"]["type"] == "string"
-        assert properties["decisions"]["type"] == "array"
-        assert properties["preferences"]["type"] == "object"
-        assert properties["topics"]["type"] == "array"
-        assert properties["sentiment"]["type"] == "string"
+        assert properties["history"]["type"] == "array"
+        assert properties["metadata"]["type"] == "object"
 
-    def test_input_schema_decisions_structure(self):
-        """Test decisions array schema structure."""
-        decisions = store_memory_tool["inputSchema"]["properties"]["decisions"]
-        assert decisions["type"] == "array"
-        assert "items" in decisions
+    def test_input_schema_history_structure(self):
+        """Test history array schema structure."""
+        history = store_memory_tool["inputSchema"]["properties"]["history"]
+        assert history["type"] == "array"
+        assert "items" in history
 
-        item_schema = decisions["items"]
+        item_schema = history["items"]
         assert item_schema["type"] == "object"
         assert "properties" in item_schema
         assert "required" in item_schema
 
-        # Check decision properties
-        assert "decision" in item_schema["properties"]
-        assert "options_considered" in item_schema["properties"]
-        assert "reasoning" in item_schema["properties"]
-        assert "outcome" in item_schema["properties"]
+        # Check message properties
+        assert "role" in item_schema["properties"]
+        assert "content" in item_schema["properties"]
+
+        # Check role enum
+        role_prop = item_schema["properties"]["role"]
+        assert role_prop["type"] == "string"
+        assert "enum" in role_prop
+        assert "user" in role_prop["enum"]
+        assert "assistant" in role_prop["enum"]
+        assert "system" in role_prop["enum"]
 
         # Check required fields
-        assert "decision" in item_schema["required"]
-        assert "options_considered" in item_schema["required"]
-        assert "reasoning" in item_schema["required"]
+        assert "role" in item_schema["required"]
+        assert "content" in item_schema["required"]
 
-    def test_input_schema_preferences_structure(self):
-        """Test preferences object schema structure."""
-        preferences = store_memory_tool["inputSchema"]["properties"]["preferences"]
-        assert preferences["type"] == "object"
-        assert "properties" in preferences
+    def test_input_schema_metadata_structure(self):
+        """Test metadata object schema structure."""
+        metadata = store_memory_tool["inputSchema"]["properties"]["metadata"]
+        assert metadata["type"] == "object"
+        assert "properties" in metadata
 
-        # Check preference properties
-        assert "risk_tolerance" in preferences["properties"]
-        assert "priorities" in preferences["properties"]
-        assert "constraints" in preferences["properties"]
+        # Check metadata properties
+        assert "platform" in metadata["properties"]
+        assert "conversation_id" in metadata["properties"]
 
         # Check types
-        assert preferences["properties"]["risk_tolerance"]["type"] == "string"
-        assert preferences["properties"]["priorities"]["type"] == "array"
-        assert preferences["properties"]["constraints"]["type"] == "array"
+        assert metadata["properties"]["platform"]["type"] == "string"
+        assert metadata["properties"]["conversation_id"]["type"] == "string"

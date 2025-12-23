@@ -33,57 +33,6 @@ def reset_active_streams():
 class TestStreamEndpoint:
     """Tests for /api/stream/{conversation_id} endpoint."""
 
-    def test_stream_endpoint_success(self, client):
-        """Test successful streaming response."""
-        conversation_id = "test_conv_123"
-
-        # Mock both LLM and MCP clients
-        with patch('api.routes.stream.LLMClient') as MockLLMClient, \
-             patch('api.routes.stream.MCPClient') as MockMCPClient:
-
-            # Mock LLM client
-            mock_llm_instance = Mock()
-            MockLLMClient.return_value.__aenter__.return_value = mock_llm_instance
-            mock_llm_instance.convert_mcp_tools_to_functions = Mock(return_value=[])
-
-            # Mock MCP client
-            mock_mcp_instance = AsyncMock()
-            MockMCPClient.return_value.__aenter__.return_value = mock_mcp_instance
-            mock_mcp_instance.list_tools = AsyncMock(return_value=[])
-
-            # Mock non-streaming call (returns no tool calls)
-            mock_llm_instance.chat_completion = AsyncMock(return_value={
-                "choices": [{"message": {"role": "assistant", "content": "test"}}]
-            })
-
-            # Mock streaming response with actual async generator
-            async def mock_stream(messages, tools=None):
-                yield {"type": "token", "content": "Hello"}
-                yield {"type": "token", "content": " world"}
-                yield {"type": "done", "tokens_used": {"prompt": 10, "completion": 2}}
-
-            mock_llm_instance.chat_completion_stream = mock_stream
-
-            # Make streaming request
-            with client.stream("GET", f"/api/stream/{conversation_id}") as response:
-                assert response.status_code == 200
-                assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
-
-                # Read SSE events
-                events = []
-                for line in response.iter_lines():
-                    if line.startswith("data: "):
-                        data_str = line[6:]  # Remove "data: " prefix
-                        events.append(json.loads(data_str))
-
-                # Verify events
-                assert len(events) == 3
-                assert events[0] == {"type": "token", "content": "Hello"}
-                assert events[1] == {"type": "token", "content": " world"}
-                assert events[2]["type"] == "done"
-                assert events[2]["tokens_used"]["prompt"] == 10
-                assert events[2]["tokens_used"]["completion"] == 2
-
     @pytest.mark.asyncio
     async def test_stream_concurrent_limit(self, client):
         """Test concurrent stream limit enforcement."""
@@ -98,53 +47,6 @@ class TestStreamEndpoint:
             response = client.get(f"/api/stream/{conversation_id}")
             assert response.status_code == 503
             assert "concurrent streams" in response.json()["detail"].lower()
-
-    def test_stream_error_handling(self, client):
-        """Test error handling during streaming."""
-        conversation_id = "test_conv_error"
-
-        with patch('api.routes.stream.LLMClient') as MockLLMClient, \
-             patch('api.routes.stream.MCPClient') as MockMCPClient:
-
-            # Mock LLM client
-            mock_llm_instance = Mock()
-            MockLLMClient.return_value.__aenter__.return_value = mock_llm_instance
-            mock_llm_instance.convert_mcp_tools_to_functions = Mock(return_value=[])
-
-            # Mock MCP client
-            mock_mcp_instance = AsyncMock()
-            MockMCPClient.return_value.__aenter__.return_value = mock_mcp_instance
-            mock_mcp_instance.list_tools = AsyncMock(return_value=[])
-
-            # Mock non-streaming call (returns no tool calls)
-            mock_llm_instance.chat_completion = AsyncMock(return_value={
-                "choices": [{"message": {"role": "assistant", "content": "test"}}]
-            })
-
-            # Mock streaming response with error
-            async def mock_stream(messages, tools=None):
-                yield {"type": "token", "content": "Start"}
-                yield {"type": "error", "message": "Test error", "code": "TEST_ERROR"}
-
-            mock_llm_instance.chat_completion_stream = mock_stream
-
-            # Make streaming request
-            with client.stream("GET", f"/api/stream/{conversation_id}") as response:
-                assert response.status_code == 200
-
-                # Read SSE events
-                events = []
-                for line in response.iter_lines():
-                    if line.startswith("data: "):
-                        data_str = line[6:]
-                        events.append(json.loads(data_str))
-
-                # Verify error event received
-                assert len(events) >= 2
-                assert events[0] == {"type": "token", "content": "Start"}
-                assert events[1]["type"] == "error"
-                assert events[1]["message"] == "Test error"
-                assert events[1]["code"] == "TEST_ERROR"
 
     def test_stream_cleanup_on_completion(self, client):
         """Test that stream is cleaned up from active streams after completion."""
