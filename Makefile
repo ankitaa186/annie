@@ -1,7 +1,7 @@
 # Annie Makefile
 # Development commands for managing Annie services
 
-.PHONY: help install venv test test-unit test-integration test-backend test-mcp test-telegram coverage start stop logs clean clean-venv clean-all rebuild restart health shell lint format format-check
+.PHONY: help install venv test test-unit test-integration test-backend test-mcp test-telegram coverage start stop logs clean clean-venv clean-all rebuild restart health shell lint format format-check gh gh-read gh-diff gh-write gh-update
 
 # Detect Docker Compose command (v2 or v1)
 COMPOSE_CMD := $(shell if docker compose version >/dev/null 2>&1; then echo "docker compose"; else echo "docker-compose"; fi)
@@ -25,6 +25,9 @@ help: ## Show this help message
 	@echo ""
 	@echo "  Docker:"
 	@grep -E '^(logs|rebuild|restart|health|shell):.*## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "    \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@echo ""
+	@echo "  GitHub (use ENV=prod for production):"
+	@grep -E '^gh[a-zA-Z0-9_-]*:.*## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "    \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
 # ============================================================
 # SETUP
@@ -153,3 +156,25 @@ shell: ## Access service shell (use SERVICE=name)
 	fi
 	@echo "Accessing $(SERVICE) shell..."
 	@$(COMPOSE_CMD) exec $(SERVICE) /bin/bash || $(COMPOSE_CMD) exec $(SERVICE) /bin/sh
+
+# ============================================================
+# GITHUB ENVIRONMENT MANAGEMENT
+# ============================================================
+
+# Default environment is dev
+ENV ?= dev
+
+gh: ## Interactive GitHub environment manager
+	@python3 scripts/github_env.py
+
+gh-read: ## Read GitHub environment variables/secrets
+	@python3 scripts/github_env.py read --env $(ENV)
+
+gh-diff: ## Show diff between local .env and GitHub
+	@python3 scripts/github_env.py diff --env $(ENV)
+
+gh-write: ## Write all .env values to GitHub (creates & overwrites)
+	@python3 scripts/github_env.py write --env $(ENV)
+
+gh-update: ## Update only changed values in GitHub
+	@python3 scripts/github_env.py update --env $(ENV)
