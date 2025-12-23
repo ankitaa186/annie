@@ -1,7 +1,7 @@
 # Annie Makefile
 # Development commands for managing Annie services
 
-.PHONY: help install venv test test-unit test-integration test-backend test-mcp test-telegram start stop logs clean rebuild restart health shell
+.PHONY: help install venv test test-unit test-integration test-backend test-mcp test-telegram coverage start stop logs clean clean-venv clean-all rebuild restart health shell lint format format-check
 
 # Detect Docker Compose command (v2 or v1)
 COMPOSE_CMD := $(shell if docker compose version >/dev/null 2>&1; then echo "docker compose"; else echo "docker-compose"; fi)
@@ -15,10 +15,13 @@ help: ## Show this help message
 	@echo "=========================="
 	@echo ""
 	@echo "  Setup:"
-	@grep -E '^(install|start|stop|clean):.*## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "    \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^(install|start|stop|clean|clean-venv|clean-all):.*## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "    \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@echo ""
+	@echo "  Code Quality:"
+	@grep -E '^(lint|format|format-check):.*## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "    \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "  Testing:"
-	@grep -E '^test[a-zA-Z0-9_-]*:.*## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "    \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^(test[a-zA-Z0-9_-]*|coverage):.*## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "    \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "  Docker:"
 	@grep -E '^(logs|rebuild|restart|health|shell):.*## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "    \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -50,7 +53,7 @@ start: ## Start all Docker services
 
 stop: ## Stop all Docker services
 	@echo "Stopping Annie services..."
-	@$(COMPOSE_CMD) stop
+	@$(COMPOSE_CMD) down
 	@echo "Services stopped."
 
 clean: ## Clean up Docker resources and caches
@@ -64,6 +67,29 @@ clean: ## Clean up Docker resources and caches
 	@find . -type d -name ".pytest_cache" -exec rm -r {} + 2>/dev/null || true
 	@echo "Cleanup complete."
 
+clean-venv: ## Remove virtual environment
+	@echo "Removing virtual environment..."
+	@rm -rf .venv
+	@echo "Virtual environment removed."
+
+clean-all: clean clean-venv ## Full cleanup (Docker + venv + caches)
+
+# ============================================================
+# CODE QUALITY
+# ============================================================
+
+lint: venv ## Run linters (ruff)
+	$(VENV) pip install -q ruff
+	$(VENV) ruff check backend/ mcp_server/ telegram_bot/
+
+format: venv ## Format code (ruff)
+	$(VENV) pip install -q ruff
+	$(VENV) ruff format backend/ mcp_server/ telegram_bot/
+
+format-check: venv ## Check code formatting without changes
+	$(VENV) pip install -q ruff
+	$(VENV) ruff format --check backend/ mcp_server/ telegram_bot/
+
 # ============================================================
 # TESTING - All Services
 # ============================================================
@@ -76,6 +102,11 @@ test-unit: venv ## Run unit tests only
 
 test-integration: venv ## Run integration tests only
 	$(VENV) pytest backend/tests/integration telegram_bot/tests/integration -v $(PYTEST_ARGS)
+
+coverage: venv ## Run tests with coverage report
+	$(VENV) pip install -q pytest-cov
+	$(VENV) pytest backend/tests mcp_server/tests telegram_bot/tests --cov=backend/api --cov=mcp_server --cov=telegram_bot --cov-report=term-missing --cov-report=html $(PYTEST_ARGS)
+	@echo "HTML coverage report: htmlcov/index.html"
 
 # ============================================================
 # TESTING - Individual Services
@@ -112,8 +143,6 @@ restart: stop start ## Restart all services
 
 health: ## Check service health
 	@echo "Checking service health..."
-	@$(COMPOSE_CMD) ps
-	@echo ""
 	@$(COMPOSE_CMD) ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}"
 
 shell: ## Access service shell (use SERVICE=name)

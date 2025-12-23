@@ -1,6 +1,9 @@
 # MCP Server Requirements
 # Python 3.12+ required
 
+# Pydantic (explicit version for Python 3.13 compatibility)
+pydantic>=2.9.0
+
 # MCP Python SDK
 mcp>=0.1.0
 
