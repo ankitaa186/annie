@@ -196,8 +196,11 @@ gh-read: ## Read GitHub environment variables/secrets
 gh-diff: ## Show diff between local .env and GitHub
 	@python3 scripts/github_env.py diff --env $(ENV)
 
+gh-download: ## Download from GitHub to local .env (GitHub → local)
+	@python3 scripts/github_env.py download --env $(ENV)
+
+gh-upload: ## Upload local .env to GitHub (local → GitHub)
+	@python3 scripts/github_env.py upload --env $(ENV)
+
 gh-write: ## Write all .env values to GitHub (creates & overwrites)
 	@python3 scripts/github_env.py write --env $(ENV)
-
-gh-update: ## Update only changed values in GitHub
-	@python3 scripts/github_env.py update --env $(ENV)
