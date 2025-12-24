@@ -110,9 +110,6 @@ test-unit: venv ## Run unit tests only
 test-integration: venv ## Run integration tests only (excludes e2e)
 	$(VENV) pytest backend/tests/integration telegram_bot/tests/integration -v $(PYTEST_ARGS)
 
-test-e2e: venv ## Run e2e tests (requires running services)
-	$(VENV) pytest backend/tests/e2e mcp_server/tests/e2e telegram_bot/tests/e2e -v --ignore="" $(PYTEST_ARGS)
-
 test-all: venv ## Run ALL tests including e2e
 	$(VENV) pytest backend/tests mcp_server/tests telegram_bot/tests -v --ignore="" $(PYTEST_ARGS)
 
