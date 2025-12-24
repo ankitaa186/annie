@@ -163,7 +163,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: backend
-          file: Dockerfile
+          file: backend/Dockerfile
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           platforms: ${{ github.ref == 'refs/heads/main' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
           tags: ${{ steps.meta-backend.outputs.tags }}
@@ -175,7 +175,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: mcp_server
-          file: Dockerfile
+          file: mcp_server/Dockerfile
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           platforms: ${{ github.ref == 'refs/heads/main' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
           tags: ${{ steps.meta-mcp.outputs.tags }}
@@ -187,7 +187,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: telegram_bot
-          file: Dockerfile
+          file: telegram_bot/Dockerfile
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           platforms: ${{ github.ref == 'refs/heads/main' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
           tags: ${{ steps.meta-telegram.outputs.tags }}
