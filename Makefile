@@ -199,5 +199,5 @@ gh-diff: ## Show diff between local .env and GitHub
 gh-write: ## Write all .env values to GitHub (creates & overwrites)
 	@python3 scripts/github_env.py write --env $(ENV)
 
-gh-update: ## Update only changed values in GitHub
+gh-update: ## Sync changes to GitHub (add, update, delete)
 	@python3 scripts/github_env.py update --env $(ENV)

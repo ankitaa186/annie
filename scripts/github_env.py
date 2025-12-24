@@ -224,6 +224,24 @@ def set_variable(repo: str, env_name: str, name: str, value: str, exists: bool =
     return code == 0, stderr.strip() if stderr else ""
 
 
+def delete_variable(repo: str, env_name: str, name: str) -> Tuple[bool, str]:
+    """Delete a variable from GitHub environment. Returns (success, error_message)."""
+    code, _, stderr = run_gh([
+        "api", f"repos/{repo}/environments/{env_name}/variables/{name}",
+        "-X", "DELETE"
+    ])
+    return code == 0, stderr.strip() if stderr else ""
+
+
+def delete_secret(repo: str, env_name: str, name: str) -> bool:
+    """Delete a secret from GitHub environment."""
+    code, _, _ = run_gh([
+        "secret", "delete", name,
+        "--env", env_name
+    ])
+    return code == 0
+
+
 def mask_value(value: str) -> str:
     """Mask a secret value for display."""
     if len(value) <= 8:
@@ -469,8 +487,8 @@ def cmd_write(repo: str, env_name: str, env_file: Path) -> None:
 
 
 def cmd_update(repo: str, env_name: str, env_file: Path) -> None:
-    """Update only changed variables/secrets in GitHub."""
-    print_header("Update GitHub", f"{repo} → {env_name}")
+    """Update only changed variables/secrets in GitHub (adds, updates, and removes)."""
+    print_header("Sync to GitHub", f"{repo} → {env_name}")
 
     print(f"{DIM}Checking for changes...{RESET}\n")
 
@@ -480,14 +498,15 @@ def cmd_update(repo: str, env_name: str, env_file: Path) -> None:
 
     # Calculate diff
     changes = []
+    deletions = []
 
-    # Check secrets
+    # Check secrets - new ones to add
     for key, value in local_secrets.items():
         if key not in gh_secrets:
             changes.append(("new_secret", key, value, None))
             print(f"  {GREEN}+ [SECRET]{RESET} {key}")
 
-    # Check variables
+    # Check variables - new and changed
     for key, value in local_variables.items():
         if key not in gh_variables:
             changes.append(("new_var", key, value, None))
@@ -496,12 +515,26 @@ def cmd_update(repo: str, env_name: str, env_file: Path) -> None:
             changes.append(("changed_var", key, value, gh_variables[key]))
             print(f"  {YELLOW}~ [VAR]{RESET} {key}: {RED}{gh_variables[key]}{RESET} → {GREEN}{value}{RESET}")
 
-    if not changes:
+    # Check for items to delete (in GitHub but not in local .env)
+    all_local_keys = set(local_secrets.keys()) | set(local_variables.keys())
+    for key in gh_variables:
+        if key not in all_local_keys:
+            deletions.append(("del_var", key))
+            print(f"  {RED}- [VAR]{RESET} {key} {DIM}(will be removed){RESET}")
+
+    for key in gh_secrets:
+        if key not in all_local_keys:
+            deletions.append(("del_secret", key))
+            print(f"  {RED}- [SECRET]{RESET} {key} {DIM}(will be removed){RESET}")
+
+    if not changes and not deletions:
         print(f"{GREEN}✓ No changes to apply. GitHub is up to date.{RESET}")
         return
 
     print(f"\n{BOLD}{'─' * 40}{RESET}")
-    print(f"{BOLD}Total changes: {len(changes)}{RESET}")
+    print(f"{BOLD}Summary:{RESET}")
+    print(f"  {GREEN}+ Add/Update:{RESET} {len(changes)} items")
+    print(f"  {RED}- Delete:{RESET}     {len(deletions)} items")
 
     if not confirm(f"\nApply these changes to '{env_name}'?"):
         print(f"\n{YELLOW}Cancelled.{RESET}")
@@ -511,25 +544,44 @@ def cmd_update(repo: str, env_name: str, env_file: Path) -> None:
     if not ensure_environment_exists(repo, env_name):
         return
 
-    # Apply changes
-    print(f"\n{BOLD}Applying changes...{RESET}")
+    # Apply additions and updates
+    if changes:
+        print(f"\n{BOLD}Applying changes...{RESET}")
+        for change_type, name, value, old_value in changes:
+            error = ""
+            if change_type == "new_secret":
+                success = set_secret(repo, env_name, name, value)
+            elif change_type == "new_var":
+                success, error = set_variable(repo, env_name, name, value, exists=False)
+            elif change_type == "changed_var":
+                success, error = set_variable(repo, env_name, name, value, exists=True)
+            else:
+                success = False
 
-    for change_type, name, value, old_value in changes:
-        error = ""
-        if change_type == "new_secret":
-            success = set_secret(repo, env_name, name, value)
-        elif change_type == "new_var":
-            success, error = set_variable(repo, env_name, name, value, exists=False)
-        elif change_type == "changed_var":
-            success, error = set_variable(repo, env_name, name, value, exists=True)
-        else:
-            success = False
+            if success:
+                print(f"  {GREEN}✓{RESET} {name}")
+            else:
+                err_msg = f" {DIM}({error}){RESET}" if error else ""
+                print(f"  {RED}✗{RESET} {name}{err_msg}")
 
-        if success:
-            print(f"  {GREEN}✓{RESET} {name}")
-        else:
-            err_msg = f" {DIM}({error}){RESET}" if error else ""
-            print(f"  {RED}✗{RESET} {name}{err_msg}")
+    # Apply deletions
+    if deletions:
+        print(f"\n{BOLD}Removing deleted items...{RESET}")
+        for del_type, name in deletions:
+            if del_type == "del_var":
+                success, error = delete_variable(repo, env_name, name)
+            elif del_type == "del_secret":
+                success = delete_secret(repo, env_name, name)
+                error = ""
+            else:
+                success = False
+                error = "Unknown type"
+
+            if success:
+                print(f"  {GREEN}✓{RESET} {name} {DIM}(removed){RESET}")
+            else:
+                err_msg = f" {DIM}({error}){RESET}" if error else ""
+                print(f"  {RED}✗{RESET} {name}{err_msg}")
 
     print(f"\n{GREEN}✓ Done!{RESET}")
 
@@ -547,7 +599,7 @@ def interactive_menu(repo: str, env_name: str, env_file: Path) -> None:
             ("1", "Read GitHub environment"),
             ("2", "Diff local .env vs GitHub"),
             ("3", "Write all to GitHub (creates & overwrites)"),
-            ("4", "Update changed values only"),
+            ("4", "Sync changes (add, update, delete)"),
             ("5", "Change environment"),
             ("q", "Quit"),
         ]
@@ -641,15 +693,15 @@ def main() -> None:
 
     print(f"\n{GREEN}✓{RESET} Using environment: {CYAN}{BOLD}{env_name}{RESET}")
 
-    # Show current GitHub state
-    cmd_read(repo, env_name, args.env_file)
+    # Show diff on startup (more useful than just reading GitHub state)
+    cmd_diff(repo, env_name, args.env_file)
 
-    # If command specified, run it directly (read already shown above)
+    # If command specified, run it directly (diff already shown above)
     if args.command:
         if args.command == "read":
-            pass  # Already shown above
+            cmd_read(repo, env_name, args.env_file)
         elif args.command == "diff":
-            cmd_diff(repo, env_name, args.env_file)
+            pass  # Already shown above
         elif args.command == "write":
             cmd_write(repo, env_name, args.env_file)
         elif args.command == "update":
