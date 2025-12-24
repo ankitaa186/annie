@@ -82,3 +82,94 @@ def mock_httpx_client():
     client.__aenter__.return_value = client
     client.__aexit__.return_value = None
     return client
+
+
+class MockRedisPipeline:
+    """Mock Redis pipeline for atomic operations."""
+
+    def __init__(self, client):
+        self._client = client
+        self._operations = []
+
+    def get(self, key: str):
+        """Queue a GET operation."""
+        self._operations.append(('get', key))
+        return self
+
+    def delete(self, key: str):
+        """Queue a DELETE operation."""
+        self._operations.append(('delete', key))
+        return self
+
+    async def execute(self):
+        """Execute all queued operations and return results."""
+        results = []
+        for op, key in self._operations:
+            if op == 'get':
+                results.append(self._client._data.get(key))
+            elif op == 'delete':
+                deleted = 1 if key in self._client._data else 0
+                self._client._data.pop(key, None)
+                self._client._ttls.pop(key, None)
+                results.append(deleted)
+        return results
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        pass
+
+
+class MockRedisClient:
+    """In-memory mock of async Redis client for testing."""
+
+    def __init__(self):
+        self._data = {}
+        self._ttls = {}
+
+    async def get(self, key: str):
+        """Get value for key."""
+        return self._data.get(key)
+
+    async def set(self, key: str, value: str, ex: int = None, nx: bool = False):
+        """Set key to value with optional expiry and NX flag."""
+        if nx and key in self._data:
+            return None
+        self._data[key] = value
+        if ex:
+            self._ttls[key] = ex
+        return True
+
+    async def delete(self, *keys):
+        """Delete one or more keys."""
+        deleted = 0
+        for key in keys:
+            if key in self._data:
+                del self._data[key]
+                self._ttls.pop(key, None)
+                deleted += 1
+        return deleted
+
+    async def ttl(self, key: str):
+        """Get TTL for key."""
+        return self._ttls.get(key, -2)
+
+    def pipeline(self):
+        """Create a pipeline for atomic operations."""
+        return MockRedisPipeline(self)
+
+    async def flushdb(self):
+        """Clear all data."""
+        self._data.clear()
+        self._ttls.clear()
+
+    async def close(self):
+        """Close connection (no-op for mock)."""
+        pass
+
+
+@pytest.fixture
+def mock_redis_client():
+    """Create an in-memory mock Redis client for testing."""
+    return MockRedisClient()
