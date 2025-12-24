@@ -162,8 +162,8 @@ jobs:
       - name: Build and push backend image
         uses: docker/build-push-action@v5
         with:
-          context: .
-          file: backend/Dockerfile
+          context: backend
+          file: Dockerfile
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           platforms: ${{ github.ref == 'refs/heads/main' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
           tags: ${{ steps.meta-backend.outputs.tags }}
@@ -174,8 +174,8 @@ jobs:
       - name: Build and push mcp-server image
         uses: docker/build-push-action@v5
         with:
-          context: .
-          file: mcp_server/Dockerfile
+          context: mcp_server
+          file: Dockerfile
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           platforms: ${{ github.ref == 'refs/heads/main' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
           tags: ${{ steps.meta-mcp.outputs.tags }}
@@ -186,8 +186,8 @@ jobs:
       - name: Build and push telegram-bot image
         uses: docker/build-push-action@v5
         with:
-          context: .
-          file: telegram_bot/Dockerfile
+          context: telegram_bot
+          file: Dockerfile
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           platforms: ${{ github.ref == 'refs/heads/main' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
           tags: ${{ steps.meta-telegram.outputs.tags }}
