@@ -81,17 +81,21 @@ clean-all: clean clean-venv ## Full cleanup (Docker + venv + caches)
 # CODE QUALITY
 # ============================================================
 
-lint: venv ## Run linters (ruff)
+lint: venv ## Run linters (ruff). Use FIX=1 to auto-fix
 	$(VENV) pip install -q ruff
+ifdef FIX
+	$(VENV) ruff check --fix backend/ mcp_server/ telegram_bot/
+else
 	$(VENV) ruff check backend/ mcp_server/ telegram_bot/
+endif
 
-format: venv ## Format code (ruff)
+format: venv ## Check formatting (ruff). Use FIX=1 to apply fixes
 	$(VENV) pip install -q ruff
+ifdef FIX
 	$(VENV) ruff format backend/ mcp_server/ telegram_bot/
-
-format-check: venv ## Check code formatting without changes
-	$(VENV) pip install -q ruff
+else
 	$(VENV) ruff format --check backend/ mcp_server/ telegram_bot/
+endif
 
 # ============================================================
 # TESTING - All Services

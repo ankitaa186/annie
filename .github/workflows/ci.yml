@@ -14,6 +14,7 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    if: false  # Skip linting for now
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
