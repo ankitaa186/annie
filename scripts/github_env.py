@@ -15,7 +15,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 # ANSI colors
 RED = "\033[91m"
@@ -29,7 +29,10 @@ BOLD = "\033[1m"
 DIM = "\033[2m"
 
 
-def parse_env_file_with_sections(path: Path) -> Tuple[Dict[str, str], Dict[str, str]]:
+def parse_env_file_with_sections(
+    path: Path,
+    include_placeholders: bool = False
+) -> Tuple[Dict[str, str], Dict[str, str], Optional[Dict[str, str]]]:
     """Parse a .env file and separate into secrets and variables based on section headers.
 
     Expects .env to have sections like:
@@ -43,14 +46,23 @@ def parse_env_file_with_sections(path: Path) -> Tuple[Dict[str, str], Dict[str, 
     # ============================================================================
     KEY=value
 
+    Args:
+        path: Path to the .env file
+        include_placeholders: If True, returns a third dict with placeholder keys
+            and their section type ('secret' or 'variable'). This is used to
+            prevent accidental deletion of GitHub keys that have placeholder
+            values in the local .env file.
+
     Returns:
-        Tuple of (secrets_dict, variables_dict)
+        Tuple of (secrets_dict, variables_dict, placeholder_keys_dict or None)
+        placeholder_keys_dict maps key names to their section type ('secret' or 'variable')
     """
     secrets: Dict[str, str] = {}
     variables: Dict[str, str] = {}
+    placeholder_keys: Dict[str, str] = {}  # key -> section type
 
     if not path.exists():
-        return secrets, variables
+        return secrets, variables, (placeholder_keys if include_placeholders else None)
 
     current_section = None  # None, 'secrets', or 'variables'
 
@@ -74,8 +86,11 @@ def parse_env_file_with_sections(path: Path) -> Tuple[Dict[str, str], Dict[str, 
         key = key.strip()
         value = value.strip()
 
-        # Skip placeholder values
+        # Track placeholder values separately (for deletion protection)
         if not value or value == "REPLACE_ME":
+            if include_placeholders:
+                section_type = "secret" if current_section == "secrets" else "variable"
+                placeholder_keys[key] = section_type
             continue
 
         # Add to appropriate dict based on current section
@@ -87,7 +102,7 @@ def parse_env_file_with_sections(path: Path) -> Tuple[Dict[str, str], Dict[str, 
             # Default to variables if no section header found yet
             variables[key] = value
 
-    return secrets, variables
+    return secrets, variables, (placeholder_keys if include_placeholders else None)
 
 
 def clear_screen():
@@ -233,13 +248,13 @@ def delete_variable(repo: str, env_name: str, name: str) -> Tuple[bool, str]:
     return code == 0, stderr.strip() if stderr else ""
 
 
-def delete_secret(repo: str, env_name: str, name: str) -> bool:
-    """Delete a secret from GitHub environment."""
-    code, _, _ = run_gh([
+def delete_secret(repo: str, env_name: str, name: str) -> Tuple[bool, str]:
+    """Delete a secret from GitHub environment. Returns (success, error_message)."""
+    code, _, stderr = run_gh([
         "secret", "delete", name,
         "--env", env_name
     ])
-    return code == 0
+    return code == 0, stderr.strip() if stderr else ""
 
 
 def mask_value(value: str) -> str:
@@ -328,7 +343,7 @@ def cmd_read(repo: str, env_name: str, env_file: Path = None) -> None:
     # Get local counts for comparison
     if env_file is None:
         env_file = Path(".env")
-    local_secrets, local_variables = parse_env_file_with_sections(env_file)
+    local_secrets, local_variables, _ = parse_env_file_with_sections(env_file)
 
     # Show comparison counts
     print(f"{BOLD}Local .env:{RESET}  {len(local_secrets)} secrets, {len(local_variables)} variables")
@@ -363,7 +378,7 @@ def cmd_diff(repo: str, env_name: str, env_file: Path) -> Dict[str, any]:
 
     print(f"{DIM}Comparing...{RESET}\n")
 
-    local_secrets, local_variables = parse_env_file_with_sections(env_file)
+    local_secrets, local_variables, _ = parse_env_file_with_sections(env_file)
     gh_variables = get_github_variables(repo, env_name)
     gh_secrets = get_github_secrets(repo, env_name)
 
@@ -437,7 +452,7 @@ def cmd_write(repo: str, env_name: str, env_file: Path) -> None:
     """Write all variables/secrets from .env to GitHub."""
     print_header("Write to GitHub", f"{repo} → {env_name}")
 
-    secrets, variables = parse_env_file_with_sections(env_file)
+    secrets, variables, _ = parse_env_file_with_sections(env_file)
 
     if not secrets and not variables:
         print(f"{RED}Error: No values found in {env_file}{RESET}")
@@ -492,13 +507,17 @@ def cmd_update(repo: str, env_name: str, env_file: Path) -> None:
 
     print(f"{DIM}Checking for changes...{RESET}\n")
 
-    local_secrets, local_variables = parse_env_file_with_sections(env_file)
+    # Get local values including placeholder keys (to prevent accidental deletion)
+    local_secrets, local_variables, placeholder_keys = parse_env_file_with_sections(
+        env_file, include_placeholders=True
+    )
     gh_variables = get_github_variables(repo, env_name)
     gh_secrets = get_github_secrets(repo, env_name)
 
     # Calculate diff
     changes = []
     deletions = []
+    skipped_placeholders = []
 
     # Check secrets - new ones to add
     for key, value in local_secrets.items():
@@ -515,17 +534,28 @@ def cmd_update(repo: str, env_name: str, env_file: Path) -> None:
             changes.append(("changed_var", key, value, gh_variables[key]))
             print(f"  {YELLOW}~ [VAR]{RESET} {key}: {RED}{gh_variables[key]}{RESET} → {GREEN}{value}{RESET}")
 
-    # Check for items to delete (in GitHub but not in local .env)
-    all_local_keys = set(local_secrets.keys()) | set(local_variables.keys())
+    # Check for variables to delete (in GitHub but not in local variables)
+    # Use type-specific checks: variables against local_variables, secrets against local_secrets
     for key in gh_variables:
-        if key not in all_local_keys:
-            deletions.append(("del_var", key))
-            print(f"  {RED}- [VAR]{RESET} {key} {DIM}(will be removed){RESET}")
+        if key not in local_variables:
+            # Check if this key has a placeholder value (don't delete it)
+            if placeholder_keys and key in placeholder_keys:
+                skipped_placeholders.append(("var", key))
+                print(f"  {DIM}· [VAR]{RESET} {key} {DIM}(skipped - has placeholder in .env){RESET}")
+            else:
+                deletions.append(("del_var", key))
+                print(f"  {RED}- [VAR]{RESET} {key} {DIM}(will be removed){RESET}")
 
+    # Check for secrets to delete (in GitHub but not in local secrets)
     for key in gh_secrets:
-        if key not in all_local_keys:
-            deletions.append(("del_secret", key))
-            print(f"  {RED}- [SECRET]{RESET} {key} {DIM}(will be removed){RESET}")
+        if key not in local_secrets:
+            # Check if this key has a placeholder value (don't delete it)
+            if placeholder_keys and key in placeholder_keys:
+                skipped_placeholders.append(("secret", key))
+                print(f"  {DIM}· [SECRET]{RESET} {key} {DIM}(skipped - has placeholder in .env){RESET}")
+            else:
+                deletions.append(("del_secret", key))
+                print(f"  {RED}- [SECRET]{RESET} {key} {DIM}(will be removed){RESET}")
 
     if not changes and not deletions:
         print(f"{GREEN}✓ No changes to apply. GitHub is up to date.{RESET}")
@@ -571,8 +601,7 @@ def cmd_update(repo: str, env_name: str, env_file: Path) -> None:
             if del_type == "del_var":
                 success, error = delete_variable(repo, env_name, name)
             elif del_type == "del_secret":
-                success = delete_secret(repo, env_name, name)
-                error = ""
+                success, error = delete_secret(repo, env_name, name)
             else:
                 success = False
                 error = "Unknown type"
