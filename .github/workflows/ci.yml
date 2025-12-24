@@ -51,6 +51,9 @@ jobs:
       - name: Install dependencies
         run: make install
 
+      - name: Create test results directory
+        run: mkdir -p test-results
+
       - name: Run backend tests
         run: make test-backend PYTEST_ARGS="--junitxml=test-results/backend.xml"
 

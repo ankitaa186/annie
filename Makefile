@@ -102,7 +102,7 @@ endif
 # ============================================================
 
 test: venv ## Run all tests (unit + integration, excludes e2e)
-	$(VENV) pytest backend/tests mcp_server/tests telegram_bot/tests -v $(PYTEST_ARGS)
+	$(VENV) pytest backend/tests mcp_server/tests telegram_bot/tests -v --ignore=backend/tests/e2e --ignore=mcp_server/tests/e2e --ignore=telegram_bot/tests/e2e $(PYTEST_ARGS)
 
 test-unit: venv ## Run unit tests only
 	$(VENV) pytest backend/tests/unit mcp_server/tests telegram_bot/tests/unit -v $(PYTEST_ARGS)
@@ -118,21 +118,37 @@ test-all: venv ## Run ALL tests including e2e
 
 coverage: venv ## Run tests with coverage (excludes e2e)
 	$(VENV) pip install -q pytest-cov
-	$(VENV) pytest backend/tests mcp_server/tests telegram_bot/tests --cov=backend/api --cov=mcp_server --cov=telegram_bot --cov-report=term-missing --cov-report=html $(PYTEST_ARGS)
+	$(VENV) pytest backend/tests mcp_server/tests telegram_bot/tests --ignore=backend/tests/e2e --ignore=mcp_server/tests/e2e --ignore=telegram_bot/tests/e2e --cov=backend/api --cov=mcp_server --cov=telegram_bot --cov-report=term-missing --cov-report=html $(PYTEST_ARGS)
 	@echo "HTML coverage report: htmlcov/index.html"
 
 # ============================================================
 # TESTING - Individual Services
 # ============================================================
 
-test-backend: venv ## Run backend tests only
-	$(VENV) pytest backend/tests -v $(PYTEST_ARGS)
+test-backend: venv ## Run backend tests (excluding e2e)
+	$(VENV) pytest backend/tests -v --ignore=backend/tests/e2e $(PYTEST_ARGS)
 
-test-mcp: venv ## Run MCP server tests only
-	$(VENV) pytest mcp_server/tests -v $(PYTEST_ARGS)
+test-mcp: venv ## Run MCP server tests (excluding e2e)
+	$(VENV) pytest mcp_server/tests -v --ignore=mcp_server/tests/e2e $(PYTEST_ARGS)
 
-test-telegram: venv ## Run Telegram bot tests only
-	$(VENV) pytest telegram_bot/tests -v $(PYTEST_ARGS)
+test-telegram: venv ## Run Telegram bot tests (excluding e2e)
+	$(VENV) pytest telegram_bot/tests -v --ignore=telegram_bot/tests/e2e $(PYTEST_ARGS)
+
+# ============================================================
+# E2E TESTING (requires full environment setup)
+# ============================================================
+
+test-e2e: venv ## Run all e2e tests
+	$(VENV) pytest backend/tests/e2e mcp_server/tests/e2e telegram_bot/tests/e2e -v $(PYTEST_ARGS)
+
+test-backend-e2e: venv ## Run backend e2e tests only
+	$(VENV) pytest backend/tests/e2e -v $(PYTEST_ARGS)
+
+test-mcp-e2e: venv ## Run MCP server e2e tests only
+	$(VENV) pytest mcp_server/tests/e2e -v $(PYTEST_ARGS)
+
+test-telegram-e2e: venv ## Run Telegram bot e2e tests only
+	$(VENV) pytest telegram_bot/tests/e2e -v $(PYTEST_ARGS)
 
 # ============================================================
 # DOCKER
