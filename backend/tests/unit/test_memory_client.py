@@ -50,10 +50,11 @@ class TestMemoryClientInit:
     """Test MemoryClient initialization."""
 
     def test_init_with_default_config(self):
-        """Test initialization with default configuration."""
+        """Test initialization with default configuration from environment."""
         client = MemoryClient()
-        assert client.memories_url == "http://host.docker.internal:8080"
-        assert client.timeout == 5.0
+        # Uses AGENTIC_MEMORIES_URL from test environment (conftest.py)
+        assert client.memories_url == "http://localhost:8080"
+        assert client.timeout == 240.0  # 4 minute default timeout
         assert client.client is not None
 
     def test_init_with_custom_config(self):
@@ -221,10 +222,11 @@ class TestRetrieveMemories:
     async def test_retrieve_memories_success(self, memory_client):
         """Test successful memory retrieval."""
         # Mock successful response with memories
+        # Note: agentic-memories API returns "results" field
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
-            "memories": [
+            "results": [
                 {
                     "memory_id": "mem_1",
                     "conversation_summary": "User asked for stock advice",

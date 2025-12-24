@@ -113,18 +113,18 @@ class TestGeminiCostCalculation:
         assert result["total_cost"] == 0.008
 
     def test_gemini_cost_with_cached_tokens(self):
-        """Test Gemini 3 Pro cost with cached tokens (50% discount)."""
+        """Test Gemini 3 Pro cost with cached tokens."""
         # 1000 prompt tokens, 500 completion tokens, 200 cached tokens
-        # Input: 1000 / 1000 * $0.002 = $0.002
-        # Output: 500 / 1000 * $0.012 = $0.006
-        # Cached: 200 / 1000 * $0.001 = $0.0002
-        # Total: $0.0082
+        # Input: 1000 / 1M * $2.00 = $0.002
+        # Output: 500 / 1M * $12.00 = $0.006
+        # Cached: 200 / 1M * $0.20 = $0.00004
+        # Total: $0.00804
         result = calculate_gemini_cost(prompt_tokens=1000, completion_tokens=500, cached_tokens=200)
 
         assert result["input_cost"] == 0.002
         assert result["output_cost"] == 0.006
-        assert result["cached_cost"] == 0.0002
-        assert result["total_cost"] == 0.0082
+        assert result["cached_cost"] == 0.00004
+        assert result["total_cost"] == 0.00804
 
     def test_gemini_cost_small_usage(self):
         """Test Gemini 3 Pro cost with small token counts."""
@@ -139,27 +139,37 @@ class TestGeminiCostCalculation:
         assert result["total_cost"] == 0.0008
 
     def test_gemini_cost_large_usage(self):
-        """Test Gemini 3 Pro cost with large token counts (1M tokens)."""
+        """Test Gemini 3 Pro cost with large token counts (1M tokens) - tiered pricing."""
         # 1,000,000 prompt tokens, 100,000 completion tokens
-        # Input: 1000000 / 1000 * $0.002 = $2.00
-        # Output: 100000 / 1000 * $0.012 = $1.20
-        # Total: $3.20
+        # Input: First 200k at $2/1M + remaining 800k at $4/1M
+        #   = (200k/1M * 2) + (800k/1M * 4) = 0.4 + 3.2 = $3.60
+        # Output: 100k at $12/1M = $1.20 (under 200k threshold)
+        # Total: $4.80
         result = calculate_gemini_cost(prompt_tokens=1000000, completion_tokens=100000)
 
-        assert result["input_cost"] == 2.0
+        assert result["input_cost"] == 3.6
         assert result["output_cost"] == 1.2
-        assert result["total_cost"] == 3.2
+        assert result["total_cost"] == 4.8
+        assert result["tier"] == "high"  # Over 200k threshold
 
     def test_gemini_cost_structure(self):
         """Test that Gemini cost result has correct structure."""
         result = calculate_gemini_cost(prompt_tokens=100, completion_tokens=50)
 
-        # Verify structure includes cached_cost
+        # Verify structure includes cached_cost and tier
         assert "input_cost" in result
         assert "output_cost" in result
         assert "cached_cost" in result
         assert "total_cost" in result
-        assert all(isinstance(v, float) for v in result.values())
+        assert "tier" in result
+        # Verify cost values are floats
+        assert isinstance(result["input_cost"], float)
+        assert isinstance(result["output_cost"], float)
+        assert isinstance(result["cached_cost"], float)
+        assert isinstance(result["total_cost"], float)
+        # Tier is a string
+        assert isinstance(result["tier"], str)
+        assert result["tier"] in ["low", "high"]
 
     def test_gemini_cost_rounding(self):
         """Test that Gemini costs are rounded to 6 decimal places."""
@@ -211,10 +221,11 @@ class TestUnifiedCostCalculation:
         )
 
         # Should include cached token cost
+        # Cached: 200 / 1M * $0.20 = $0.00004
         assert result["input_cost"] == 0.002
         assert result["output_cost"] == 0.006
-        assert result["cached_cost"] == 0.0002
-        assert result["total_cost"] == 0.0082
+        assert result["cached_cost"] == 0.00004
+        assert result["total_cost"] == 0.00804
 
     def test_calculate_llm_cost_unknown_provider(self):
         """Test that unknown provider raises ValueError."""

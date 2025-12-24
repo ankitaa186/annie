@@ -81,8 +81,11 @@ class TestLangfuseClientInitialization:
                 public_key="pk-test-12345",
                 secret_key="sk-test-67890",
                 host="https://us.cloud.langfuse.com",
+                release="annie-test",  # From LANGFUSE_ENVIRONMENT env var
                 flush_at=10,  # Batch size as per AC #1
-                flush_interval=1.0  # Flush interval as per AC #1
+                flush_interval=1.0,  # Flush interval as per AC #1
+                enabled=True,
+                debug=False
             )
 
     def test_client_is_singleton(self, mock_env_enabled):
