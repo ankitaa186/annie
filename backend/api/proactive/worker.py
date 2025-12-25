@@ -16,10 +16,13 @@ graceful error handling, and comprehensive observability via Langfuse.
 """
 
 import asyncio
+import json
 import os
 import time
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+import redis.asyncio as redis
 from arq import cron
 from arq.connections import RedisSettings
 
@@ -129,10 +132,33 @@ async def process_trigger(
             }
         )
 
+        # Debug: Log full trigger data
+        logger.debug(
+            "Full trigger data",
+            extra={
+                "trigger_id": trigger_id,
+                "user_id": user_id,
+                "trigger": trigger
+            }
+        )
+
         # Phase 1: Subconscious gate check
         gate_start = time.time()
         gate_result = await gate.should_fire(trigger, user_id)
         evaluation_ms = int((time.time() - gate_start) * 1000)
+
+        # Debug: Log gate result
+        logger.debug(
+            "Gate check result",
+            extra={
+                "trigger_id": trigger_id,
+                "user_id": user_id,
+                "allowed": gate_result.allowed,
+                "reason": gate_result.reason,
+                "checks_passed": gate_result.checks_passed,
+                "defer_until": str(gate_result.defer_until) if gate_result.defer_until else None
+            }
+        )
 
         if not gate_result.allowed:
             status = "gate_blocked"
@@ -160,6 +186,22 @@ async def process_trigger(
         agent_start = time.time()
         wake_result = await execute_wake_up_agent(trigger, user_id)
         generation_ms = int((time.time() - agent_start) * 1000)
+
+        # Debug: Log wake-up agent result
+        logger.debug(
+            "Wake-up agent result",
+            extra={
+                "trigger_id": trigger_id,
+                "user_id": user_id,
+                "skip": wake_result.skip,
+                "skip_reason": wake_result.skip_reason,
+                "message_length": len(wake_result.message) if wake_result.message else 0,
+                "message_preview": wake_result.message[:200] if wake_result.message else None,
+                "tools_called": wake_result.tools_called,
+                "reasoning": wake_result.reasoning[:200] if wake_result.reasoning else None,
+                "generation_ms": generation_ms
+            }
+        )
 
         if wake_result.skip:
             # Use "failed" status since API doesn't accept "skipped"
@@ -464,6 +506,58 @@ async def handle_condition_trigger(
 
 
 # ============================================================================
+# Worker Health / Liveness
+# ============================================================================
+
+HEARTBEAT_KEY = "proactive:worker:heartbeat"
+HEARTBEAT_TTL = 120  # 2 minutes - should refresh every minute
+
+
+async def update_heartbeat() -> None:
+    """Update worker heartbeat in Redis for liveness checks."""
+    try:
+        redis_client = redis.Redis(
+            host=config.get("REDIS_HOST", "redis"),
+            port=int(config.get("REDIS_PORT", 6379)),
+            decode_responses=True
+        )
+        heartbeat_data = json.dumps({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "worker": "proactive-worker"
+        })
+        await redis_client.set(HEARTBEAT_KEY, heartbeat_data, ex=HEARTBEAT_TTL)
+        await redis_client.aclose()
+    except Exception as e:
+        logger.warning(f"Failed to update heartbeat: {e}")
+
+
+async def check_heartbeat() -> bool:
+    """Check if worker heartbeat is recent (for health checks)."""
+    try:
+        redis_client = redis.Redis(
+            host=config.get("REDIS_HOST", "redis"),
+            port=int(config.get("REDIS_PORT", 6379)),
+            decode_responses=True
+        )
+        heartbeat_json = await redis_client.get(HEARTBEAT_KEY)
+        await redis_client.aclose()
+
+        if not heartbeat_json:
+            return False
+
+        heartbeat = json.loads(heartbeat_json)
+        timestamp = datetime.fromisoformat(heartbeat["timestamp"].replace("Z", "+00:00"))
+        age_seconds = (datetime.now(timezone.utc) - timestamp).total_seconds()
+
+        # Healthy if heartbeat is less than 2 minutes old
+        return age_seconds < HEARTBEAT_TTL
+
+    except Exception as e:
+        logger.warning(f"Heartbeat check failed: {e}")
+        return False
+
+
+# ============================================================================
 # Worker Tasks
 # ============================================================================
 
@@ -636,6 +730,9 @@ async def poll_triggers(ctx: Dict[str, Any]) -> None:
                 await intents_client.close()
             except Exception:
                 pass
+
+        # Update heartbeat for liveness check
+        await update_heartbeat()
 
 
 # ============================================================================

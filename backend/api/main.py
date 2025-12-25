@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any
 
 import httpx
+import redis.asyncio
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -293,6 +294,71 @@ async def check_agentic_memories_health() -> Dict[str, Any]:
         }
 
 
+async def check_proactive_worker_health() -> Dict[str, Any]:
+    """Check proactive worker liveness via Redis heartbeat.
+
+    Returns:
+        Dictionary with worker status including alive, last_heartbeat, and age_seconds.
+    """
+    try:
+        from api.proactive.worker import HEARTBEAT_KEY, HEARTBEAT_TTL
+
+        redis_host = config.get("REDIS_HOST", "redis")
+        redis_port = int(config.get("REDIS_PORT", 6379))
+
+        redis_client = redis.asyncio.Redis(
+            host=redis_host,
+            port=redis_port,
+            decode_responses=True
+        )
+
+        heartbeat_json = await redis_client.get(HEARTBEAT_KEY)
+        await redis_client.aclose()
+
+        if not heartbeat_json:
+            return {
+                "status": "unavailable",
+                "alive": False,
+                "last_heartbeat": None,
+                "age_seconds": None,
+                "reason": "no_heartbeat"
+            }
+
+        import json
+        heartbeat = json.loads(heartbeat_json)
+        timestamp = datetime.fromisoformat(heartbeat["timestamp"].replace("Z", "+00:00"))
+        age_seconds = (datetime.now(timezone.utc) - timestamp).total_seconds()
+
+        if age_seconds < HEARTBEAT_TTL:
+            return {
+                "status": "ok",
+                "alive": True,
+                "last_heartbeat": heartbeat["timestamp"],
+                "age_seconds": round(age_seconds, 1)
+            }
+        else:
+            return {
+                "status": "degraded",
+                "alive": False,
+                "last_heartbeat": heartbeat["timestamp"],
+                "age_seconds": round(age_seconds, 1),
+                "reason": "heartbeat_stale"
+            }
+
+    except Exception as e:
+        logger.warning(
+            "Proactive worker health check failed",
+            extra={"error": str(e)}
+        )
+        return {
+            "status": "unavailable",
+            "alive": False,
+            "last_heartbeat": None,
+            "age_seconds": None,
+            "reason": str(e)
+        }
+
+
 def check_langfuse_health() -> Dict[str, Any]:
     """Check Langfuse observability status.
 
@@ -404,6 +470,7 @@ async def full_health_check() -> JSONResponse:
         "redis": check_redis_health(),
         "llm_api": check_llm_api_health(),
         "agentic_memories": await check_agentic_memories_health(),
+        "proactive_worker": await check_proactive_worker_health(),
         "langfuse": check_langfuse_health()
     }
 

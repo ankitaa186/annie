@@ -91,11 +91,17 @@ class SubconsciousGate:
     """
 
     # Configuration
-    RECENT_CONTACT_MINUTES = 15  # Block if user messaged within last N minutes
-    DAILY_MESSAGE_LIMIT = 5
+    RECENT_CONTACT_MINUTES = 1  # Block if user messaged within last N minutes
+    DAILY_MESSAGE_LIMIT = 10
     QUIET_HOURS_START = 22  # 10 PM
     QUIET_HOURS_END = 8     # 8 AM
     DAILY_COUNTER_TTL = 86400  # 24 hours
+
+    # Gate Check Enable/Disable Flags (set to False to skip check)
+    CHECK_OPT_OUT_ENABLED = False       # Check if user disabled proactive messages
+    CHECK_RECENT_CONTACT_ENABLED = False  # Check if user messaged recently
+    CHECK_DAILY_LIMIT_ENABLED = False   # Check daily message limit
+    CHECK_QUIET_HOURS_ENABLED = False   # Check quiet hours (10pm-8am)
 
     def __init__(self, redis_client: Optional[redis.Redis] = None):
         """
@@ -159,64 +165,68 @@ class SubconsciousGate:
 
         try:
             # Check 1: User opt-out (fastest - single profile read)
-            result = await self._check_opt_out(user_id)
-            if result:
-                logger.info(
-                    "Gate blocked by user opt-out",
-                    extra={
-                        "user_id": user_id,
-                        "trigger_id": trigger.get("id"),
-                        "trigger_type": trigger.get("trigger_type"),
-                        "checks_passed": checks_passed,
-                    }
-                )
-                return result
+            if self.CHECK_OPT_OUT_ENABLED:
+                result = await self._check_opt_out(user_id)
+                if result:
+                    logger.info(
+                        "Gate blocked by user opt-out",
+                        extra={
+                            "user_id": user_id,
+                            "trigger_id": trigger.get("id"),
+                            "trigger_type": trigger.get("trigger_type"),
+                            "checks_passed": checks_passed,
+                        }
+                    )
+                    return result
             checks_passed.append("opt_out")
 
             # Check 2: Recent contact (single session read)
-            result = await self._check_recent_contact(user_id)
-            if result:
-                logger.info(
-                    "Gate blocked by recent contact",
-                    extra={
-                        "user_id": user_id,
-                        "trigger_id": trigger.get("id"),
-                        "trigger_type": trigger.get("trigger_type"),
-                        "checks_passed": checks_passed,
-                    }
-                )
-                return result
+            if self.CHECK_RECENT_CONTACT_ENABLED:
+                result = await self._check_recent_contact(user_id)
+                if result:
+                    logger.info(
+                        "Gate blocked by recent contact",
+                        extra={
+                            "user_id": user_id,
+                            "trigger_id": trigger.get("id"),
+                            "trigger_type": trigger.get("trigger_type"),
+                            "checks_passed": checks_passed,
+                        }
+                    )
+                    return result
             checks_passed.append("recent_contact")
 
             # Check 3: Daily limit (single Redis read)
-            result = await self._check_daily_limit(user_id)
-            if result:
-                logger.info(
-                    "Gate blocked by daily limit",
-                    extra={
-                        "user_id": user_id,
-                        "trigger_id": trigger.get("id"),
-                        "trigger_type": trigger.get("trigger_type"),
-                        "checks_passed": checks_passed,
-                    }
-                )
-                return result
+            if self.CHECK_DAILY_LIMIT_ENABLED:
+                result = await self._check_daily_limit(user_id)
+                if result:
+                    logger.info(
+                        "Gate blocked by daily limit",
+                        extra={
+                            "user_id": user_id,
+                            "trigger_id": trigger.get("id"),
+                            "trigger_type": trigger.get("trigger_type"),
+                            "checks_passed": checks_passed,
+                        }
+                    )
+                    return result
             checks_passed.append("daily_limit")
 
             # Check 4: Quiet hours (requires timezone calculation)
-            result = await self._check_quiet_hours(user_id)
-            if result:
-                logger.info(
-                    "Gate blocked by quiet hours",
-                    extra={
-                        "user_id": user_id,
-                        "trigger_id": trigger.get("id"),
-                        "trigger_type": trigger.get("trigger_type"),
-                        "defer_until": result.defer_until.isoformat() if result.defer_until else None,
-                        "checks_passed": checks_passed,
-                    }
-                )
-                return result
+            if self.CHECK_QUIET_HOURS_ENABLED:
+                result = await self._check_quiet_hours(user_id)
+                if result:
+                    logger.info(
+                        "Gate blocked by quiet hours",
+                        extra={
+                            "user_id": user_id,
+                            "trigger_id": trigger.get("id"),
+                            "trigger_type": trigger.get("trigger_type"),
+                            "defer_until": result.defer_until.isoformat() if result.defer_until else None,
+                            "checks_passed": checks_passed,
+                        }
+                    )
+                    return result
             checks_passed.append("quiet_hours")
 
             # All checks passed

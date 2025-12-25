@@ -33,7 +33,7 @@ def summarize_portfolio_result(result: Dict[str, Any]) -> str:
         "3 holdings" (without prices)
     """
     if result.get("status") == "error":
-        return result.get("message", "Failed")[:50]
+        return result.get("message", "Failed")[:500]
 
     holdings_count = result.get("total_holdings", 0)
 
@@ -67,7 +67,7 @@ def summarize_add_holding_result(result: Dict[str, Any]) -> str:
         "Updated AAPL: 10 shares"
     """
     if result.get("status") == "error":
-        return result.get("message", "Failed")[:50]
+        return result.get("message", "Failed")[:500]
 
     holding = result.get("holding", {})
     ticker = holding.get("ticker", "???")
@@ -99,7 +99,7 @@ def summarize_update_holding_result(result: Dict[str, Any]) -> str:
         "Updated AAPL"
     """
     if result.get("status") == "error":
-        return result.get("message", "Failed")[:50]
+        return result.get("message", "Failed")[:500]
 
     ticker = result.get("ticker", "???")
     return f"Updated {ticker}"
@@ -126,7 +126,7 @@ def summarize_remove_holding_result(result: Dict[str, Any]) -> str:
         "Removed AAPL"
     """
     if result.get("status") == "error":
-        return result.get("message", "Failed")[:50]
+        return result.get("message", "Failed")[:500]
 
     ticker = result.get("ticker", "???")
     return f"Removed {ticker}"
@@ -153,7 +153,7 @@ def summarize_clear_portfolio_result(result: Dict[str, Any]) -> str:
         "Portfolio cleared (3 removed)"
     """
     if result.get("status") == "error":
-        return result.get("message", "Failed")[:50]
+        return result.get("message", "Failed")[:500]
 
     holdings_removed = result.get("holdings_removed", 0)
     return f"Portfolio cleared ({holdings_removed} removed)"
@@ -182,7 +182,7 @@ def summarize_analyze_stock_result(result: Dict[str, Any]) -> str:
         "AAPL $175.50 (-1.5%)"
     """
     if result.get("status") == "error":
-        return result.get("message", "Failed")[:50]
+        return result.get("message", "Failed")[:500]
 
     ticker = result.get("ticker") or "???"
     price = result.get("current_price") or 0
@@ -212,7 +212,7 @@ def summarize_stock_history_result(result: Dict[str, Any]) -> str:
         "History loaded: 1mo (22 days)"
     """
     if result.get("status") == "error":
-        return result.get("message", "Failed")[:50]
+        return result.get("message", "Failed")[:500]
 
     period = result.get("period", "???")
     data_points = result.get("data_points", 0)
@@ -239,7 +239,7 @@ def summarize_profile_result(result: Dict[str, Any]) -> str:
         "Profile loaded (67% complete)"
     """
     if result.get("status") == "error":
-        return result.get("error", "Failed")[:50]
+        return result.get("error", "Failed")[:500]
 
     completeness = result.get("completeness", 0)
     return f"Profile loaded ({completeness}% complete)"
@@ -266,7 +266,7 @@ def summarize_store_memory_result(result: Dict[str, Any]) -> str:
         "Memory saved"
     """
     if result.get("status") == "error":
-        return result.get("message", "Failed")[:50]
+        return result.get("message", "Failed")[:500]
 
     memories_created = result.get("memories_created", 0)
     if memories_created > 1:
@@ -296,7 +296,7 @@ def summarize_retrieve_memories_result(result: Dict[str, Any]) -> str:
         "No memories found"
     """
     if result.get("status") == "error":
-        return result.get("message", "Failed")[:50]
+        return result.get("message", "Failed")[:500]
 
     memory_count = result.get("memory_count", 0)
     if memory_count == 0:
@@ -327,7 +327,7 @@ def summarize_internet_search_result(result: Dict[str, Any]) -> str:
         "No results found"
     """
     if result.get("status") == "error":
-        return result.get("message", "Failed")[:50]
+        return result.get("message", "Failed")[:500]
 
     results = result.get("results", [])
     count = len(results)
@@ -423,7 +423,7 @@ def summarize_tool_result(tool_name: str, result: Dict[str, Any]) -> str:
     # Generic fallback for unknown tools or summarizer failures
     if result.get("status") == "error":
         error_message = result.get("message", "Failed")
-        # Truncate to 50 chars
-        return error_message[:50]
+        # Truncate to 500 chars to show full error context
+        return error_message[:500]
 
     return "Complete"

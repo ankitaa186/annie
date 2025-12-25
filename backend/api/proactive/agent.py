@@ -194,6 +194,20 @@ async def gather_dynamic_state(user_id: str, timezone: str = "America/Los_Angele
             }
         )
 
+        # Debug: Log full dynamic state details
+        logger.debug(
+            "Full dynamic state",
+            extra={
+                "user_id": user_id,
+                "current_datetime": current_time.isoformat(),
+                "day_of_week": current_time.strftime("%A"),
+                "market_status": market_status,
+                "hours_since_last_message": hours_since,
+                "recent_context": recent_context,
+                "profile": profile
+            }
+        )
+
         if LANGFUSE_AVAILABLE:
             langfuse_context.update_current_observation(
                 output={
@@ -389,8 +403,23 @@ def parse_agent_response(response_content: str, tools_called: List[str]) -> Wake
         WakeUpResult parsed from response
     """
     try:
+        # Strip markdown code blocks if present (Gemini often wraps JSON in ```json ... ```)
+        clean_content = response_content.strip()
+        if clean_content.startswith("```"):
+            # Remove opening ```json or ``` 
+            lines = clean_content.split("\n")
+            if lines[0].startswith("```"):
+                lines = lines[1:]  # Remove first line (```json)
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]  # Remove last line (```)
+            clean_content = "\n".join(lines).strip()
+            logger.debug(
+                "Stripped markdown code blocks from response",
+                extra={"original_length": len(response_content), "clean_length": len(clean_content)}
+            )
+
         # Try to parse as JSON
-        data = json.loads(response_content)
+        data = json.loads(clean_content)
 
         return WakeUpResult(
             skip=data.get("skip", False),
@@ -501,6 +530,18 @@ async def execute_wake_up_agent(
         # 3. Build the prompt with both static and dynamic context
         prompt = build_agent_prompt(trigger_data, dynamic_state, tool_names)
 
+        # Debug: Log the action_context and prompt
+        logger.debug(
+            "Wake-up agent prompt built",
+            extra={
+                "trigger_id": trigger_data.get("id"),
+                "user_id": user_id,
+                "action_context": trigger_data.get("action_context"),
+                "prompt_length": len(prompt),
+                "prompt_preview": prompt[:500] if prompt else None
+            }
+        )
+
         # 4. Execute with full tool access (10 minute timeout)
         tools_called = []
 
@@ -528,6 +569,7 @@ async def execute_wake_up_agent(
                 # Get streaming provider to handle tool calls
                 async with MCPClient() as mcp_client:
                     response_content = ""
+                    chunk_count = 0
 
                     # Use streaming to handle tool calls
                     async for chunk in llm_client.stream_chat_completion(
@@ -535,14 +577,60 @@ async def execute_wake_up_agent(
                         tools=llm_tools,
                         mcp_client=mcp_client
                     ):
-                        if chunk.get("type") == "content":
-                            response_content += chunk.get("delta", "")
-                        elif chunk.get("type") == "tool_call":
+                        chunk_count += 1
+                        chunk_type = chunk.get("type")
+                        # #region agent log
+                        logger.debug(
+                            "Agent received chunk",
+                            extra={
+                                "chunk_count": chunk_count,
+                                "chunk_type": chunk_type,
+                                "chunk_keys": list(chunk.keys()),
+                                "chunk_preview": str(chunk)[:200]
+                            }
+                        )
+                        # #endregion
+                        if chunk_type == "content":
+                            delta = chunk.get("delta", "")
+                            response_content += delta
+                            # #region agent log
+                            logger.debug(
+                                "Agent content chunk",
+                                extra={
+                                    "delta_length": len(delta),
+                                    "total_length": len(response_content)
+                                }
+                            )
+                            # #endregion
+                        elif chunk_type == "token":
+                            # Gemini returns "token" type with "content" field
+                            token_content = chunk.get("content", "")
+                            response_content += token_content
+                            # #region agent log
+                            logger.debug(
+                                "Agent token chunk",
+                                extra={
+                                    "token_length": len(token_content),
+                                    "total_length": len(response_content)
+                                }
+                            )
+                            # #endregion
+                        elif chunk_type == "tool_call":
                             # Track tool calls
                             tool_name = chunk.get("name")
                             if tool_name:
                                 tools_called.append(tool_name)
 
+                    # #region agent log
+                    logger.info(
+                        "Agent streaming complete",
+                        extra={
+                            "total_chunks": chunk_count,
+                            "response_length": len(response_content),
+                            "response_preview": response_content[:200] if response_content else "EMPTY"
+                        }
+                    )
+                    # #endregion
                     return response_content
 
             try:
