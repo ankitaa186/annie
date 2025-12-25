@@ -93,7 +93,20 @@ async def get_proactive_context(
 
         # Verify message is within 2-hour feedback window
         try:
-            sent_dt = datetime.fromisoformat(sent_at.replace('Z', '+00:00'))
+            # Handle different timestamp formats
+            if isinstance(sent_at, (int, float)):
+                # Unix timestamp - convert to datetime
+                sent_dt = datetime.fromtimestamp(sent_at, tz=timezone.utc)
+            elif isinstance(sent_at, str):
+                # ISO string - parse it
+                sent_dt = datetime.fromisoformat(sent_at.replace('Z', '+00:00'))
+            else:
+                logger.warning(
+                    "Unexpected sent_at type",
+                    extra={"user_id": user_id, "sent_at_type": type(sent_at).__name__}
+                )
+                return None
+
             now = datetime.now(timezone.utc)
             time_diff = (now - sent_dt).total_seconds()
 
@@ -110,12 +123,13 @@ async def get_proactive_context(
                 )
                 return None
 
-        except (ValueError, TypeError) as e:
+        except (ValueError, TypeError, AttributeError) as e:
             logger.warning(
                 "Failed to parse sent_at timestamp",
                 extra={
                     "user_id": user_id,
                     "sent_at": sent_at,
+                    "sent_at_type": type(sent_at).__name__,
                     "error": str(e)
                 }
             )

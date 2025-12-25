@@ -146,7 +146,7 @@ def calculate_llm_cost(provider: str, prompt_tokens: int, completion_tokens: int
     Calculate cost for LLM API usage based on provider.
 
     Args:
-        provider: LLM provider name ("grok-4", "chatgpt-5", or "gemini-3-pro-preview")
+        provider: LLM provider name ("grok-4", "chatgpt-5", "gemini-3-pro-preview", "gemini-2.5-pro", etc.)
         prompt_tokens: Number of input tokens
         completion_tokens: Number of output tokens
         sources_used: Number of Live Search sources accessed (Grok-4 only)
@@ -162,7 +162,8 @@ def calculate_llm_cost(provider: str, prompt_tokens: int, completion_tokens: int
         return calculate_grok_cost(prompt_tokens, completion_tokens, sources_used)
     elif provider == "chatgpt-5":
         return calculate_chatgpt_cost(prompt_tokens, completion_tokens)
-    elif provider == "gemini-3-pro-preview":
+    elif provider in ("gemini-3-pro-preview", "gemini-2.5-pro", "gemini-2.0-flash"):
+        # All Gemini models use same cost calculation (adjust if pricing differs)
         return calculate_gemini_cost(prompt_tokens, completion_tokens, cached_tokens)
     else:
         raise ValueError(f"Unknown provider: {provider}")

@@ -170,11 +170,13 @@ async def gather_dynamic_state(user_id: str, timezone: str = "America/Los_Angele
             logger.warning(f"Failed to get recent context: {e}")
             recent_context = None
 
-        # Get fresh user profile
+        # Get user profile from cache (non-blocking)
         profile = None
         try:
             profile_manager = ProfileManager()
-            profile = await profile_manager.get_profile(user_id, refresh=True)
+            profile = await profile_manager.load_profile_from_cache(user_id)
+            # Trigger background refresh for freshness (non-blocking)
+            await profile_manager.refresh_profile_background(user_id)
             await profile_manager.close()
         except Exception as e:
             logger.warning(f"Failed to get fresh profile: {e}")
@@ -291,12 +293,12 @@ def build_agent_prompt(
     elif hours < 24:
         tone_guidance = (
             f"Recent Contact: User messaged {int(hours)} hours ago.\n"
-            "Normal conversational tone. Be helpful and concise."
+            "Normal conversational tone. Be helpful and provide meaningful detail."
         )
     else:
         tone_guidance = (
             f"Recent Contact: User messaged {int(hours)} hours ago (over a day).\n"
-            "Warmer greeting is appropriate. Can be more detailed if needed."
+            "Warmer greeting is appropriate. Provide comprehensive, valuable information."
         )
 
     prompt_parts = [
@@ -364,18 +366,20 @@ def build_agent_prompt(
         '    "skip_reason": "reason if skipping",',
         '    "message": "the message to send if not skipping",',
         '    "tools_called": ["list of tools you called"],',
-        '    "reasoning": "brief explanation of your decision"',
+        '    "reasoning": "thorough explanation of your analysis and decision"',
         "}",
         "",
         "## Critical Rules",
         "",
-        "1. FETCH FRESH DATA - Never trust portfolio data from action_context",
-        "2. FOLLOW YOUR BRIEFING - it was written specifically for this trigger",
-        "3. RESPECT SKIP CONDITIONS - don't message when briefing says not to",
-        "4. CONSIDER RECENT CONTEXT - adjust tone based on user's recent state",
-        "5. MATCH THE TONE - use the voice examples as guide",
-        "6. BE CONCISE - respect length guidelines",
-        "7. DON'T OVER-FETCH - only call tools you need",
+        "1. ACTION_CONTEXT IS YOUR GUIDE - Follow your briefing's preferences for tone, length, and style",
+        "2. THINK DEEPLY - Analyze the situation thoroughly before composing your message",
+        "3. USE TOOLS LIBERALLY - Call relevant tools to gather fresh, current information",
+        "4. FETCH FRESH DATA - Never use stale data. Always get live data via tools when needed",
+        "5. DELIVER VALUE - Unless briefing says 'brief', provide rich content with insights and context",
+        "6. RESPECT SKIP CONDITIONS - don't message when briefing says not to",
+        "7. CONSIDER RECENT CONTEXT - adjust tone based on user's recent state",
+        "8. MATCH THE TONE - use the voice examples in your briefing as guide",
+        "9. EXPLAIN WHY - A good message explains why things matter, not just what the numbers are",
         "",
         "## Tone Adjustment",
         "",

@@ -2712,18 +2712,29 @@ Cron format: [minute] [hour] [day-of-month] [month] [day-of-week]
 Examples: "0 9 * * *" = 9am daily, "30 8 * * 1-5" = 8:30am weekdays
 
 ACTION_CONTEXT GUIDANCE:
-Write a comprehensive briefing for the wake-up AI that includes:
-1. original_request: User's exact words
-2. intent_summary: What this trigger should accomplish (1-3 sentences)
-3. user_context: Name, timezone, communication preferences (NOT dynamic data like holdings)
-4. execution_instructions: Step-by-step guide for wake-up AI
-5. message_guidance: Tone, length, formatting preferences
-6. edge_cases: How to handle errors or missing data
+Write a COMPREHENSIVE briefing for the wake-up AI. This is its ONLY context - be thorough!
 
-IMPORTANT:
-- NEVER put dynamic data (portfolio holdings, prices) in action_context
-- execution_instructions MUST say "Retrieve current portfolio/profile first"
-- Be thorough - this briefing is everything the wake-up AI knows
+REQUIRED SECTIONS:
+1. original_request: User's exact words
+2. intent_summary: What this trigger should accomplish and WHY it matters
+3. user_context: Name, timezone, communication style (NOT dynamic data like holdings/prices)
+4. execution_instructions: Step-by-step guide including:
+   - Which tools to call to gather fresh data
+   - How to analyze and interpret the data
+   - Decision criteria for when to skip vs send
+5. message_guidance: How to compose the message:
+   - If user wants brief: respect that preference
+   - Otherwise: default to rich, informative messages with insights and context
+   - Include voice examples showing personality
+   - Explain WHY data matters, not just WHAT the numbers are
+6. available_tools: Which tools are relevant and how to use them
+7. edge_cases: How to handle errors, missing data, unusual situations
+
+CRITICAL RULES:
+- NEVER put dynamic data (holdings, prices) in action_context - fetch fresh via tools
+- Wake-up AI should use tools liberally to gather current information
+- action_context preferences take precedence - if user wants brief, respect it
+- Be thorough - this briefing is EVERYTHING the wake-up AI knows
     """,
     "inputSchema": {
         "type": "object",

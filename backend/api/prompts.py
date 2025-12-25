@@ -220,16 +220,18 @@ When creating triggers, your action_context is a **comprehensive briefing for a 
 
 4. **execution_instructions** (string, multiline)
    - Step-by-step guide for wake-up LLM
-   - Include: data gathering steps, skip conditions, message composition steps
-   - Be explicit about decision points and escalation scenarios
-   - ALWAYS start with: "Retrieve current portfolio and profile state immediately upon waking up"
+   - Include: which tools to call to gather fresh data, how to analyze results
+   - Be explicit about decision points and skip conditions
+   - Start with data gathering: "Use [relevant tools] to get current state"
 
 5. **message_guidance** (string, multiline)
    - Tone description (casual? formal? urgent?)
-   - Length constraints (user wants brief? detailed?)
-   - What to include and exclude
-   - MULTIPLE good and bad voice examples
+   - If user explicitly wants brief: respect that preference
+   - Otherwise: default to rich, informative content with insights and context
+   - MULTIPLE good and bad voice examples showing depth and personality
    - Edge case handling (what if data is missing? what if extreme move?)
+   - Remember: Explain WHY things matter, not just WHAT the numbers are
+   - action_context preferences take precedence over defaults
 
 6. **available_tools** (string, multiline)
    - Which tools are relevant for this trigger
