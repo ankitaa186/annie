@@ -137,6 +137,8 @@ async def test_gate_blocks_when_opted_out(mock_redis, sample_trigger):
 
         gate = SubconsciousGate(redis_client=mock_redis)
         gate.profile_manager = mock_pm
+        # Enable the opt-out check for this test
+        gate.CHECK_OPT_OUT_ENABLED = True
 
         result = await gate.should_fire(sample_trigger, "user_456")
 
@@ -167,6 +169,8 @@ async def test_gate_blocks_recent_contact(mock_redis, sample_trigger):
 
         gate = SubconsciousGate(redis_client=mock_redis)
         gate.profile_manager = mock_pm
+        # Enable the recent contact check for this test
+        gate.CHECK_RECENT_CONTACT_ENABLED = True
 
         result = await gate.should_fire(sample_trigger, "user_456")
 
@@ -245,6 +249,8 @@ async def test_gate_blocks_daily_limit_reached(mock_redis, sample_trigger):
 
         gate = SubconsciousGate(redis_client=mock_redis)
         gate.profile_manager = mock_pm
+        # Enable the daily limit check for this test
+        gate.CHECK_DAILY_LIMIT_ENABLED = True
 
         result = await gate.should_fire(sample_trigger, "user_456")
 
@@ -296,6 +302,8 @@ async def test_gate_blocks_quiet_hours_night(mock_redis, sample_trigger):
 
         gate = SubconsciousGate(redis_client=mock_redis)
         gate.profile_manager = mock_pm
+        # Enable the quiet hours check for this test
+        gate.CHECK_QUIET_HOURS_ENABLED = True
 
         result = await gate.should_fire(sample_trigger, "user_456")
 
@@ -320,6 +328,8 @@ async def test_gate_blocks_quiet_hours_early_morning(mock_redis, sample_trigger)
 
         gate = SubconsciousGate(redis_client=mock_redis)
         gate.profile_manager = mock_pm
+        # Enable the quiet hours check for this test
+        gate.CHECK_QUIET_HOURS_ENABLED = True
 
         result = await gate.should_fire(sample_trigger, "user_456")
 
