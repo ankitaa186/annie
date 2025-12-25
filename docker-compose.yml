@@ -121,6 +121,39 @@ services:
       - annie-network
     restart: unless-stopped
 
+  proactive-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: annie-proactive-worker
+    command: ["python", "-m", "arq", "api.proactive.worker.WorkerSettings"]
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENVIRONMENT=${ENVIRONMENT:-dev}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - AGENTIC_MEMORIES_URL=${AGENTIC_MEMORIES_URL}
+      - LLM_PROVIDER=${LLM_PROVIDER:-grok-4}
+      - GROK_API_KEY=${GROK_API_KEY}
+      - CHATGPT_API_KEY=${CHATGPT_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY}
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-https://us.cloud.langfuse.com}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    networks:
+      - annie-network
+    restart: unless-stopped
+
   redis:
     image: redis:7.2-alpine
     container_name: annie-redis

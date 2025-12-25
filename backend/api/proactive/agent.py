@@ -530,7 +530,7 @@ async def execute_wake_up_agent(
                     response_content = ""
 
                     # Use streaming to handle tool calls
-                    async for chunk in llm_client.stream_completion(
+                    async for chunk in llm_client.stream_chat_completion(
                         messages=messages,
                         tools=llm_tools,
                         mcp_client=mcp_client

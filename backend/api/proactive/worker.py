@@ -162,7 +162,9 @@ async def process_trigger(
         generation_ms = int((time.time() - agent_start) * 1000)
 
         if wake_result.skip:
-            status = "skipped"
+            # Use "failed" status since API doesn't accept "skipped"
+            status = "failed"
+            error_message = f"Agent skipped: {wake_result.skip_reason}"
             logger.info(
                 "Wake-up agent skipped message",
                 extra={
@@ -317,8 +319,8 @@ async def fire_trigger_report(
                 # First 100 chars of message
                 report["message_preview"] = wake_result.message[:100]
 
-        # Add skip reason if skipped
-        if status == "skipped" and wake_result:
+        # Add skip reason if agent skipped (status will be "failed")
+        if wake_result and wake_result.skip:
             report["skip_reason"] = wake_result.skip_reason
 
         # Add tools called if available
@@ -390,6 +392,7 @@ async def handle_condition_trigger(
     """
     trigger_id = trigger.get("id")
     user_id = trigger.get("user_id")
+    trigger_type = trigger.get("trigger_type", "price")  # e.g., "price", "silence", "portfolio"
     trigger_condition = trigger.get("trigger_condition", {})
     condition_expression = trigger_condition.get("expression", "")
 
@@ -405,9 +408,9 @@ async def handle_condition_trigger(
         return False
 
     try:
-        # Evaluate condition
+        # Evaluate condition with condition_type, expression, and user_id
         eval_start = time.time()
-        result: EvaluatorResult = await evaluate_condition(condition_expression, user_id)
+        result: EvaluatorResult = await evaluate_condition(trigger_type, condition_expression, user_id)
         evaluation_ms = int((time.time() - eval_start) * 1000)
 
         if not result.met:
