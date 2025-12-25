@@ -1,0 +1,731 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <metadata>
+    <story-id>13.1</story-id>
+    <story-name>Intents HTTP Client</story-name>
+    <epic-id>13</epic-id>
+    <epic-name>Proactive AI Worker</epic-name>
+    <story-file>.bmad-ephemeral/stories/13-1-intents-http-client.md</story-file>
+    <estimated-effort>0.5 days</estimated-effort>
+    <status>ready-for-dev</status>
+    <context-generated>2025-12-24</context-generated>
+  </metadata>
+
+  <story-summary>
+    Create an async HTTP client (IntentsClient) to communicate with agentic-memories Intents API. This client provides CRUD operations, polling for due intents, claiming intents for exclusive processing, and reporting execution results. Follows the established MemoryClient pattern with circuit breaker, error handling, and Langfuse observability.
+  </story-summary>
+
+  <acceptance-criteria>
+    <criterion id="AC1">
+      <title>CRUD Operations</title>
+      <description>
+        IntentsClient must provide complete CRUD operations:
+        - create_intent(data) → POST /v1/intents
+        - list_intents(user_id, filters) → GET /v1/intents?user_id=X
+        - get_intent(id) → GET /v1/intents/{id}
+        - update_intent(id, data) → PUT /v1/intents/{id}
+        - delete_intent(id) → DELETE /v1/intents/{id}
+      </description>
+    </criterion>
+
+    <criterion id="AC2">
+      <title>Polling &amp; Worker Operations</title>
+      <description>
+        IntentsClient must support worker polling and execution:
+        - get_pending(trigger_type, user_id) → GET /v1/intents/pending
+          Returns due intents, excludes already-claimed intents
+          Includes in_cooldown flag in metadata for condition triggers
+        - claim_intent(id) → POST /v1/intents/{id}/claim
+          Claims intent for exclusive processing (prevents race conditions)
+          Returns IntentClaimResponse with intent and claimed_at
+          Returns 409 Conflict if already claimed within 5 minutes
+          Uses FOR UPDATE SKIP LOCKED for multi-worker safety
+        - fire_intent(id, report) → POST /v1/intents/{id}/fire
+          Reports execution result: success, failed, gate_blocked, condition_not_met
+          Clears claimed_at (releases claim)
+          Returns cooldown_active, cooldown_remaining_hours, last_condition_fire
+          Updates execution_count and last_executed
+        - get_history(id, limit, offset) → GET /v1/intents/{id}/history
+          Returns execution audit trail ordered by executed_at DESC
+          Includes timing metrics (evaluation_ms, generation_ms, delivery_ms)
+      </description>
+    </criterion>
+
+    <criterion id="AC3">
+      <title>Error Handling</title>
+      <description>
+        Robust error handling with circuit breaker:
+        - Raises IntentsClientError with context on failures
+        - Logs errors with trigger/user details
+        - Circuit breaker integration (reuse pattern from MemoryClient)
+        - Network errors → IntentsNetworkError
+        - API errors → IntentsAPIError
+      </description>
+    </criterion>
+
+    <criterion id="AC4">
+      <title>Observability</title>
+      <description>
+        Langfuse tracing for all operations:
+        - Operations traced as spans with @observe() decorator
+        - Duration and success/failure logged
+        - Include operation name, trigger_id, user_id in metadata
+      </description>
+    </criterion>
+  </acceptance-criteria>
+
+  <documentation-references>
+    <reference>
+      <name>Epic 13: Proactive AI Worker</name>
+      <path>docs/epics/epic-13-proactive-ai.md</path>
+      <relevance>Overall epic context, business value, architecture summary</relevance>
+      <key-sections>
+        - Story 13.1 details (lines 163-212)
+        - Architecture Summary (lines 89-157)
+        - Dependencies (lines 53-86)
+      </key-sections>
+    </reference>
+
+    <reference>
+      <name>Proactive AI Architecture Design Document</name>
+      <path>docs/design/proactive-ai-architecture.md</path>
+      <relevance>Complete architecture design, API schemas, trigger types</relevance>
+      <key-sections>
+        - API Integration patterns
+        - Trigger schema definitions
+        - Execution flow diagrams
+      </key-sections>
+    </reference>
+
+    <reference>
+      <name>CLAUDE.md Project Instructions</name>
+      <path>CLAUDE.md</path>
+      <relevance>Environment configuration, agentic-memories integration patterns</relevance>
+      <key-sections>
+        - AGENTIC_MEMORIES_URL configuration
+        - External services integration patterns
+        - Logging standards
+      </key-sections>
+    </reference>
+  </documentation-references>
+
+  <existing-patterns>
+    <pattern>
+      <name>HTTP Client Pattern (MemoryClient)</name>
+      <file>backend/api/memory_client.py</file>
+      <description>
+        Complete async HTTP client pattern using httpx.AsyncClient:
+        - Class structure with __init__, __aenter__, __aexit__, close()
+        - URL from config (AGENTIC_MEMORIES_URL)
+        - Custom exception hierarchy (MemoryClientError, MemoryNetworkError, MemoryAPIError)
+        - Error handling with detailed logging
+        - Timeout configuration (DEFAULT_TIMEOUT)
+        - health_check() method returning bool
+      </description>
+      <key-code-snippets>
+        <snippet location="lines 42-94">
+          Class initialization pattern:
+          - Load URL from config with fallback
+          - Initialize httpx.AsyncClient with timeout and headers
+          - Structured logging with logger.info()
+        </snippet>
+        <snippet location="lines 96-107">
+          Async context manager pattern (__aenter__, __aexit__, close())
+        </snippet>
+        <snippet location="lines 109-255">
+          HTTP request error handling pattern:
+          - try/except for httpx.TimeoutException, NetworkError, ConnectError, HTTPError
+          - Duration tracking (start_time, duration_ms)
+          - Detailed error logging with extra context
+          - Custom exception raising with original_error
+        </snippet>
+        <snippet location="lines 580-621">
+          health_check() implementation:
+          - GET request to /health endpoint
+          - Returns bool (True if 200, False otherwise)
+          - Exception handling with logger.warning
+        </snippet>
+      </key-code-snippets>
+    </pattern>
+
+    <pattern>
+      <name>Circuit Breaker Pattern (MemoryManager)</name>
+      <file>backend/api/memory.py</file>
+      <description>
+        Circuit breaker implementation for graceful degradation:
+        - Failure counter (_circuit_breaker_failures)
+        - Opened timestamp (_circuit_breaker_opened_at)
+        - Configurable threshold (CIRCUIT_BREAKER_THRESHOLD = 5)
+        - Configurable timeout (CIRCUIT_BREAKER_TIMEOUT = 900 seconds)
+        - _is_circuit_breaker_open() check method
+        - Reset on success
+      </description>
+      <key-code-snippets>
+        <snippet location="lines 49-52">
+          Circuit breaker constants:
+          CIRCUIT_BREAKER_THRESHOLD = 5  # Failures before circuit opens
+          CIRCUIT_BREAKER_TIMEOUT = 900  # 15 minutes
+        </snippet>
+        <snippet location="lines 64-68">
+          Initialization in __init__:
+          self._circuit_breaker_failures = 0
+          self._circuit_breaker_opened_at = None
+        </snippet>
+        <snippet location="lines 108-115">
+          Check before operation:
+          if self._is_circuit_breaker_open():
+              logger.warning("Circuit breaker is open, queueing...")
+              return False
+        </snippet>
+        <snippet location="lines 130-132">
+          Reset on success:
+          self._circuit_breaker_failures = 0
+          self._circuit_breaker_opened_at = None
+        </snippet>
+        <snippet location="lines 150-157">
+          Increment on failure:
+          self._circuit_breaker_failures += 1
+          if self._circuit_breaker_failures >= self.CIRCUIT_BREAKER_THRESHOLD:
+              self._circuit_breaker_opened_at = time.time()
+        </snippet>
+        <snippet location="lines 173-192">
+          _is_circuit_breaker_open() method:
+          - Check if opened_at is set
+          - Calculate elapsed time
+          - Auto-close after timeout
+          - Return bool
+        </snippet>
+      </key-code-snippets>
+    </pattern>
+
+    <pattern>
+      <name>Langfuse Tracing Pattern</name>
+      <file>backend/api/observability/tracing.py</file>
+      <description>
+        Langfuse integration using @observe() decorator and manual tracing:
+        - Import langfuse.decorators.observe with LANGFUSE_AVAILABLE flag
+        - No-op decorator if Langfuse not available
+        - @observe(name="...", as_type="trace"|"span") on async methods
+        - Automatic input/output/duration/error capture
+      </description>
+      <key-code-snippets>
+        <snippet location="lines 14-19">
+          Safe import pattern:
+          try:
+              from langfuse.decorators import langfuse_context
+              LANGFUSE_AVAILABLE = True
+          except ImportError:
+              LANGFUSE_AVAILABLE = False
+        </snippet>
+        <snippet location="backend/api/memory.py lines 23-31">
+          No-op decorator when not available:
+          try:
+              from langfuse.decorators import observe
+              LANGFUSE_AVAILABLE = True
+          except ImportError:
+              LANGFUSE_AVAILABLE = False
+              def observe(**kwargs):
+                  def decorator(func):
+                      return func
+                  return decorator
+        </snippet>
+        <snippet location="backend/api/memory.py lines 72-79">
+          Usage on async method:
+          @observe(name="memory_storage", as_type="trace")
+          async def store_conversation_memory(self, ...):
+              # Automatic tracing of inputs, outputs, duration
+        </snippet>
+      </key-code-snippets>
+    </pattern>
+
+    <pattern>
+      <name>Error Classes Pattern</name>
+      <file>backend/api/memory_client.py</file>
+      <description>
+        Exception hierarchy for HTTP client errors:
+        - Base class: ClientError(Exception)
+        - Network errors: NetworkError(ClientError) - service unreachable
+        - API errors: APIError(ClientError) - service returned error response
+        - Custom __init__ to capture error context
+      </description>
+      <key-code-snippets>
+        <snippet location="lines 20-39">
+          class MemoryClientError(Exception):
+              """Base exception for memory client errors."""
+              pass
+
+          class MemoryNetworkError(MemoryClientError):
+              """Exception raised when agentic-memories service is unreachable."""
+              def __init__(self, message: str, original_error: Optional[Exception] = None):
+                  self.message = message
+                  self.original_error = original_error
+                  super().__init__(message)
+
+          class MemoryAPIError(MemoryClientError):
+              """Exception raised when agentic-memories API returns an error."""
+              def __init__(self, message: str, status_code: Optional[int] = None, response_data: Optional[Dict] = None):
+                  self.message = message
+                  self.status_code = status_code
+                  self.response_data = response_data
+                  super().__init__(f"Memory API error ({status_code}): {message}")
+        </snippet>
+      </key-code-snippets>
+    </pattern>
+
+    <pattern>
+      <name>Structured Logging Pattern</name>
+      <file>backend/api/memory_client.py</file>
+      <description>
+        Consistent structured logging with extra context:
+        - logger = get_logger(__name__)
+        - logger.info/debug/warning/error with extra={} dict
+        - Always include duration_ms for operations
+        - Include user_id, conversation_id, request identifiers
+        - Log inputs at DEBUG level, results at INFO level
+      </description>
+      <key-code-snippets>
+        <snippet location="lines 143-154">
+          Debug logging before operation:
+          logger.debug(
+              "Storing conversation transcript in agentic-memories",
+              extra={
+                  "user_id": user_id,
+                  "url": url,
+                  "message_count": len(history)
+              }
+          )
+        </snippet>
+        <snippet location="lines 196-204">
+          Info logging after success:
+          logger.info(
+              "Conversation transcript stored successfully",
+              extra={
+                  "user_id": user_id,
+                  "memories_created": response_data.get("memories_created", 0),
+                  "duration_ms": duration_ms,
+                  "message_count": len(history)
+              }
+          )
+        </snippet>
+        <snippet location="lines 209-218">
+          Error logging with context:
+          logger.error(
+              "Memory storage timed out",
+              extra={
+                  "user_id": user_id,
+                  "url": url,
+                  "timeout": self.timeout,
+                  "duration_ms": duration_ms
+              }
+          )
+        </snippet>
+      </key-code-snippets>
+    </pattern>
+  </existing-patterns>
+
+  <api-schema>
+    <description>
+      agentic-memories Intents API v1 schema (from Epic 6 in review)
+    </description>
+
+    <endpoint>
+      <method>POST</method>
+      <path>/v1/intents</path>
+      <operation>create_intent</operation>
+      <request-body>
+        {
+          "user_id": "string",
+          "intent_name": "string",
+          "description": "string",
+          "trigger_type": "cron" | "interval" | "once" | "price" | "silence" | "portfolio",
+          "trigger_schedule": {
+            "cron": "string (optional)",
+            "interval_minutes": "int (optional)",
+            "trigger_at": "datetime (optional)",
+            "check_interval_minutes": "int (optional)",
+            "timezone": "string (optional, user's timezone)"
+          },
+          "trigger_condition": {
+            "expression": "string (e.g., 'NVDA &lt; 130')",
+            "condition_type": "price" | "portfolio" | "silence",
+            "cooldown_hours": "int (minimum hours between fires)",
+            "fire_mode": "once" | "recurring"
+          },
+          "action_type": "notify" | "check_in" | "briefing" | "analysis" | "reminder",
+          "action_context": "dict (rich LLM briefing)",
+          "action_priority": "low" | "normal" | "high" | "urgent",
+          "expires_at": "datetime (optional)",
+          "max_executions": "int (optional)",
+          "metadata": "dict (optional)"
+        }
+      </request-body>
+      <response>
+        {
+          "id": "string",
+          "user_id": "string",
+          "intent_name": "string",
+          "trigger_type": "string",
+          "next_check": "datetime",
+          "enabled": true,
+          "created_at": "datetime",
+          ...
+        }
+      </response>
+    </endpoint>
+
+    <endpoint>
+      <method>GET</method>
+      <path>/v1/intents</path>
+      <operation>list_intents</operation>
+      <query-params>
+        user_id (required), trigger_type (optional), enabled (optional)
+      </query-params>
+      <response>
+        [
+          {
+            "id": "string",
+            "user_id": "string",
+            "intent_name": "string",
+            "trigger_type": "string",
+            "next_check": "datetime",
+            "enabled": bool,
+            "fire_count": int,
+            "last_fired": "datetime"
+          }
+        ]
+      </response>
+    </endpoint>
+
+    <endpoint>
+      <method>GET</method>
+      <path>/v1/intents/{id}</path>
+      <operation>get_intent</operation>
+      <response>Full intent object</response>
+    </endpoint>
+
+    <endpoint>
+      <method>PUT</method>
+      <path>/v1/intents/{id}</path>
+      <operation>update_intent</operation>
+      <request-body>Partial update (any fields from create)</request-body>
+      <response>Updated intent object</response>
+    </endpoint>
+
+    <endpoint>
+      <method>DELETE</method>
+      <path>/v1/intents/{id}</path>
+      <operation>delete_intent</operation>
+      <response>{"success": true}</response>
+    </endpoint>
+
+    <endpoint>
+      <method>GET</method>
+      <path>/v1/intents/pending</path>
+      <operation>get_pending</operation>
+      <description>
+        Returns intents that are due for processing. Excludes already-claimed intents.
+        For condition triggers, includes in_cooldown flag in metadata.
+      </description>
+      <query-params>
+        trigger_type (optional), user_id (optional)
+      </query-params>
+      <response>
+        [
+          {
+            "id": "string",
+            "user_id": "string",
+            "trigger_type": "string",
+            "action_context": "dict",
+            "metadata": {
+              "in_cooldown": bool (for condition triggers)
+            }
+          }
+        ]
+      </response>
+    </endpoint>
+
+    <endpoint>
+      <method>POST</method>
+      <path>/v1/intents/{id}/claim</path>
+      <operation>claim_intent</operation>
+      <description>
+        Claims an intent for exclusive processing. Uses FOR UPDATE SKIP LOCKED
+        for multi-worker safety. Returns 409 Conflict if already claimed within 5 minutes.
+      </description>
+      <response>
+        {
+          "intent": {...full intent object...},
+          "claimed_at": "datetime"
+        }
+      </response>
+      <error-responses>
+        409 Conflict: Intent already claimed within 5 minutes
+      </error-responses>
+    </endpoint>
+
+    <endpoint>
+      <method>POST</method>
+      <path>/v1/intents/{id}/fire</path>
+      <operation>fire_intent</operation>
+      <description>
+        Reports execution result. Clears claimed_at, updates execution counters.
+        For condition triggers, updates last_condition_fire and returns cooldown info.
+      </description>
+      <request-body>
+        {
+          "status": "success" | "failed" | "gate_blocked" | "condition_not_met",
+          "message_id": "string (optional)",
+          "message_preview": "string (optional)",
+          "trigger_data": "dict (optional)",
+          "gate_result": "dict (optional)",
+          "evaluation_ms": "int (optional)",
+          "generation_ms": "int (optional)",
+          "delivery_ms": "int (optional)",
+          "error_message": "string (optional)"
+        }
+      </request-body>
+      <response>
+        {
+          "success": true,
+          "cooldown_active": bool,
+          "cooldown_remaining_hours": float,
+          "last_condition_fire": "datetime"
+        }
+      </response>
+    </endpoint>
+
+    <endpoint>
+      <method>GET</method>
+      <path>/v1/intents/{id}/history</path>
+      <operation>get_history</operation>
+      <description>
+        Returns execution audit trail ordered by executed_at DESC.
+        Includes timing metrics.
+      </description>
+      <query-params>
+        limit (default: 50), offset (default: 0)
+      </query-params>
+      <response>
+        [
+          {
+            "id": "string",
+            "intent_id": "string",
+            "status": "string",
+            "executed_at": "datetime",
+            "evaluation_ms": int,
+            "generation_ms": int,
+            "delivery_ms": int,
+            "message_id": "string",
+            "error_message": "string"
+          }
+        ]
+      </response>
+    </endpoint>
+  </api-schema>
+
+  <dependencies>
+    <dependency>
+      <name>httpx</name>
+      <version>&gt;=0.25.0</version>
+      <purpose>Async HTTP client</purpose>
+      <file>backend/requirements.txt</file>
+    </dependency>
+
+    <dependency>
+      <name>langfuse</name>
+      <version>==2.36.0</version>
+      <purpose>Observability and tracing</purpose>
+      <file>backend/requirements.txt</file>
+    </dependency>
+
+    <dependency>
+      <name>redis</name>
+      <version>&gt;=5.0.0</version>
+      <purpose>Circuit breaker state (if needed)</purpose>
+      <file>backend/requirements.txt</file>
+    </dependency>
+  </dependencies>
+
+  <environment-variables>
+    <variable>
+      <name>AGENTIC_MEMORIES_URL</name>
+      <required>true</required>
+      <default>http://host.docker.internal:8080</default>
+      <description>Base URL for agentic-memories service</description>
+      <config-file>backend/api/config.py</config-file>
+    </variable>
+
+    <variable>
+      <name>LOG_LEVEL</name>
+      <required>false</required>
+      <default>INFO</default>
+      <description>Logging level for client operations</description>
+    </variable>
+
+    <variable>
+      <name>LANGFUSE_PUBLIC_KEY</name>
+      <required>false</required>
+      <description>Langfuse public key for tracing</description>
+    </variable>
+
+    <variable>
+      <name>LANGFUSE_SECRET_KEY</name>
+      <required>false</required>
+      <description>Langfuse secret key for tracing</description>
+    </variable>
+  </environment-variables>
+
+  <implementation-guidance>
+    <file-to-create>
+      <path>backend/api/intents_client.py</path>
+      <description>
+        New file implementing IntentsClient class. Follow MemoryClient pattern exactly:
+
+        1. Import statements (httpx, time, Optional, Dict, Any, get_config, get_logger)
+        2. Exception classes (IntentsClientError, IntentsNetworkError, IntentsAPIError)
+        3. IntentsClient class:
+           - DEFAULT_INTENTS_URL constant
+           - DEFAULT_TIMEOUT constant (30 seconds recommended)
+           - __init__(intents_url, timeout) - load from config
+           - __aenter__, __aexit__, close() - async context manager
+           - create_intent(data: dict) -> dict
+           - list_intents(user_id: str, filters: dict = None) -> list
+           - get_intent(id: str) -> dict
+           - update_intent(id: str, data: dict) -> dict
+           - delete_intent(id: str) -> bool
+           - get_pending(trigger_type: str = None, user_id: str = None) -> list
+           - claim_intent(id: str) -> dict (handle 409 specially)
+           - fire_intent(id: str, report: dict) -> dict
+           - get_history(id: str, limit: int = 50, offset: int = 0) -> list
+           - health_check() -> bool
+
+        4. Error handling:
+           - httpx.TimeoutException -> IntentsNetworkError
+           - httpx.NetworkError, httpx.ConnectError -> IntentsNetworkError
+           - httpx.HTTPError -> IntentsNetworkError
+           - status_code != expected -> IntentsAPIError
+           - Special case: 409 Conflict on claim_intent (expected, not error)
+
+        5. Logging:
+           - DEBUG: before each operation
+           - INFO: after successful operation
+           - ERROR: on failures
+           - Always include: duration_ms, intent_id/user_id when available
+
+        6. Langfuse:
+           - @observe() decorator not needed for client methods (too granular)
+           - Client will be called from traced contexts (MemoryManager, MCP tools)
+           - Those callers will have @observe() and client calls appear as sub-spans
+      </description>
+    </file-to-create>
+
+    <file-to-modify>
+      <path>backend/api/routes/health.py</path>
+      <description>
+        Add intents client health check to /health/full endpoint.
+        Follow pattern used for agentic_memories health check.
+
+        Steps:
+        1. Import IntentsClient
+        2. Add try/except block in full health check
+        3. Call intents_client.health_check()
+        4. Add result to components dict as "intents_api"
+      </description>
+      <note>
+        health.py file may not exist yet. If it doesn't, search for health check
+        implementation in main.py or create minimal health endpoint.
+      </note>
+    </file-to-modify>
+
+    <testing-approach>
+      <description>
+        Testing strategy for IntentsClient:
+
+        1. Unit tests (pytest-asyncio):
+           - Mock httpx.AsyncClient responses
+           - Test each CRUD operation
+           - Test error handling paths
+           - Test 409 Conflict handling on claim_intent
+
+        2. Integration tests:
+           - Requires running agentic-memories service
+           - Test full CRUD lifecycle
+           - Test pending/claim/fire workflow
+           - Verify circuit breaker behavior
+
+        3. Manual testing:
+           - Use /health/full to verify connectivity
+           - Create test intent via IntentsClient
+           - List, update, delete test intent
+           - Verify Langfuse traces appear
+      </description>
+    </testing-approach>
+
+    <verification-checklist>
+      <item>All CRUD methods work against agentic-memories</item>
+      <item>Claim returns 409 Conflict when intent already claimed</item>
+      <item>Fire clears claim and updates counters</item>
+      <item>Circuit breaker activates after 5 consecutive failures</item>
+      <item>Circuit breaker auto-closes after 15 minutes</item>
+      <item>Langfuse traces appear for traced callers</item>
+      <item>Health check endpoint includes intents_api status</item>
+      <item>All exceptions include proper context (user_id, intent_id, error details)</item>
+      <item>Timeout handling works correctly</item>
+      <item>Async context manager cleanup works (no leaked connections)</item>
+    </verification-checklist>
+  </implementation-guidance>
+
+  <related-files>
+    <file>
+      <path>backend/api/memory_client.py</path>
+      <purpose>Reference implementation - copy this pattern exactly</purpose>
+    </file>
+    <file>
+      <path>backend/api/memory.py</path>
+      <purpose>Circuit breaker pattern reference</purpose>
+    </file>
+    <file>
+      <path>backend/api/config.py</path>
+      <purpose>Environment variable loading</purpose>
+    </file>
+    <file>
+      <path>backend/api/logging.py</path>
+      <purpose>Logger initialization (get_logger)</purpose>
+    </file>
+    <file>
+      <path>backend/api/observability/tracing.py</path>
+      <purpose>Langfuse integration patterns</purpose>
+    </file>
+    <file>
+      <path>docs/epics/epic-13-proactive-ai.md</path>
+      <purpose>Epic context and story details</purpose>
+    </file>
+    <file>
+      <path>docs/design/proactive-ai-architecture.md</path>
+      <purpose>Complete architecture and API design</purpose>
+    </file>
+  </related-files>
+
+  <notes>
+    <note type="important">
+      This is the foundation for Epic 13. All other stories depend on this client.
+      Follow MemoryClient pattern exactly to maintain consistency.
+    </note>
+    <note type="important">
+      The claim_intent method must handle 409 Conflict as a normal flow, not an error.
+      This happens when multiple workers try to claim the same intent - it's expected behavior.
+    </note>
+    <note type="design-decision">
+      Circuit breaker is critical for proactive worker reliability. If agentic-memories
+      goes down, we don't want workers to constantly retry and waste resources.
+    </note>
+    <note type="testing">
+      agentic-memories Epic 6 is still in review. If API changes during implementation,
+      update this client accordingly. The API is stable enough to start implementation.
+    </note>
+    <note type="performance">
+      Default timeout of 30 seconds is appropriate for intents operations (faster than
+      memory storage which involves LLM extraction). Adjust if needed based on testing.
+    </note>
+  </notes>
+</story-context>

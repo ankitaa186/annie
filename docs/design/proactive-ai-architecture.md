@@ -1526,11 +1526,12 @@ async def get_available_tools() -> List[ToolDefinition]:
 │  │                                                                      │    │
 │  │  POST   /v1/intents           - Create trigger                       │    │
 │  │  GET    /v1/intents           - List triggers                        │    │
-│  │  GET    /v1/intents/{id}      - Get trigger                          │    │
-│  │  PUT    /v1/intents/{id}      - Update trigger                       │    │
-│  │  DELETE /v1/intents/{id}      - Delete trigger                       │    │
-│  │  GET    /v1/intents/pending   - Get due triggers                     │    │
-│  │  POST   /v1/intents/{id}/fire - Report trigger execution             │    │
+│  │  GET    /v1/intents/{id}       - Get trigger                         │    │
+│  │  PUT    /v1/intents/{id}       - Update trigger                      │    │
+│  │  DELETE /v1/intents/{id}       - Delete trigger                      │    │
+│  │  GET    /v1/intents/pending    - Get due triggers (read-only)        │    │
+│  │  POST   /v1/intents/{id}/claim - Claim trigger for processing        │    │
+│  │  POST   /v1/intents/{id}/fire  - Report execution (clears claim)     │    │
 │  │                                                                      │    │
 │  └─────────────────────────────────────────────────────────────────────┘    │
 │                                                                              │
@@ -1583,34 +1584,55 @@ async def poll_scheduled_triggers(ctx):
     """Poll for due scheduled triggers. Runs every 30 seconds."""
     client = IntentsClient()
 
-    # Get triggers where next_check <= now
+    # Get triggers where next_check <= now (read-only, no side effects)
     pending = await client.get_pending(trigger_type="scheduled")
 
     for trigger in pending:
+        # Claim the trigger to prevent duplicate processing
+        claim_result = await client.claim(trigger["id"])
+        if claim_result.status == 409:
+            # Already claimed by another worker, skip
+            continue
+
         await process_trigger(trigger)
 
 async def poll_condition_triggers(ctx):
     """Evaluate condition triggers. Runs every minute."""
     client = IntentsClient()
 
-    # Get condition triggers due for evaluation
+    # Get condition triggers due for evaluation (read-only, no side effects)
     conditions = await client.get_pending(trigger_type="condition")
 
     for trigger in conditions:
+        # Skip if in cooldown (returned as flag from pending query)
+        if trigger.get("in_cooldown"):
+            continue
+
+        # Claim the trigger before evaluation
+        claim_result = await client.claim(trigger["id"])
+        if claim_result.status == 409:
+            # Already claimed by another worker, skip
+            continue
+
         # Fast evaluation (no LLM)
         condition_met = await evaluate_condition(trigger)
 
         if condition_met:
             await process_trigger(trigger)
         else:
-            # Update next_check for next evaluation
-            await client.update_next_check(
+            # Update next_check for next evaluation (also clears claim)
+            await client.fire(
                 trigger["id"],
+                status="condition_not_met",
                 next_check=now() + timedelta(minutes=trigger["condition"]["check_interval_minutes"])
             )
 
 async def process_trigger(trigger: dict):
-    """Process a fired trigger through the full pipeline."""
+    """Process a claimed trigger through the full pipeline.
+
+    IMPORTANT: Trigger must be claimed before calling this function.
+    The fire() call at the end will clear the claim.
+    """
     user_id = trigger["user_id"]
 
     # 1. Subconscious gate check
@@ -1619,7 +1641,7 @@ async def process_trigger(trigger: dict):
         await report_fire(trigger, status="gate_blocked", reason=gate_result.reason)
         return
 
-    # 2. Wake-up agent
+    # 2. Wake-up agent (LLM call)
     result = await wake_up_agent(trigger, user_id)
 
     if result.skip:
@@ -1629,7 +1651,7 @@ async def process_trigger(trigger: dict):
     # 3. Deliver message
     message_id = await deliver_to_telegram(user_id, result.message)
 
-    # 4. Report success
+    # 4. Report success (clears claim, updates next_check)
     await report_fire(
         trigger,
         status="success",
@@ -1973,6 +1995,18 @@ class WakeUpResult(BaseModel):
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
+│ CLAIM TRIGGER                                                                │
+│                                                                              │
+│ POST /v1/intents/trigger_abc123/claim                                        │
+│                                                                              │
+│ Result: 200 OK (claimed) or 409 Conflict (already claimed by other worker)   │
+│ If 409: skip to next trigger                                                 │
+│                                                                              │
+│ claimed_at: "2025-12-26T08:30:00-08:00"                                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
 │ SUBCONSCIOUS GATE CHECK                                                      │
 │                                                                              │
 │ ✓ Recent contact? No (last message 18 hours ago)                             │
@@ -2012,7 +2046,7 @@ class WakeUpResult(BaseModel):
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ FIRE REPORT                                                                  │
+│ FIRE REPORT (clears claim)                                                   │
 │                                                                              │
 │ POST /v1/intents/trigger_abc123/fire                                         │
 │ {                                                                            │
@@ -2023,6 +2057,7 @@ class WakeUpResult(BaseModel):
 │ }                                                                            │
 │                                                                              │
 │ agentic-memories updates:                                                    │
+│ - claimed_at: NULL (releases claim)                                          │
 │ - fire_count: 1                                                              │
 │ - last_fired: "2025-12-26T08:30:15-08:00"                                    │
 │ - next_check: "2025-12-27T08:30:00-08:00" (next weekday)                     │
@@ -2381,8 +2416,9 @@ yfinance>=0.2.0      # Stock price fetching (for condition evaluation)
 | `/v1/intents/{id}` | GET | Get trigger |
 | `/v1/intents/{id}` | PUT | Update trigger |
 | `/v1/intents/{id}` | DELETE | Delete trigger |
-| `/v1/intents/pending` | GET | Get due triggers |
-| `/v1/intents/{id}/fire` | POST | Report execution |
+| `/v1/intents/pending` | GET | Get due triggers (read-only) |
+| `/v1/intents/{id}/claim` | POST | Claim trigger for processing (409 if claimed) |
+| `/v1/intents/{id}/fire` | POST | Report execution (clears claim) |
 
 ---
 
@@ -2397,6 +2433,7 @@ yfinance>=0.2.0      # Stock price fetching (for condition evaluation)
 | **Creation LLM** | The LLM that creates triggers during normal chat |
 | **Wake-up LLM** | The LLM that executes triggers when they fire |
 | **Subconscious Gate** | Spam prevention layer |
+| **Claim** | Reserve a trigger for exclusive processing (prevents duplicate execution) |
 | **Fire** | When a trigger activates and sends a message |
 | **Skip** | When a trigger activates but decides not to send |
 | **Cooldown** | Minimum time between fires for condition triggers |

@@ -1017,7 +1017,40 @@ async def stream_response(conversation_id: str, request: Request):
                     }
                 )
 
-        # Build system message with user_id, profile, portfolio, and platform-specific formatting
+        # Load proactive context from Redis cache (Story 13.10 - Feedback Handler)
+        # If user is responding to a recent proactive message, include context in system prompt
+        proactive_context = None
+        if user_id:
+            try:
+                proactive_context_key = f"proactive_context:{conversation_id}"
+                proactive_context_data = await state_manager.redis_client.get(proactive_context_key)
+                if proactive_context_data:
+                    import json
+                    proactive_context = json.loads(proactive_context_data)
+                    logger.info(
+                        "Proactive context loaded for feedback handling",
+                        extra={
+                            "conversation_id": conversation_id,
+                            "user_id": user_id,
+                            "trigger_id": proactive_context.get("trigger_id"),
+                            "intent_name": proactive_context.get("trigger_details", {}).get("intent_name", "Unknown")
+                        }
+                    )
+
+                    # Clear context after loading (one-time use)
+                    await state_manager.redis_client.delete(proactive_context_key)
+
+            except Exception as e:
+                logger.warning(
+                    f"Failed to load proactive context, continuing without: {str(e)}",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "user_id": user_id,
+                        "error_type": type(e).__name__
+                    }
+                )
+
+        # Build system message with user_id, profile, portfolio, proactive_context, and platform-specific formatting
         from api.prompts import build_system_prompt
 
         system_message = build_system_prompt(
@@ -1025,7 +1058,8 @@ async def stream_response(conversation_id: str, request: Request):
             platform=platform,
             include_tool_instructions=True,
             profile=profile,
-            portfolio=portfolio
+            portfolio=portfolio,
+            proactive_context=proactive_context
         ) if user_id else None
 
         logger.debug(

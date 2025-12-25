@@ -1,10 +1,11 @@
 # Epic 13: Proactive AI Worker
 
-**Status:** Proposed
+**Status:** Ready (Pending agentic-memories Epic 6 merge)
 **Priority:** P1 (Key Differentiator)
 **Estimated Effort:** 5-6 days
 **Author:** Ankit + Claude Code
 **Date:** 2025-12-24 (Revised)
+**Updated:** Stories aligned with claims-based worker pattern
 
 ---
 
@@ -54,17 +55,25 @@ This enables handling of **novel trigger types without code changes**.
 
 | Dependency | Status | Notes |
 |------------|--------|-------|
-| **agentic-memories Epic 5** | Required | Intents API (CRUD, `/pending`, `/fire`) |
-| **agentic-memories Epic 6** | Required | API Alignment (timezone, expressions, cooldown) |
+| **agentic-memories Epic 5** | ✅ Complete | Intents API (CRUD, `/pending`, `/fire`) |
+| **agentic-memories Epic 6** | 🔄 In Review | API Alignment (timezone, expressions, cooldown, claims) |
 
-**CRITICAL**: This epic cannot start until agentic-memories Epic 5 and Epic 6 are complete.
+**STATUS UPDATE (2025-12-24):**
+- Epic 5 (Intents API) is complete
+- Epic 6 Story 6.3 (Cooldown Logic) is in review - includes claims API:
+  - `POST /v1/intents/{id}/claim` - Claims intent for processing (409 if claimed)
+  - `claimed_at` field with 5-minute timeout
+  - `FOR UPDATE SKIP LOCKED` for multi-worker safety
+  - `in_cooldown` flag returned from `/pending` endpoint
+  - `last_condition_fire` tracking for condition triggers
 
 Epic 6 adds:
 - Timezone support for user-local scheduling
 - Flexible condition expressions ("NVDA < 130", "any_holding_change > 5%")
-- Cooldown logic (minimum hours between fires)
+- Cooldown logic (minimum hours between fires) ✅ Implemented
 - Fire mode (once vs recurring for conditions)
 - Portfolio condition type
+- **Claims API for multi-worker safety** ✅ Implemented
 
 ### Internal Dependencies
 
@@ -167,10 +176,21 @@ Given IntentsClient, when CRUD methods called, then:
 - `update_intent(id, data)` → PUT `/v1/intents/{id}`
 - `delete_intent(id)` → DELETE `/v1/intents/{id}`
 
-**AC #2: Polling Operations**
+**AC #2: Polling & Worker Operations**
 Given IntentsClient, when polling methods called, then:
 - `get_pending(trigger_type)` → GET `/v1/intents/pending`
+  - Returns due intents, excludes already-claimed intents
+  - Includes `in_cooldown` flag for condition triggers
+- `claim_intent(id)` → POST `/v1/intents/{id}/claim`
+  - Claims intent for exclusive processing (prevents race conditions)
+  - Returns `IntentClaimResponse` with `intent` and `claimed_at`
+  - Returns 409 Conflict if already claimed within 5 minutes
+  - Uses `FOR UPDATE SKIP LOCKED` for multi-worker safety
 - `fire_intent(id, report)` → POST `/v1/intents/{id}/fire`
+  - Reports execution result (success/skipped/gate_blocked/error)
+  - Clears `claimed_at` (releases claim)
+  - Updates `last_condition_fire` for condition triggers
+  - Updates `fire_count` and `last_fired`
 
 **AC #3: Error Handling**
 Given network error, when any method fails, then:
@@ -463,22 +483,28 @@ Given agent execution, then enforces:
 **AC #1: Scheduled Trigger Polling**
 Given worker running, when poll interval reached (30s), then:
 - Calls `IntentsClient.get_pending(trigger_type="scheduled")`
-- Iterates through due triggers
-- Passes each to processing pipeline
+- For each due trigger:
+  1. Claims trigger via `IntentsClient.claim_intent(id)`
+  2. If 409 Conflict → Skip (already claimed by another worker)
+  3. If claimed → Pass to processing pipeline
 
 **AC #2: Condition Trigger Polling**
 Given worker running, when poll interval reached (60s), then:
 - Calls `IntentsClient.get_pending(trigger_type="condition")`
-- For each trigger: evaluates condition via evaluators
-- If condition met: passes to processing pipeline
-- If not met: updates next_check += check_interval
+- For each trigger:
+  1. Skip if `in_cooldown` flag is true
+  2. Claims trigger via `IntentsClient.claim_intent(id)`
+  3. If 409 Conflict → Skip (already claimed by another worker)
+  4. Evaluates condition via evaluators (fast, no LLM)
+  5. If condition met → Pass to processing pipeline
+  6. If not met → Call `fire_intent()` with status="condition_not_met" (clears claim, updates next_check)
 
 **AC #3: Processing Pipeline**
-Given trigger to process, executes in order:
+Given claimed trigger to process, executes in order:
 1. Subconscious gate check
 2. Wake-up agent execution
 3. Telegram delivery (if not skipped)
-4. Fire report to agentic-memories
+4. Fire report to agentic-memories (clears claim)
 
 **AC #4: Fire Reporting**
 Given trigger processed, when reporting to agentic-memories, then:

@@ -4,7 +4,7 @@ set -e
 ENVIRONMENT="${ENVIRONMENT:-production}"
 
 if [ "$ENVIRONMENT" = "dev" ]; then
-    WORKERS=2
+    WORKERS=3
     echo "🔧 Dev mode - starting uvicorn with $WORKERS workers"
 else
     WORKERS=5

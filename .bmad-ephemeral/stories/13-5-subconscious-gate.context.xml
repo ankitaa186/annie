@@ -1,0 +1,745 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <metadata>
+    <story_id>13.5</story_id>
+    <story_name>Subconscious Gate</story_name>
+    <epic_id>13</epic_id>
+    <epic_name>Proactive AI Worker</epic_name>
+    <status>ready-for-dev</status>
+    <estimated_effort>0.5 days</estimated_effort>
+    <generated_at>2025-12-24</generated_at>
+  </metadata>
+
+  <story_overview>
+    <user_story>
+      As a user, I want Annie to respect my boundaries and not spam me,
+      so that proactive messages remain helpful rather than annoying.
+    </user_story>
+
+    <description>
+      Implement a "subconscious gate" that acts as a spam prevention layer before proactive
+      messages are sent to users. The gate checks multiple conditions (recent contact, daily
+      limits, quiet hours, user preferences) and blocks messages that would be annoying or
+      inappropriate timing.
+
+      This gate is called by the wake-up worker BEFORE executing the wake-up agent, ensuring
+      that even if a trigger fires, we respect user boundaries.
+    </description>
+
+    <acceptance_criteria>
+      <criterion id="AC1">
+        <title>Recent Contact Check</title>
+        <given>User messaged recently</given>
+        <when>Gate checked</when>
+        <then>
+          - Blocks if user messaged &lt; 1 hour ago
+          - Returns GateResult(allowed=False, reason="recent_contact")
+        </then>
+      </criterion>
+
+      <criterion id="AC2">
+        <title>Daily Limit Check</title>
+        <given>Daily limit tracking</given>
+        <when>Gate checked</when>
+        <then>
+          - Tracks count in Redis: proactive:{user_id}:daily:{date}
+          - TTL: 24 hours
+          - Blocks if count &gt;= 5
+          - Returns GateResult(allowed=False, reason="daily_limit")
+        </then>
+      </criterion>
+
+      <criterion id="AC3">
+        <title>Quiet Hours Check</title>
+        <given>User timezone</given>
+        <when>Gate checked</when>
+        <then>
+          - Checks user's local time
+          - Blocks if 22:00 - 08:00
+          - Returns GateResult(allowed=False, reason="quiet_hours", defer_until=...)
+        </then>
+      </criterion>
+
+      <criterion id="AC4">
+        <title>User Opt-Out Check</title>
+        <given>User preferences</given>
+        <when>Gate checked</when>
+        <then>
+          - Checks proactive_enabled in user profile
+          - Blocks if explicitly disabled
+          - Returns GateResult(allowed=False, reason="user_opt_out")
+        </then>
+      </criterion>
+
+      <criterion id="AC5">
+        <title>Gate Result Model</title>
+        <given>Gate check complete</given>
+        <then>
+          Returns GateResult with:
+          - allowed: bool
+          - reason: Optional[str]
+          - defer_until: Optional[datetime]
+        </then>
+      </criterion>
+    </acceptance_criteria>
+  </story_overview>
+
+  <documentation_references>
+    <reference>
+      <path>docs/design/proactive-ai-architecture.md</path>
+      <section>12.1 Subconscious Gate</section>
+      <relevance>
+        Primary design documentation for this story. Defines all gate checks, limits,
+        and behavior. Shows Redis key patterns and implementation pseudocode.
+      </relevance>
+      <key_points>
+        - Recent contact: 1 hour limit
+        - Daily limit: 5 messages per day
+        - Quiet hours: 10 PM - 8 AM (user's local time)
+        - User opt-out: Check proactive_enabled flag
+        - Check order: opt-out → recent contact → daily limit → quiet hours (fail-fast)
+      </key_points>
+    </reference>
+
+    <reference>
+      <path>CLAUDE.md</path>
+      <section>Development Workflow, Redis, Python Version</section>
+      <relevance>Project conventions, Redis patterns, testing patterns</relevance>
+    </reference>
+  </documentation_references>
+
+  <existing_code_patterns>
+    <pattern>
+      <name>Redis Usage Patterns</name>
+      <location>backend/api/state.py</location>
+      <example><![CDATA[
+# Redis key patterns used in StateManager:
+# - session:{user_id} - Session data (JSON, TTL: 3600s)
+# - conversation:{conversation_id} - Message list (JSON array, TTL: 1800s)
+# - conversation_mapping:{conversation_id} - user_id reverse lookup (TTL: 1800s)
+
+# Pattern: Setting key with TTL
+await self.redis_client.setex(
+    key,
+    self.SESSION_TTL,
+    json.dumps(session)
+)
+
+# Pattern: Getting key
+session_json = await self.redis_client.get(key)
+if session_json:
+    session = json.loads(session_json)
+
+# Pattern: Error handling
+try:
+    await self.redis_client.ping()
+except (redis_exceptions.ConnectionError, redis_exceptions.TimeoutError) as e:
+    logger.error("Redis connection failed", extra={"error": str(e)})
+    raise RedisConnectionError("Redis server is unreachable", original_error=e)
+]]></example>
+      <key_takeaways>
+        - Use async redis.asyncio as redis
+        - Decode responses with decode_responses=True
+        - Always set TTL when creating keys
+        - Graceful error handling for connection errors
+        - JSON serialize/deserialize for complex data
+        - Use structured logging with extra fields
+      </key_takeaways>
+    </pattern>
+
+    <pattern>
+      <name>User Profile Access Patterns</name>
+      <location>backend/api/profile.py</location>
+      <example><![CDATA[
+# Redis key patterns for profile data:
+# - profile:{user_id} - Cached profile data (JSON, TTL: 900s = 15 min)
+# - profile_meta:{user_id} - Metadata hash (message_count, last_refresh) (TTL: 86400s = 24h)
+
+# Pattern: Loading from cache
+async def load_profile_from_cache(self, user_id: str) -> Dict[str, Any]:
+    cache_key = f"profile:{user_id}"
+    cached_data = await self.redis_client.get(cache_key)
+
+    if cached_data:
+        profile = json.loads(cached_data)
+        profile["cached"] = True
+        return profile
+    else:
+        # Return empty profile
+        return {
+            "user_id": user_id,
+            "completeness": 0,
+            "cached": False,
+            "basics": {},
+            "preferences": {},
+            # ...
+        }
+
+# Profile structure includes:
+# {
+#   "user_id": "123456",
+#   "completeness": 45,
+#   "basics": {"name": "Sarah", "timezone": "US/Pacific", ...},
+#   "preferences": {"communication_style": "direct", ...},
+#   "goals": {...},
+#   "interests": {...},
+#   "background": {...}
+# }
+]]></example>
+      <key_takeaways>
+        - Profile has timezone in basics.timezone field
+        - Use ProfileManager.load_profile_from_cache() for non-blocking reads
+        - Profile preferences can include proactive_enabled flag
+        - Graceful degradation returns empty profile on errors
+        - Cache miss returns empty profile with cached=False
+      </key_takeaways>
+    </pattern>
+
+    <pattern>
+      <name>Timezone Handling Patterns</name>
+      <location>backend/api/prompts.py</location>
+      <example><![CDATA[
+import pytz
+from datetime import datetime
+
+# Pattern: Converting to user timezone
+if basics.get("timezone"):
+    try:
+        user_tz = pytz.timezone(basics['timezone'])
+        user_time = datetime.now(user_tz).strftime("%I:%M %p")
+        basics_lines.append(f"Timezone: {basics['timezone']} (current time: {user_time})")
+    except (pytz.exceptions.UnknownTimeZoneError, ValueError, KeyError) as e:
+        logger.error(
+            f"Failed to convert timezone: {basics.get('timezone')}",
+            extra={"error": str(e), "user_id": user_id}
+        )
+        # Fallback: just show timezone name
+        basics_lines.append(f"Timezone: {basics['timezone']}")
+
+# Default timezone if not set
+pacific = pytz.timezone("US/Pacific")
+timestamp = datetime.now(pacific).isoformat()
+]]></example>
+      <key_takeaways>
+        - Use pytz for timezone conversions
+        - Handle UnknownTimeZoneError gracefully
+        - Default to US/Pacific if timezone not set
+        - Use datetime.now(tz) to get current time in timezone
+        - Log timezone conversion errors for debugging
+      </key_takeaways>
+    </pattern>
+
+    <pattern>
+      <name>Session Last Activity Tracking</name>
+      <location>backend/api/state.py</location>
+      <example><![CDATA[
+# Session structure includes last_activity timestamp
+session = {
+    "user_id": user_id,
+    "platform": platform,
+    "conversation_id": conversation_id,
+    "created_at": now,
+    "last_activity": now,  # ISO 8601 format with Z suffix
+    "message_count": 0
+}
+
+# Pattern: Updating last_activity
+async def update_session_activity(self, user_id: str) -> None:
+    session = await self.get_session(user_id)
+    if not session:
+        return
+
+    # Update timestamp
+    session["last_activity"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    session["message_count"] = session.get("message_count", 0) + 1
+
+    # Store with reset TTL
+    await self.redis_client.setex(
+        f"session:{user_id}",
+        self.SESSION_TTL,
+        json.dumps(session)
+    )
+
+# Note: last_activity is in session, NOT a separate key
+# To get last_activity, you need to read the session first
+]]></example>
+      <key_takeaways>
+        - last_activity is stored INSIDE session:{user_id} JSON
+        - Format: ISO 8601 with Z suffix (e.g., "2025-12-24T10:30:00Z")
+        - Updated every time user sends a message
+        - Parse with datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+        - Compare timestamps by converting to datetime objects
+      </key_takeaways>
+    </pattern>
+
+    <pattern>
+      <name>Dataclass Pattern for Results</name>
+      <location>backend/api/memory.py, backend/api/profile.py</location>
+      <example><![CDATA[
+from dataclasses import dataclass
+from typing import Optional
+from datetime import datetime
+
+@dataclass
+class GateResult:
+    """Result from subconscious gate check."""
+    allowed: bool
+    reason: Optional[str] = None
+    defer_until: Optional[datetime] = None
+
+# Usage:
+return GateResult(allowed=False, reason="recent_contact")
+return GateResult(allowed=True)
+return GateResult(
+    allowed=False,
+    reason="quiet_hours",
+    defer_until=datetime(2025, 12, 25, 8, 0, 0, tzinfo=user_tz)
+)
+]]></example>
+      <key_takeaways>
+        - Use dataclasses for structured return values
+        - Optional fields with defaults
+        - Type hints for all fields
+        - Clean, readable API
+      </key_takeaways>
+    </pattern>
+  </existing_code_patterns>
+
+  <redis_key_patterns>
+    <key>
+      <pattern>user:{user_id}:last_activity</pattern>
+      <type>String (ISO timestamp)</type>
+      <ttl>None (managed by session TTL)</ttl>
+      <note>
+        IMPORTANT: This is NOT a separate key. last_activity is stored INSIDE
+        the session:{user_id} JSON object. To access it, read the session and
+        parse the JSON to get the last_activity field.
+      </note>
+      <usage>
+        # Read session to get last_activity
+        session_key = f"session:{user_id}"
+        session_json = await redis.get(session_key)
+        if session_json:
+            session = json.loads(session_json)
+            last_activity_str = session.get("last_activity")
+            # Parse: "2025-12-24T10:30:00Z"
+            last_activity = datetime.fromisoformat(last_activity_str.replace('Z', '+00:00'))
+      </usage>
+    </key>
+
+    <key>
+      <pattern>proactive:{user_id}:daily:{YYYY-MM-DD}</pattern>
+      <type>String (integer counter)</type>
+      <ttl>86400 (24 hours)</ttl>
+      <purpose>Track daily proactive message count</purpose>
+      <usage>
+        # Increment on successful send (not on gate check)
+        date_key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        counter_key = f"proactive:{user_id}:daily:{date_key}"
+        count = await redis.incr(counter_key)
+        if count == 1:
+            # First increment, set TTL
+            await redis.expire(counter_key, 86400)
+
+        # Check during gate
+        current_count = await redis.get(counter_key)
+        if current_count and int(current_count) >= 5:
+            return GateResult(allowed=False, reason="daily_limit")
+      </usage>
+    </key>
+
+    <key>
+      <pattern>session:{user_id}</pattern>
+      <type>JSON string</type>
+      <ttl>3600 (1 hour)</ttl>
+      <purpose>User session data including last_activity</purpose>
+      <note>See StateManager for full structure and usage</note>
+    </key>
+
+    <key>
+      <pattern>profile:{user_id}</pattern>
+      <type>JSON string</type>
+      <ttl>900 (15 minutes)</ttl>
+      <purpose>Cached user profile including timezone and preferences</purpose>
+      <note>Use ProfileManager.load_profile_from_cache() to access</note>
+    </key>
+  </redis_key_patterns>
+
+  <testing_patterns>
+    <pattern>
+      <name>Async Unit Tests with Mocked Redis</name>
+      <location>backend/tests/unit/test_profile_manager.py</location>
+      <example><![CDATA[
+import pytest
+from unittest.mock import AsyncMock
+from datetime import datetime, timezone
+
+@pytest.fixture
+async def redis_mock():
+    """Mock Redis client."""
+    mock = AsyncMock()
+    mock.get = AsyncMock()
+    mock.setex = AsyncMock()
+    mock.incr = AsyncMock()
+    mock.expire = AsyncMock()
+    mock.close = AsyncMock()
+    return mock
+
+@pytest.fixture
+async def gate_manager(redis_mock):
+    """SubconsciousGate instance with mocked Redis."""
+    from api.proactive.gate import SubconsciousGate
+    gate = SubconsciousGate(redis_client=redis_mock)
+    return gate
+
+@pytest.mark.asyncio
+async def test_recent_contact_blocks(gate_manager, redis_mock):
+    """Test gate blocks when user messaged recently."""
+    user_id = "test_user_123"
+
+    # Mock session with recent last_activity (30 minutes ago)
+    recent_time = datetime.now(timezone.utc) - timedelta(minutes=30)
+    session = {
+        "user_id": user_id,
+        "last_activity": recent_time.isoformat().replace("+00:00", "Z")
+    }
+    redis_mock.get.return_value = json.dumps(session)
+
+    result = await gate_manager.check_gate(user_id)
+
+    assert result.allowed == False
+    assert result.reason == "recent_contact"
+    redis_mock.get.assert_called_once_with(f"session:{user_id}")
+]]></example>
+      <key_takeaways>
+        - Use @pytest.mark.asyncio for async tests
+        - Mock Redis with AsyncMock
+        - Test each gate check independently
+        - Test happy path (all checks pass)
+        - Test edge cases (timezone errors, missing profile, etc.)
+        - Verify Redis keys accessed correctly
+        - Check return value structure
+      </key_takeaways>
+    </pattern>
+
+    <pattern>
+      <name>Test Structure for Gate Checks</name>
+      <tests>
+        <test>test_recent_contact_blocks_within_hour</test>
+        <test>test_recent_contact_allows_after_hour</test>
+        <test>test_daily_limit_blocks_at_five</test>
+        <test>test_daily_limit_allows_under_five</test>
+        <test>test_quiet_hours_blocks_night</test>
+        <test>test_quiet_hours_blocks_early_morning</test>
+        <test>test_quiet_hours_allows_daytime</test>
+        <test>test_quiet_hours_calculates_defer_until</test>
+        <test>test_user_opt_out_blocks</test>
+        <test>test_user_opt_out_allows_when_enabled</test>
+        <test>test_all_checks_pass</test>
+        <test>test_fail_fast_order</test>
+        <test>test_timezone_error_graceful_fallback</test>
+        <test>test_missing_profile_graceful_handling</test>
+      </tests>
+    </pattern>
+  </testing_patterns>
+
+  <implementation_guidance>
+    <file_structure>
+      <file>backend/api/proactive/__init__.py</file>
+      <file>backend/api/proactive/gate.py</file>
+    </file_structure>
+
+    <check_order>
+      <step>1. User opt-out (fastest - single profile read)</step>
+      <step>2. Recent contact (single session read)</step>
+      <step>3. Daily limit (single Redis read)</step>
+      <step>4. Quiet hours (requires timezone calculation)</step>
+      <rationale>Fail-fast ordering from cheapest to most expensive checks</rationale>
+    </check_order>
+
+    <dataclass_definition>
+      <code><![CDATA[
+from dataclasses import dataclass
+from typing import Optional
+from datetime import datetime
+
+@dataclass
+class GateResult:
+    """Result from subconscious gate check."""
+    allowed: bool
+    reason: Optional[str] = None
+    defer_until: Optional[datetime] = None
+]]></code>
+    </dataclass_definition>
+
+    <class_structure>
+      <code><![CDATA[
+class SubconsciousGate:
+    """
+    Spam prevention gate for proactive messages.
+
+    Checks multiple conditions before allowing proactive messages:
+    1. User opt-out - Check proactive_enabled in profile
+    2. Recent contact - Block if user messaged < 1 hour ago
+    3. Daily limit - Block if >= 5 proactive messages today
+    4. Quiet hours - Block if 22:00 - 08:00 in user's timezone
+
+    Returns GateResult with allowed flag and optional reason/defer_until.
+    """
+
+    # Configuration
+    RECENT_CONTACT_HOURS = 1
+    DAILY_MESSAGE_LIMIT = 5
+    QUIET_HOURS_START = 22  # 10 PM
+    QUIET_HOURS_END = 8     # 8 AM
+
+    def __init__(self, redis_client: Optional[redis.Redis] = None):
+        """Initialize gate with Redis client."""
+        # Similar to ProfileManager init pattern
+
+    async def check_gate(self, user_id: str) -> GateResult:
+        """Main entry point - run all checks in order."""
+        # 1. Check opt-out
+        # 2. Check recent contact
+        # 3. Check daily limit
+        # 4. Check quiet hours
+        # Return first blocking result or allowed=True
+
+    async def _check_opt_out(self, user_id: str) -> Optional[GateResult]:
+        """Check if user has disabled proactive messages."""
+        # Use ProfileManager to load profile
+        # Check profile.preferences.proactive_enabled
+        # Return None if allowed, GateResult if blocked
+
+    async def _check_recent_contact(self, user_id: str) -> Optional[GateResult]:
+        """Check if user messaged within last hour."""
+        # Read session:{user_id}
+        # Parse last_activity timestamp
+        # Compare with now
+
+    async def _check_daily_limit(self, user_id: str) -> Optional[GateResult]:
+        """Check if daily message limit reached."""
+        # Read proactive:{user_id}:daily:{date}
+        # Check if count >= 5
+
+    async def _check_quiet_hours(self, user_id: str) -> Optional[GateResult]:
+        """Check if current time is in quiet hours."""
+        # Load profile for timezone
+        # Calculate user's local hour
+        # Check if 22 <= hour or hour < 8
+        # Calculate defer_until (next 8am)
+]]></code>
+    </class_structure>
+
+    <quiet_hours_defer_calculation>
+      <code><![CDATA[
+# Calculate defer_until for quiet hours
+import pytz
+from datetime import datetime, timedelta
+
+# Get user timezone (default to UTC if not set)
+user_tz = pytz.timezone(profile.get("basics", {}).get("timezone", "UTC"))
+user_now = datetime.now(user_tz)
+user_hour = user_now.hour
+
+if 22 <= user_hour or user_hour < 8:
+    # In quiet hours - calculate next 8am
+    if user_hour >= 22:
+        # After 10pm - defer to 8am tomorrow
+        next_8am = user_now.replace(hour=8, minute=0, second=0, microsecond=0)
+        next_8am += timedelta(days=1)
+    else:
+        # Before 8am - defer to 8am today
+        next_8am = user_now.replace(hour=8, minute=0, second=0, microsecond=0)
+
+    return GateResult(
+        allowed=False,
+        reason="quiet_hours",
+        defer_until=next_8am
+    )
+]]></code>
+    </quiet_hours_defer_calculation>
+
+    <daily_counter_note>
+      <important>
+        The daily counter (proactive:{user_id}:daily:{date}) should be incremented
+        ONLY on successful message send, NOT during gate check. The gate only READS
+        the counter. Incrementing happens in the wake-up worker AFTER successful delivery.
+      </important>
+      <code><![CDATA[
+# In gate.py - READ only
+current_count = await redis.get(counter_key)
+if current_count and int(current_count) >= 5:
+    return GateResult(allowed=False, reason="daily_limit")
+
+# In worker.py (Story 13.7) - INCREMENT after send
+await redis.incr(counter_key)
+await redis.expire(counter_key, 86400)  # Set TTL if first increment
+]]></code>
+    </daily_counter_note>
+
+    <logging_guidance>
+      <code><![CDATA[
+# Log gate decisions for debugging
+logger.info(
+    "Subconscious gate check",
+    extra={
+        "user_id": user_id,
+        "allowed": result.allowed,
+        "reason": result.reason,
+        "defer_until": result.defer_until.isoformat() if result.defer_until else None
+    }
+)
+
+# Log individual check failures
+logger.debug(
+    "Recent contact check blocked",
+    extra={
+        "user_id": user_id,
+        "last_activity": last_activity_str,
+        "hours_since": hours_since
+    }
+)
+]]></code>
+    </logging_guidance>
+  </implementation_guidance>
+
+  <dependencies>
+    <dependency>
+      <name>ProfileManager</name>
+      <location>backend/api/profile.py</location>
+      <usage>Load user profile for timezone and proactive_enabled preference</usage>
+    </dependency>
+
+    <dependency>
+      <name>StateManager</name>
+      <location>backend/api/state.py</location>
+      <usage>Access session data for last_activity timestamp</usage>
+    </dependency>
+
+    <dependency>
+      <name>Redis</name>
+      <package>redis.asyncio</package>
+      <usage>Access Redis for session, profile cache, and daily counters</usage>
+    </dependency>
+
+    <dependency>
+      <name>pytz</name>
+      <package>pytz</package>
+      <usage>Timezone conversions for quiet hours check</usage>
+    </dependency>
+  </dependencies>
+
+  <tasks>
+    <task id="1" status="pending">
+      <title>Create gate module structure</title>
+      <subtasks>
+        - Create backend/api/proactive/__init__.py
+        - Create backend/api/proactive/gate.py
+        - Define GateResult dataclass
+        - Create SubconsciousGate class with __init__
+      </subtasks>
+    </task>
+
+    <task id="2" status="pending">
+      <title>Implement recent contact check</title>
+      <subtasks>
+        - Read session:{user_id} from Redis
+        - Parse last_activity timestamp
+        - Calculate time since last activity
+        - Return blocked if &lt; 1 hour
+        - Handle missing session gracefully
+      </subtasks>
+    </task>
+
+    <task id="3" status="pending">
+      <title>Implement daily limit check</title>
+      <subtasks>
+        - Read proactive:{user_id}:daily:{date} counter
+        - Parse current count
+        - Return blocked if count &gt;= 5
+        - Handle missing counter (treat as 0)
+      </subtasks>
+    </task>
+
+    <task id="4" status="pending">
+      <title>Implement quiet hours check</title>
+      <subtasks>
+        - Load user profile for timezone
+        - Calculate user's local time using pytz
+        - Check if hour is 22-23 or 0-7
+        - Calculate defer_until (next 8am in user timezone)
+        - Handle timezone errors gracefully (fallback to UTC)
+      </subtasks>
+    </task>
+
+    <task id="5" status="pending">
+      <title>Implement user opt-out check</title>
+      <subtasks>
+        - Load user profile using ProfileManager
+        - Check profile.preferences.proactive_enabled
+        - Return blocked if explicitly False
+        - Allow if not set (default enabled)
+      </subtasks>
+    </task>
+
+    <task id="6" status="pending">
+      <title>Create main gate check function</title>
+      <subtasks>
+        - Implement async def check_gate(user_id: str) -> GateResult
+        - Run checks in fail-fast order (opt-out → recent → daily → quiet)
+        - Return first blocking result
+        - Return allowed=True if all pass
+        - Add comprehensive logging
+      </subtasks>
+    </task>
+
+    <task id="7" status="pending">
+      <title>Write unit tests</title>
+      <subtasks>
+        - Test each gate check independently
+        - Test all checks passing
+        - Test fail-fast ordering
+        - Test timezone error handling
+        - Test missing profile/session handling
+        - Test defer_until calculation for quiet hours
+      </subtasks>
+    </task>
+  </tasks>
+
+  <verification_checklist>
+    <item>Gate blocks when user messaged &lt; 1 hour ago</item>
+    <item>Gate blocks after 5 proactive messages per day</item>
+    <item>Gate blocks during quiet hours (10pm - 8am local)</item>
+    <item>Gate blocks when user has opted out</item>
+    <item>Gate allows when all checks pass</item>
+    <item>defer_until correctly calculated for quiet hours</item>
+    <item>Timezone errors handled gracefully (fallback to UTC)</item>
+    <item>Missing profile handled gracefully (return allowed by default)</item>
+    <item>Missing session handled gracefully (no last_activity = allow)</item>
+    <item>Logging provides sufficient debugging info</item>
+    <item>All unit tests pass</item>
+  </verification_checklist>
+
+  <notes>
+    <note>
+      The daily counter increment happens in Story 13.7 (Arq Background Worker),
+      not in this story. This story only READS the counter during gate checks.
+    </note>
+
+    <note>
+      Default behavior is permissive: if profile/session/counter is missing,
+      we ALLOW the message (fail open). Only explicit blocks should prevent sending.
+    </note>
+
+    <note>
+      The defer_until field in GateResult is only populated for quiet_hours reason.
+      Other blocking reasons return None for defer_until.
+    </note>
+
+    <note>
+      Timezone handling should be defensive: catch all timezone-related exceptions
+      and fall back to UTC if user timezone is invalid or missing.
+    </note>
+  </notes>
+</story-context>
