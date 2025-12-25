@@ -152,7 +152,7 @@ async def test_gate_blocks_when_opted_out(mock_redis, sample_trigger):
 
 @pytest.mark.asyncio
 async def test_gate_blocks_recent_contact(mock_redis, sample_trigger):
-    """Test gate blocks when user contacted less than 1 hour ago."""
+    """Test gate blocks when user contacted within RECENT_CONTACT_MINUTES window."""
     with patch('api.proactive.gate.ProfileManager') as mock_pm_class:
         mock_pm = AsyncMock()
         mock_pm.load_profile_from_cache = AsyncMock(return_value={
@@ -161,8 +161,8 @@ async def test_gate_blocks_recent_contact(mock_redis, sample_trigger):
         })
         mock_pm_class.return_value = mock_pm
 
-        # User contacted 30 minutes ago
-        last_activity = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
+        # User contacted 30 seconds ago (within 1-minute RECENT_CONTACT_MINUTES window)
+        last_activity = (datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat()
         mock_redis.get = AsyncMock(return_value=json.dumps({
             "last_activity": last_activity
         }))
@@ -241,11 +241,8 @@ async def test_gate_blocks_daily_limit_reached(mock_redis, sample_trigger):
         })
         mock_pm_class.return_value = mock_pm
 
-        # No recent contact, but at daily limit
-        mock_redis.get = AsyncMock(side_effect=[
-            None,  # session (no recent contact)
-            "5"    # daily counter at limit
-        ])
+        # At daily limit (DAILY_MESSAGE_LIMIT = 10)
+        mock_redis.get = AsyncMock(return_value="10")
 
         gate = SubconsciousGate(redis_client=mock_redis)
         gate.profile_manager = mock_pm
