@@ -5,6 +5,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    image: annie-backend  # Named image for sharing with proactive-worker
     container_name: annie-backend
     ports:
       - "${BACKEND_PORT:-8001}:8000"
@@ -122,9 +123,7 @@ services:
     restart: unless-stopped
 
   proactive-worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: annie-backend  # Share image with backend, different entrypoint
     container_name: annie-proactive-worker
     command: ["python", "-m", "arq", "api.proactive.worker.WorkerSettings"]
     environment:
