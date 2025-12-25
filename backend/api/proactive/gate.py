@@ -6,7 +6,7 @@ proactive messages to be sent to users.
 
 Gate Checks (in fail-fast order):
 1. User opt-out - Check proactive_enabled preference
-2. Recent contact - Block if user messaged < 1 hour ago
+2. Recent contact - Block if user messaged < N minutes ago (configurable)
 3. Daily limit - Block if >= 5 proactive messages today
 4. Quiet hours - Block if 22:00 - 08:00 in user's timezone
 
@@ -73,7 +73,7 @@ class SubconsciousGate:
 
     Checks multiple conditions before allowing proactive messages:
     1. User opt-out - Check proactive_enabled in profile
-    2. Recent contact - Block if user messaged < 1 hour ago
+    2. Recent contact - Block if user messaged < N minutes ago (configurable)
     3. Daily limit - Block if >= 5 proactive messages today
     4. Quiet hours - Block if 22:00 - 08:00 in user's timezone
 
@@ -91,7 +91,7 @@ class SubconsciousGate:
     """
 
     # Configuration
-    RECENT_CONTACT_HOURS = 1
+    RECENT_CONTACT_MINUTES = 15  # Block if user messaged within last N minutes
     DAILY_MESSAGE_LIMIT = 5
     QUIET_HOURS_START = 22  # 10 PM
     QUIET_HOURS_END = 8     # 8 AM
@@ -285,7 +285,7 @@ class SubconsciousGate:
 
     async def _check_recent_contact(self, user_id: str) -> Optional[GateResult]:
         """
-        Check if user messaged within the last hour.
+        Check if user messaged within the recent contact window.
 
         Args:
             user_id: User identifier
@@ -323,15 +323,16 @@ class SubconsciousGate:
             now = datetime.now(timezone.utc)
             time_since = now - last_activity
 
-            # Check if less than 1 hour ago
-            if time_since < timedelta(hours=self.RECENT_CONTACT_HOURS):
-                hours_since = time_since.total_seconds() / 3600
+            # Check if within recent contact window
+            if time_since < timedelta(minutes=self.RECENT_CONTACT_MINUTES):
+                minutes_since = time_since.total_seconds() / 60
                 logger.debug(
                     "Recent contact detected - blocking",
                     extra={
                         "user_id": user_id,
                         "last_activity": last_activity_str,
-                        "hours_since": round(hours_since, 2),
+                        "minutes_since": round(minutes_since, 1),
+                        "threshold_minutes": self.RECENT_CONTACT_MINUTES,
                     }
                 )
                 return GateResult(allowed=False, reason="recent_contact")
