@@ -39,7 +39,7 @@ class GeminiProvider(BaseProvider):
     DEFAULT_MODEL = "gemini-3-pro-preview"
 
     # Supported Gemini models
-    SUPPORTED_MODELS = ["gemini-3-pro-preview", "gemini-2.5-pro", "gemini-2.0-flash"]
+    SUPPORTED_MODELS = ["gemini-3-pro-preview", "gemini-3-flash-preview", "gemini-2.5-pro"]
 
     # Safety filter user-friendly messages
     SAFETY_MESSAGES = {

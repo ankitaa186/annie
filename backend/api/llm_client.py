@@ -87,7 +87,7 @@ class LLMClient:
             "chatgpt-5": bool(chatgpt_api_key and chatgpt_api_key != "REPLACE_ME"),
             "gemini-3-pro-preview": bool(gemini_api_key and gemini_api_key != "REPLACE_ME"),  # Story 9.2
             "gemini-3-flash-preview": bool(gemini_api_key and gemini_api_key != "REPLACE_ME"),  # Fallback for Gemini 3 Pro
-            "gemini-2.5-pro": bool(gemini_api_key and gemini_api_key != "REPLACE_ME")  # Legacy fallback
+            "gemini-2.5-pro": bool(gemini_api_key and gemini_api_key != "REPLACE_ME")  # Legacy
         }
 
         # Instantiate provider based on configuration
@@ -302,7 +302,7 @@ class LLMClient:
             elif fallback_name == "chatgpt-5":
                 fallback_provider = ChatGPTProvider()
             elif fallback_name == "gemini-3-flash-preview":
-                fallback_provider = GeminiProvider(model_override="gemini-2.0-flash")
+                fallback_provider = GeminiProvider(model_override="gemini-3-flash-preview")
             elif fallback_name == "gemini-2.5-pro":
                 fallback_provider = GeminiProvider(model_override="gemini-2.5-pro")
             elif fallback_name == "gemini-3-pro-preview":
