@@ -284,6 +284,16 @@ class MCPClient:
                 }
             )
 
+            # Debug: Log full request payload
+            logger.debug(
+                "MCP tool request payload",
+                extra={
+                    "tool_name": tool_name,
+                    "request_id": request_id,
+                    "full_request": json_rpc_request
+                }
+            )
+
             # Emit status: Tool call start
             emit_status(f"Calling {tool_name}...", icon="🔧")
 
@@ -374,6 +384,16 @@ class MCPClient:
                     "request_id": request_id,
                     "duration_ms": duration_ms,
                     "success": True
+                }
+            )
+
+            # Debug: Log full response payload
+            logger.debug(
+                "MCP tool response payload",
+                extra={
+                    "tool_name": tool_name,
+                    "request_id": request_id,
+                    "full_response": tool_result
                 }
             )
 

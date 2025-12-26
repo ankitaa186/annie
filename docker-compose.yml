@@ -5,6 +5,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    image: annie-backend  # Named image for sharing with proactive-worker
     container_name: annie-backend
     ports:
       - "${BACKEND_PORT:-8001}:8000"
@@ -117,6 +118,43 @@ services:
       start_period: 30s
     volumes:
       - ./telegram_bot:/app/telegram_bot
+    networks:
+      - annie-network
+    restart: unless-stopped
+
+  proactive-worker:
+    image: annie-backend  # Share image with backend, different entrypoint
+    container_name: annie-proactive-worker
+    command: ["python", "-m", "arq", "api.proactive.worker.WorkerSettings"]
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENVIRONMENT=${ENVIRONMENT:-dev}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - AGENTIC_MEMORIES_URL=${AGENTIC_MEMORIES_URL}
+      - LLM_PROVIDER=${LLM_PROVIDER:-grok-4}
+      - GROK_API_KEY=${GROK_API_KEY}
+      - CHATGPT_API_KEY=${CHATGPT_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY}
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-https://us.cloud.langfuse.com}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "healthcheck_worker.py"]
+      interval: 240s
+      timeout: 90s
+      retries: 5
+      start_period: 120s  # Allow time for first poll cycle
+    volumes:
+      - ./backend:/app
     networks:
       - annie-network
     restart: unless-stopped

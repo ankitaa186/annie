@@ -304,6 +304,104 @@ class ProfileManager:
             )
             # Don't raise - this is a background task, failures should not block
 
+    @observe(name="profile_fetch_fresh", as_type="span")
+    async def fetch_profile_fresh(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Fetch fresh profile from agentic-memories and return it.
+
+        Unlike refresh_profile_background() which only updates cache,
+        this method fetches fresh profile, updates cache, AND returns the profile.
+        Designed for proactive agent context where fresh data is critical.
+
+        Falls back to cached profile if MCP call fails.
+
+        Args:
+            user_id: User identifier
+
+        Returns:
+            Profile dict if successful, cached profile if MCP fails, None if both fail
+        """
+        start_time = time.time()
+
+        try:
+            logger.info(
+                "Fetching fresh profile via MCP",
+                extra={"user_id": user_id}
+            )
+
+            # Call get_user_profile MCP tool
+            async with MCPClient() as mcp_client:
+                result = await mcp_client.call_tool(
+                    "get_user_profile",
+                    {"user_id": user_id}
+                )
+
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            # Check if tool call succeeded
+            if result.get("status") == "success":
+                # Build profile object
+                profile = {
+                    "user_id": user_id,
+                    "completeness_pct": result.get("completeness_pct", 0),
+                    "basics": result.get("basics", {}),
+                    "preferences": result.get("preferences", {}),
+                    "goals": result.get("goals", {}),
+                    "interests": result.get("interests", {}),
+                    "background": result.get("background", {})
+                }
+
+                # Update cache with fresh data
+                cache_key = f"profile:{user_id}"
+                await self.redis_client.setex(
+                    cache_key,
+                    self.PROFILE_CACHE_TTL,
+                    json.dumps(profile)
+                )
+
+                # Update metadata (last_refresh timestamp)
+                await self._update_last_refresh(user_id)
+
+                logger.info(
+                    "Fresh profile fetched successfully",
+                    extra={
+                        "user_id": user_id,
+                        "completeness_pct": profile["completeness_pct"],
+                        "duration_ms": duration_ms
+                    }
+                )
+
+                return profile
+
+            else:
+                # Tool call failed - fall back to cache
+                error_msg = result.get("error", "Unknown error")
+                logger.warning(
+                    f"Fresh profile fetch failed - falling back to cache: {error_msg}",
+                    extra={
+                        "user_id": user_id,
+                        "duration_ms": duration_ms,
+                        "error": error_msg
+                    }
+                )
+                return await self.load_profile_from_cache(user_id)
+
+        except Exception as e:
+            duration_ms = int((time.time() - start_time) * 1000)
+            logger.warning(
+                f"Fresh profile fetch failed - falling back to cache: {str(e)}",
+                extra={
+                    "user_id": user_id,
+                    "duration_ms": duration_ms,
+                    "error_type": type(e).__name__
+                }
+            )
+            # Fall back to cached profile
+            try:
+                return await self.load_profile_from_cache(user_id)
+            except Exception:
+                return None
+
     async def check_refresh_triggers(self, user_id: str, message_count: Optional[int] = None) -> bool:
         """
         Check if profile refresh should be triggered.

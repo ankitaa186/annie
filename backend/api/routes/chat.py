@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from api.logging import get_logger
 from api.memory import MemoryManager
 from api.mcp_client import MCPClient, MCPClientError, MCPNetworkError, MCPToolError
+from api.proactive.activity_tracker import ActivityTracker
 from api.profile import ProfileManager
 from api.state import StateManager, StateError
 from api.status import emit_status
@@ -346,6 +347,63 @@ async def create_chat(request: ChatRequest, background_tasks: BackgroundTasks):
                 "content": request.message
             }
             await state.add_message(conversation_id, user_message)
+
+            # Update user activity timestamp (non-blocking, fire-and-forget)
+            try:
+                tracker = ActivityTracker(redis_client=state.redis_client)
+                await tracker.record_activity(request.user_id)
+            except Exception as e:
+                # Fire-and-forget: log error but don't fail chat flow
+                logger.warning(
+                    f"Failed to update user activity: {str(e)}",
+                    extra={
+                        "user_id": request.user_id,
+                        "error_type": type(e).__name__
+                    }
+                )
+
+            # Check for proactive feedback context (Story 13.10)
+            # If user is responding to a recent proactive message, store context for streaming endpoint
+            try:
+                from api.proactive.feedback import get_proactive_context
+
+                proactive_context = await get_proactive_context(
+                    request.user_id,
+                    state.redis_client
+                )
+
+                if proactive_context:
+                    # Store proactive context in Redis for streaming endpoint
+                    # Similar to memory_context and profile_cache patterns
+                    proactive_context_key = f"proactive_context:{conversation_id}"
+                    await state.redis_client.setex(
+                        proactive_context_key,
+                        300,  # 5 minutes TTL (same as other context caches)
+                        json.dumps(proactive_context)
+                    )
+
+                    logger.info(
+                        "Proactive feedback context detected and stored",
+                        extra={
+                            "user_id": request.user_id,
+                            "conversation_id": conversation_id,
+                            "trigger_id": proactive_context.get("trigger_id"),
+                            "intent_name": proactive_context.get("trigger_details", {}).get("intent_name", "Unknown"),
+                            "time_since_message_seconds": proactive_context.get("time_since_message_seconds")
+                        }
+                    )
+
+            except Exception as e:
+                # Fire-and-forget: log error but don't fail chat flow
+                # Graceful degradation - feedback detection is optional
+                logger.warning(
+                    f"Failed to detect proactive feedback context: {str(e)}",
+                    extra={
+                        "user_id": request.user_id,
+                        "conversation_id": conversation_id,
+                        "error_type": type(e).__name__
+                    }
+                )
 
             # Load and manage user profile (non-blocking)
             try:

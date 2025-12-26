@@ -1,0 +1,599 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <metadata>
+    <story-id>13-8-user-activity-tracking</story-id>
+    <story-title>User Activity Tracking</story-title>
+    <epic>Epic 13 - Proactive AI Worker</epic>
+    <status>drafted</status>
+    <estimated-effort>0.25 days</estimated-effort>
+    <dependencies>
+      <dependency>Redis (existing infrastructure)</dependency>
+      <dependency>StateManager (backend/api/state.py)</dependency>
+      <dependency>Chat endpoint (backend/api/routes/chat.py)</dependency>
+    </dependencies>
+    <context-generated>2025-12-24</context-generated>
+  </metadata>
+
+  <user-story>
+    <as-a>system</as-a>
+    <i-want>to track user activity timestamps</i-want>
+    <so-that>silence detection and gate checks work correctly</so-that>
+  </user-story>
+
+  <acceptance-criteria>
+    <criterion id="AC1">
+      <title>Activity Update on Message</title>
+      <given>user sends message</given>
+      <when>chat endpoint processes</when>
+      <then>
+        - Updates Redis: `user:{user_id}:last_activity`
+        - Value: ISO timestamp
+        - TTL: 7 days
+      </then>
+    </criterion>
+    <criterion id="AC2">
+      <title>Activity Retrieval</title>
+      <given>activity check needed</given>
+      <when>queried</when>
+      <then>
+        - Returns last activity timestamp
+        - Handles missing key (new user) gracefully
+        - Returns None for users with no history
+      </then>
+    </criterion>
+    <criterion id="AC3">
+      <title>Integration with Gate</title>
+      <given>subconscious gate check</given>
+      <then>uses activity for:
+        - Recent contact check (less than 1 hour)
+        - Can be extended for other checks
+      </then>
+    </criterion>
+  </acceptance-criteria>
+
+  <tasks>
+    <task id="1" status="pending">
+      <title>Create activity module</title>
+      <description>Create `backend/api/proactive/activity.py` with activity tracking functions</description>
+      <subtasks>
+        <subtask>Create backend/api/proactive directory (if not exists)</subtask>
+        <subtask>Create backend/api/proactive/__init__.py</subtask>
+        <subtask>Create backend/api/proactive/activity.py with module structure</subtask>
+        <subtask>Define activity tracking functions</subtask>
+      </subtasks>
+    </task>
+    <task id="2" status="pending">
+      <title>Implement activity update</title>
+      <description>Create update_activity(user_id: str) function</description>
+      <subtasks>
+        <subtask>Create function signature: update_activity(user_id: str) -> None</subtask>
+        <subtask>Get Redis client from StateManager or via dependency injection</subtask>
+        <subtask>Generate ISO timestamp (UTC, Z-suffix format)</subtask>
+        <subtask>Store timestamp in Redis with key pattern: user:{user_id}:last_activity</subtask>
+        <subtask>Set 7-day TTL (604800 seconds)</subtask>
+        <subtask>Add logging for successful update</subtask>
+        <subtask>Add error handling with graceful degradation</subtask>
+      </subtasks>
+    </task>
+    <task id="3" status="pending">
+      <title>Implement activity retrieval</title>
+      <description>Create get_last_activity(user_id: str) function</description>
+      <subtasks>
+        <subtask>Create function signature: get_last_activity(user_id: str) -> Optional[datetime]</subtask>
+        <subtask>Get Redis client from StateManager or via dependency injection</subtask>
+        <subtask>Retrieve value from Redis key: user:{user_id}:last_activity</subtask>
+        <subtask>Handle missing keys (return None for new users)</subtask>
+        <subtask>Parse ISO timestamp string to datetime object</subtask>
+        <subtask>Add logging for successful retrieval</subtask>
+        <subtask>Add error handling with graceful degradation</subtask>
+      </subtasks>
+    </task>
+    <task id="4" status="pending">
+      <title>Integrate with chat endpoint</title>
+      <description>Add activity update call to backend/api/routes/chat.py</description>
+      <subtasks>
+        <subtask>Import activity module in chat.py</subtask>
+        <subtask>Identify insertion point (after successful message processing)</subtask>
+        <subtask>Call update_activity(request.user_id) non-blocking (fire-and-forget)</subtask>
+        <subtask>Add try-except to prevent activity tracking from breaking chat flow</subtask>
+        <subtask>Add logging for activity tracking calls</subtask>
+      </subtasks>
+    </task>
+  </tasks>
+
+  <technical-context>
+    <redis-patterns>
+      <pattern>
+        <name>Activity Tracking Key Pattern</name>
+        <key-format>user:{user_id}:last_activity</key-format>
+        <value-format>ISO timestamp string (e.g., "2025-12-24T10:30:00Z")</value-format>
+        <ttl>7 days (604800 seconds)</ttl>
+        <example>
+          Key: user:123456:last_activity
+          Value: "2025-12-24T10:30:00Z"
+          TTL: 604800
+        </example>
+      </pattern>
+    </redis-patterns>
+
+    <redis-client-access>
+      <description>
+        Redis client is accessed through StateManager context manager.
+        StateManager provides self.redis_client for direct Redis operations.
+      </description>
+      <pattern-1>
+        <name>StateManager Context (Recommended for new operations)</name>
+        <code><![CDATA[
+from api.state import StateManager
+
+async with StateManager() as state:
+    # Access Redis client
+    await state.redis_client.setex(
+        "key_name",
+        ttl_seconds,
+        value
+    )
+    result = await state.redis_client.get("key_name")
+        ]]></code>
+      </pattern-1>
+      <pattern-2>
+        <name>Dependency Injection (For utility functions)</name>
+        <code><![CDATA[
+import redis.asyncio as redis
+from api.config import get_config
+
+async def update_activity(user_id: str, redis_client: Optional[redis.Redis] = None) -> None:
+    """Update user activity timestamp.
+
+    Args:
+        user_id: User identifier
+        redis_client: Optional Redis client. If not provided, creates new connection.
+    """
+    should_close = False
+    if redis_client is None:
+        config = get_config()
+        redis_host = config.get("REDIS_HOST", "redis")
+        redis_port = int(config.get("REDIS_PORT", 6379))
+        redis_client = redis.Redis(
+            host=redis_host,
+            port=redis_port,
+            decode_responses=True
+        )
+        should_close = True
+
+    try:
+        # Use redis_client here
+        key = f"user:{user_id}:last_activity"
+        timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        await redis_client.setex(key, 604800, timestamp)
+    finally:
+        if should_close:
+            await redis_client.close()
+        ]]></code>
+      </pattern-2>
+      <existing-examples>
+        <example>
+          <file>backend/api/state.py</file>
+          <location>Line 86-120: StateManager.__init__() creates Redis client</location>
+          <location>Line 256-269: create_session() uses self.redis_client.setex()</location>
+          <location>Line 326-349: get_session() uses self.redis_client.get()</location>
+        </example>
+        <example>
+          <file>backend/api/profile.py</file>
+          <location>Line 79-100: ProfileManager.__init__() accepts optional redis_client</location>
+          <location>Line 94-98: Creates Redis connection if not provided</location>
+        </example>
+      </existing-examples>
+    </redis-client-access>
+
+    <chat-endpoint-integration>
+      <file>backend/api/routes/chat.py</file>
+      <current-flow>
+        1. Validate request (line 277-287)
+        2. Create/get session with StateManager (line 305-329)
+        3. Store user message (line 344-348)
+        4. Load and manage profile (line 351-423)
+        5. Retrieve memory context if needed (line 424-527)
+        6. Build stream URL (line 529)
+        7. Trigger background memory storage (line 531-549)
+        8. Return ChatResponse (line 573-578)
+      </current-flow>
+      <insertion-point>
+        <location>After line 348 (after storing user message)</location>
+        <reason>Activity should be tracked after message is successfully stored but before other processing</reason>
+        <code-snippet><![CDATA[
+# Store user message in conversation history
+user_message = {
+    "role": "user",
+    "content": request.message
+}
+await state.add_message(conversation_id, user_message)
+
+# *** INSERT ACTIVITY TRACKING HERE ***
+# Update user activity timestamp (non-blocking)
+try:
+    from api.proactive.activity import update_activity
+    await update_activity(request.user_id, state.redis_client)
+except Exception as e:
+    # Fire-and-forget: log error but don't fail chat flow
+    logger.warning(
+        f"Failed to update user activity: {str(e)}",
+        extra={"user_id": request.user_id}
+    )
+
+# Load and manage user profile (non-blocking)
+try:
+    profile_manager = ProfileManager(redis_client=state.redis_client)
+    ...
+        ]]></code-snippet>
+      </insertion-point>
+      <best-practices>
+        <practice>Use try-except to prevent activity tracking from breaking chat flow</practice>
+        <practice>Use fire-and-forget pattern (log errors but continue)</practice>
+        <practice>Pass state.redis_client to avoid creating new connection</practice>
+        <practice>Keep activity tracking simple and fast (single Redis write)</practice>
+        <practice>Add logging at INFO level for successful updates</practice>
+        <practice>Add logging at WARNING level for failures</practice>
+      </best-practices>
+    </chat-endpoint-integration>
+
+    <timestamp-format>
+      <format>ISO 8601 with UTC timezone and Z suffix</format>
+      <example>2025-12-24T10:30:00Z</example>
+      <generation-code><![CDATA[
+from datetime import datetime, timezone
+
+timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+# Result: "2025-12-24T10:30:00Z"
+      ]]></generation-code>
+      <parsing-code><![CDATA[
+from datetime import datetime
+
+timestamp_str = "2025-12-24T10:30:00Z"
+dt = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+# Result: datetime object with UTC timezone
+      ]]></parsing-code>
+      <consistency>
+        This format matches existing patterns in:
+        - StateManager session timestamps (state.py line 235, 407)
+        - StateManager message timestamps (state.py line 485)
+        - ChatResponse timestamp (chat.py line 577)
+      </consistency>
+    </timestamp-format>
+
+    <module-structure>
+      <file>backend/api/proactive/activity.py</file>
+      <template><![CDATA[
+"""
+Activity Tracking Module
+
+Tracks user activity timestamps for silence detection and gate checks.
+
+Redis Key Patterns:
+- user:{user_id}:last_activity -> ISO timestamp (TTL: 7 days)
+"""
+
+from datetime import datetime, timezone
+from typing import Optional
+import redis.asyncio as redis
+from redis import exceptions as redis_exceptions
+
+from api.config import get_config
+from api.logging import get_logger
+
+logger = get_logger(__name__)
+
+# TTL for activity tracking: 7 days in seconds
+ACTIVITY_TTL = 604800
+
+
+async def update_activity(user_id: str, redis_client: redis.Redis) -> None:
+    """
+    Update user activity timestamp.
+
+    Stores ISO timestamp in Redis with 7-day TTL.
+    Non-blocking, fire-and-forget operation.
+
+    Args:
+        user_id: User identifier
+        redis_client: Redis client from StateManager
+
+    Example:
+        async with StateManager() as state:
+            await update_activity("123456", state.redis_client)
+    """
+    # Implementation here
+
+
+async def get_last_activity(user_id: str, redis_client: redis.Redis) -> Optional[datetime]:
+    """
+    Get last activity timestamp for user.
+
+    Returns datetime object or None if no activity found.
+    Handles missing keys gracefully (returns None for new users).
+
+    Args:
+        user_id: User identifier
+        redis_client: Redis client from StateManager
+
+    Returns:
+        datetime object with UTC timezone, or None if not found
+
+    Example:
+        async with StateManager() as state:
+            last_active = await get_last_activity("123456", state.redis_client)
+            if last_active:
+                print(f"Last active: {last_active.isoformat()}")
+    """
+    # Implementation here
+      ]]></template>
+    </module-structure>
+
+    <error-handling>
+      <pattern>Graceful Degradation</pattern>
+      <description>
+        Activity tracking is non-critical. Failures should be logged but not propagate.
+        Use try-except with fire-and-forget pattern.
+      </description>
+      <example><![CDATA[
+try:
+    await update_activity(user_id, redis_client)
+    logger.info(
+        "User activity updated",
+        extra={"user_id": user_id}
+    )
+except redis_exceptions.ConnectionError as e:
+    logger.warning(
+        f"Failed to update activity (Redis unavailable): {str(e)}",
+        extra={"user_id": user_id}
+    )
+except Exception as e:
+    logger.error(
+        f"Unexpected error updating activity: {str(e)}",
+        extra={"user_id": user_id},
+        exc_info=True
+    )
+      ]]></example>
+    </error-handling>
+
+    <logging-standards>
+      <level>INFO</level>
+      <description>Log successful activity updates at INFO level</description>
+      <example><![CDATA[
+logger.info(
+    "User activity updated",
+    extra={
+        "user_id": user_id,
+        "timestamp": timestamp,
+        "key": key
+    }
+)
+      ]]></example>
+      <level>WARNING</level>
+      <description>Log failures at WARNING level (non-critical)</description>
+      <example><![CDATA[
+logger.warning(
+    f"Failed to update user activity: {str(e)}",
+    extra={
+        "user_id": user_id,
+        "error_type": type(e).__name__
+    }
+)
+      ]]></example>
+    </logging-standards>
+  </technical-context>
+
+  <testing-guidance>
+    <test-file>backend/tests/unit/test_activity_tracking.py</test-file>
+    <test-patterns>
+      <pattern name="Mock Redis Client">
+        <description>Use AsyncMock for Redis client in unit tests</description>
+        <example-file>backend/tests/unit/test_profile_manager.py</example-file>
+        <example-location>Lines 16-30: redis_mock fixture</example-location>
+        <code><![CDATA[
+import pytest
+from unittest.mock import AsyncMock
+
+@pytest.fixture
+async def redis_mock():
+    """Mock Redis client."""
+    mock = AsyncMock()
+    mock.get = AsyncMock()
+    mock.setex = AsyncMock()
+    mock.close = AsyncMock()
+    return mock
+        ]]></code>
+      </pattern>
+      <pattern name="Test Activity Update">
+        <description>Test successful activity update with correct TTL</description>
+        <code><![CDATA[
+@pytest.mark.asyncio
+async def test_update_activity_success(redis_mock):
+    """Test successful activity update."""
+    user_id = "test_user_123"
+
+    await update_activity(user_id, redis_mock)
+
+    # Verify Redis setex was called
+    redis_mock.setex.assert_called_once()
+    call_args = redis_mock.setex.call_args[0]
+
+    # Check key format
+    assert call_args[0] == f"user:{user_id}:last_activity"
+
+    # Check TTL (7 days = 604800 seconds)
+    assert call_args[1] == 604800
+
+    # Check timestamp format (ISO with Z suffix)
+    timestamp = call_args[2]
+    assert timestamp.endswith("Z")
+    assert "T" in timestamp
+        ]]></code>
+      </pattern>
+      <pattern name="Test Activity Retrieval">
+        <description>Test retrieving activity timestamp</description>
+        <code><![CDATA[
+@pytest.mark.asyncio
+async def test_get_last_activity_found(redis_mock):
+    """Test retrieving existing activity timestamp."""
+    user_id = "test_user_123"
+    stored_timestamp = "2025-12-24T10:30:00Z"
+
+    redis_mock.get.return_value = stored_timestamp
+
+    result = await get_last_activity(user_id, redis_mock)
+
+    # Verify result is datetime object
+    assert isinstance(result, datetime)
+
+    # Verify timezone is UTC
+    assert result.tzinfo == timezone.utc
+
+    # Verify Redis get was called with correct key
+    redis_mock.get.assert_called_once_with(f"user:{user_id}:last_activity")
+        ]]></code>
+      </pattern>
+      <pattern name="Test Missing Activity">
+        <description>Test graceful handling of missing activity</description>
+        <code><![CDATA[
+@pytest.mark.asyncio
+async def test_get_last_activity_not_found(redis_mock):
+    """Test handling of missing activity (new user)."""
+    user_id = "new_user_123"
+
+    redis_mock.get.return_value = None
+
+    result = await get_last_activity(user_id, redis_mock)
+
+    # Should return None for new users
+    assert result is None
+        ]]></code>
+      </pattern>
+      <pattern name="Test Error Handling">
+        <description>Test graceful degradation on Redis errors</description>
+        <code><![CDATA[
+@pytest.mark.asyncio
+async def test_update_activity_redis_error(redis_mock):
+    """Test graceful degradation on Redis connection error."""
+    user_id = "test_user_123"
+
+    import redis.asyncio as redis_lib
+    redis_mock.setex.side_effect = redis_lib.RedisError("Connection failed")
+
+    # Should not raise exception
+    await update_activity(user_id, redis_mock)
+
+    # Verify it attempted the operation
+    redis_mock.setex.assert_called_once()
+        ]]></code>
+      </pattern>
+    </test-patterns>
+    <test-coverage>
+      <requirement>Test successful activity update</requirement>
+      <requirement>Test activity retrieval (found)</requirement>
+      <requirement>Test activity retrieval (not found)</requirement>
+      <requirement>Test timestamp format validation</requirement>
+      <requirement>Test TTL is set correctly (7 days)</requirement>
+      <requirement>Test Redis connection errors (graceful degradation)</requirement>
+      <requirement>Test invalid user_id handling</requirement>
+    </test-coverage>
+  </testing-guidance>
+
+  <related-stories>
+    <story id="13-5" title="Subconscious Gate">
+      <description>Uses activity tracking for recent contact check</description>
+      <dependency>Needs get_last_activity() to check if user contacted recently</dependency>
+    </story>
+    <story id="13-4" title="Condition Evaluators">
+      <description>Uses activity tracking for silence detection</description>
+      <dependency>Needs get_last_activity() to determine silence duration</dependency>
+    </story>
+  </related-stories>
+
+  <architectural-notes>
+    <note>
+      Activity tracking is part of Proactive AI Worker infrastructure.
+      See docs/design/proactive-ai-architecture.md for full context.
+    </note>
+    <note>
+      The proactive module (backend/api/proactive/) will contain:
+      - activity.py (this story)
+      - gate.py (Story 13.5 - Subconscious Gate)
+      - evaluators.py (Story 13.4 - Condition Evaluators)
+      - agent.py (Story 13.6 - Wake-Up Agent)
+    </note>
+    <note>
+      Activity tracking uses simple Redis key-value pattern instead of Redis Hashes
+      to minimize complexity. Only two operations needed: set and get timestamp.
+    </note>
+  </architectural-notes>
+
+  <verification-checklist>
+    <item>Activity updated on every user message in chat endpoint</item>
+    <item>Activity retrievable via get_last_activity()</item>
+    <item>Missing activity handled gracefully (returns None)</item>
+    <item>TTL set correctly (7 days = 604800 seconds)</item>
+    <item>Timestamp format matches existing patterns (ISO with Z suffix)</item>
+    <item>Error handling prevents chat flow from breaking</item>
+    <item>Redis connection reused from StateManager (no new connections)</item>
+    <item>Logging at appropriate levels (INFO for success, WARNING for failures)</item>
+    <item>Unit tests cover all scenarios (success, missing, errors)</item>
+    <item>Manual test: Send message, verify Redis key exists with correct TTL</item>
+  </verification-checklist>
+
+  <files-to-create>
+    <file path="backend/api/proactive/__init__.py">
+      <description>Package initializer for proactive module</description>
+      <content><![CDATA[
+"""
+Proactive AI Worker Module
+
+Infrastructure for proactive message delivery based on triggers.
+"""
+
+__all__ = ["activity"]
+      ]]></content>
+    </file>
+    <file path="backend/api/proactive/activity.py">
+      <description>Activity tracking implementation (see module-structure template)</description>
+    </file>
+    <file path="backend/tests/unit/test_activity_tracking.py">
+      <description>Unit tests for activity tracking (see testing-guidance)</description>
+    </file>
+  </files-to-create>
+
+  <files-to-modify>
+    <file path="backend/api/routes/chat.py">
+      <modification>
+        <location>After line 348 (after storing user message)</location>
+        <change>Add activity tracking call with try-except wrapper</change>
+        <impact>Minimal - single async function call, non-blocking</impact>
+      </modification>
+    </file>
+  </files-to-modify>
+
+  <dev-notes>
+    <note priority="high">
+      Keep activity tracking simple and fast. Single Redis write operation.
+      Should complete in under 5ms under normal conditions.
+    </note>
+    <note priority="high">
+      Use fire-and-forget pattern. Activity tracking must never break chat flow.
+      All exceptions caught and logged at WARNING level.
+    </note>
+    <note priority="medium">
+      Reuse redis_client from StateManager context to avoid creating new connections.
+      Pass state.redis_client as parameter to update_activity().
+    </note>
+    <note priority="medium">
+      Timestamp format must match existing patterns (ISO with Z suffix).
+      Use datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    </note>
+    <note priority="low">
+      7-day TTL chosen to balance:
+      - Long enough for silence detection (days of inactivity)
+      - Short enough to not store stale data indefinitely
+      - Consistent with session/conversation TTLs in StateManager
+    </note>
+  </dev-notes>
+</story-context>

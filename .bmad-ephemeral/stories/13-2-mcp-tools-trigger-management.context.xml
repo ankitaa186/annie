@@ -1,0 +1,680 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <metadata>
+    <story-id>13.2</story-id>
+    <story-name>MCP Tools for Trigger Management</story-name>
+    <epic>Epic 13 - Proactive AI Worker</epic>
+    <status>drafted</status>
+    <estimated-effort>1 day</estimated-effort>
+    <generated-date>2025-12-24</generated-date>
+  </metadata>
+
+  <story-overview>
+    <user-story>
+      As a user, I want to create and manage triggers through conversation with Annie,
+      so that I can set up proactive reminders and alerts naturally.
+    </user-story>
+
+    <description>
+      This story implements the MCP tools that enable the LLM to create and manage proactive triggers
+      during conversation. These tools call the backend IntentsClient which communicates with
+      agentic-memories service for trigger persistence.
+
+      The tools are designed to teach the LLM when and how to use proactive features through
+      comprehensive descriptions and schema documentation.
+    </description>
+  </story-overview>
+
+  <acceptance-criteria>
+    <criterion id="AC1">
+      <name>create_trigger Tool</name>
+      <requirements>
+        - Full schema as defined in Design Doc Section 5.1
+        - Comprehensive description teaching LLM when to use (reminders, alerts, check-ins)
+        - Cron expression examples in description
+        - How to write rich action_context
+        - Returns created trigger with ID and next_check
+      </requirements>
+    </criterion>
+
+    <criterion id="AC2">
+      <name>list_triggers Tool</name>
+      <requirements>
+        - Filter by trigger_type: cron, interval, once, price, silence, portfolio, or all
+        - Option to include disabled triggers
+        - Returns array with: id, intent_name, schedule/condition, enabled, next_check, execution_count
+      </requirements>
+    </criterion>
+
+    <criterion id="AC3">
+      <name>update_trigger Tool</name>
+      <requirements>
+        - Accepts trigger_id + partial updates
+        - Can modify schedule, condition, action_context, enabled
+        - Description explains pause vs delete difference
+      </requirements>
+    </criterion>
+
+    <criterion id="AC4">
+      <name>delete_trigger Tool</name>
+      <requirements>
+        - Requires trigger_id + confirm=true
+        - Description emphasizes confirmation with user first
+        - Returns success confirmation
+      </requirements>
+    </criterion>
+
+    <criterion id="AC5">
+      <name>Tool Execution</name>
+      <requirements>
+        - Tool calls IntentsClient (backend HTTP client to agentic-memories)
+        - User ID extracted from session context
+        - Returns structured success/failure
+        - Errors include clear messages for LLM
+      </requirements>
+    </criterion>
+  </acceptance-criteria>
+
+  <design-reference>
+    <architecture-doc>
+      See: /Users/ankit/dev/annie/docs/design/proactive-ai-architecture.md
+
+      Key sections:
+      - Section 3: Trigger Types (scheduled vs condition)
+      - Section 4: Action Context Specification
+      - Section 5: MCP Tool Definitions (complete schemas)
+      - Section 11: Examples (user interactions)
+    </architecture-doc>
+
+    <trigger-types>
+      <type name="scheduled">
+        <description>Fire at specific times via cron or one-time datetime</description>
+        <modes>
+          - cron: Recurring schedule with cron expression
+          - once: One-time execution at specific datetime
+        </modes>
+        <examples>
+          - "Every morning at 9am" → cron: "0 9 * * *"
+          - "Every weekday at 8:30" → cron: "30 8 * * 1-5"
+          - "Every Friday at 5pm" → cron: "0 17 * * 5"
+          - "Remind me tomorrow at 3pm" → once mode
+        </examples>
+      </type>
+
+      <type name="condition">
+        <description>Fire when condition becomes true</description>
+        <condition-types>
+          - price: Stock price threshold (e.g., "NVDA &lt; 130")
+          - portfolio: Portfolio metric (e.g., "any_holding_change &gt; 5%")
+          - silence: User inactivity (e.g., "inactive_hours &gt; 48")
+        </condition-types>
+        <parameters>
+          - expression: Human-readable condition
+          - check_interval_minutes: How often to evaluate (default: 5)
+          - cooldown_hours: Min hours between fires (default: 24)
+          - fire_mode: "once" or "recurring" (default: recurring)
+        </parameters>
+      </type>
+    </trigger-types>
+
+    <action-context-specification>
+      <description>
+        Rich briefing document written by creation LLM for wake-up LLM.
+        Contains everything needed to execute the trigger properly.
+      </description>
+
+      <required-sections>
+        <section name="original_request">
+          Preserve user's exact words for ground truth
+        </section>
+
+        <section name="intent_summary">
+          1-3 sentence distillation of what trigger should accomplish
+        </section>
+
+        <section name="user_context">
+          CRITICAL: Only invariant data (name, timezone, communication style).
+          NEVER snapshot dynamic data (portfolio holdings, prices).
+          Wake-up LLM must fetch fresh data via tools.
+        </section>
+
+        <section name="execution_instructions">
+          Step-by-step guide:
+          1. GATHER DATA (which tools to call)
+          2. EVALUATE WHETHER TO SEND (skip conditions)
+          3. COMPOSE MESSAGE (tone, length, content)
+          4. ERROR HANDLING (what if data unavailable)
+        </section>
+
+        <section name="message_guidance">
+          - Tone (casual/professional/enthusiastic)
+          - Length (brief/moderate/detailed)
+          - Formatting preferences
+          - What to emphasize/de-emphasize
+        </section>
+
+        <section name="available_tools">
+          List which tools wake-up agent should use
+        </section>
+
+        <section name="edge_cases">
+          How to handle missing data, empty results, errors
+        </section>
+      </required-sections>
+    </action-context-specification>
+  </design-reference>
+
+  <existing-mcp-patterns>
+    <tool-registration>
+      <description>
+        Tools are registered in mcp_server/server.py via MCPServer.register_default_tools()
+      </description>
+
+      <example-from-server-py>
+        <![CDATA[
+def register_default_tools(self):
+    """Register default tools."""
+    self.tool_registry.register(health_check_tool)
+    self.tool_registry.register(store_memory_tool)
+    self.tool_registry.register(retrieve_memories_tool)
+    self.tool_registry.register(get_user_profile_tool)
+    # Portfolio management tools
+    self.tool_registry.register(get_portfolio_tool)
+    self.tool_registry.register(add_holding_tool)
+    # ... etc
+        ]]>
+      </example-from-server-py>
+    </tool-registration>
+
+    <tool-definition-structure>
+      <description>
+        Tools are defined as dictionaries with name, description, inputSchema, and handler.
+        Stored in mcp_server/tools.py.
+      </description>
+
+      <pattern>
+        <![CDATA[
+# Tool definition (dictionary format)
+tool_name_tool = {
+    "name": "tool_name",
+    "description": """
+    Comprehensive description that teaches the LLM:
+    - WHEN to use this tool (signal phrases, user intent)
+    - HOW to use it (parameter guidance)
+    - WHAT it returns (result structure)
+    - EXAMPLES of common use cases
+
+    Use this when user says "X" or asks "Y".
+    """,
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "param1": {
+                "type": "string",
+                "description": "Clear description of parameter purpose"
+            },
+            "param2": {
+                "type": "integer",
+                "description": "Another parameter",
+                "default": 10,
+                "minimum": 1,
+                "maximum": 100
+            }
+        },
+        "required": ["param1"]
+    },
+    "handler": tool_handler_function
+}
+        ]]>
+      </pattern>
+    </tool-definition-structure>
+
+    <async-handler-pattern>
+      <description>
+        Tool handlers can be async functions. Server auto-detects and awaits if needed.
+      </description>
+
+      <example-from-tools-py>
+        <![CDATA[
+async def get_portfolio_tool_handler(
+    user_id: str,
+    include_prices: bool = False
+) -> Dict[str, Any]:
+    """
+    Get user's investment portfolio holdings.
+
+    Args:
+        user_id: User identifier
+        include_prices: If True, fetch current prices
+
+    Returns:
+        dict: Portfolio with holdings, total_holdings, last_updated
+    """
+    start_time = time.time()
+
+    # Get config
+    config = get_config()
+    memories_url = config.get("AGENTIC_MEMORIES_URL", "http://host.docker.internal:8080")
+
+    # Validate params
+    if not user_id:
+        return {"status": "error", "message": "Invalid user_id"}
+
+    try:
+        # Make HTTP request to backend service
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(
+                f"{memories_url}/v1/portfolio",
+                params={"user_id": user_id}
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                # ... process result
+                return {"status": "success", ...}
+            else:
+                return {"status": "error", "message": f"HTTP {response.status_code}"}
+
+    except httpx.TimeoutException:
+        return {"status": "error", "message": "Service timed out"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+        ]]>
+      </example-from-tools-py>
+    </async-handler-pattern>
+
+    <http-client-pattern>
+      <description>
+        MCP tools call backend/external services via httpx.AsyncClient.
+        Pattern: async with httpx.AsyncClient(timeout=X) as client
+      </description>
+
+      <best-practices>
+        - Use async with for automatic cleanup
+        - Set appropriate timeouts (5-10s for reads, 180s for LLM operations)
+        - Handle all HTTP error codes gracefully
+        - Return structured {"status": "success"|"error", ...} responses
+        - Log all operations with structured logging
+        - Include duration_ms in logs for performance tracking
+      </best-practices>
+    </http-client-pattern>
+
+    <error-handling-pattern>
+      <description>
+        Tools should handle errors gracefully and return LLM-friendly messages.
+      </description>
+
+      <example>
+        <![CDATA[
+try:
+    # Call service
+    response = await client.post(url, json=payload)
+
+    if response.status_code == 200:
+        return {"status": "success", "data": response.json()}
+    else:
+        # Parse error message
+        try:
+            error_data = response.json()
+            error_msg = error_data.get("detail", f"HTTP {response.status_code}")
+        except:
+            error_msg = response.text or f"HTTP {response.status_code}"
+
+        logger.error(
+            "Service call failed",
+            extra={"status_code": response.status_code, "error": error_msg}
+        )
+        return {
+            "status": "error",
+            "message": f"Failed: {error_msg}",
+            "error_code": response.status_code
+        }
+
+except httpx.TimeoutException:
+    return {"status": "error", "message": "Service timed out. Try again."}
+except httpx.NetworkError:
+    return {"status": "error", "message": "Service unavailable."}
+except Exception as e:
+    logger.error("Unexpected error", exc_info=True)
+    return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+        ]]>
+      </example>
+    </error-handling-pattern>
+
+    <schema-examples>
+      <retrieve-memories-schema>
+        <description>Example of comprehensive tool schema with validation</description>
+        <![CDATA[
+"inputSchema": {
+    "type": "object",
+    "properties": {
+        "user_id": {
+            "type": "string",
+            "description": "User identifier"
+        },
+        "query": {
+            "type": "string",
+            "description": "Search query describing decision context (e.g., 'stock investment decisions')"
+        },
+        "limit": {
+            "type": "integer",
+            "description": "Max memories to retrieve (default: 50, range: 20-1000)",
+            "default": 50,
+            "minimum": 20,
+            "maximum": 1000
+        }
+    },
+    "required": ["user_id", "query"]
+}
+        ]]>
+      </retrieve-memories-schema>
+
+      <add-holding-schema>
+        <description>Example with optional parameters and enums</description>
+        <![CDATA[
+"inputSchema": {
+    "type": "object",
+    "properties": {
+        "user_id": {"type": "string", "description": "User identifier"},
+        "ticker": {
+            "type": "string",
+            "description": "Stock ticker (e.g., 'AAPL', 'GOOGL'). Normalized to uppercase."
+        },
+        "shares": {
+            "type": "number",
+            "description": "Number of shares owned"
+        },
+        "avg_price": {
+            "type": "number",
+            "description": "Average purchase price per share in USD"
+        }
+    },
+    "required": ["user_id", "ticker"]
+}
+        ]]>
+      </add-holding-schema>
+    </schema-examples>
+  </existing-mcp-patterns>
+
+  <backend-integration>
+    <intents-client-location>
+      <path>backend/api/intents_client.py</path>
+      <status>To be created in Story 13.1</status>
+      <description>
+        HTTP client for calling agentic-memories intents endpoints.
+        Similar pattern to MemoryClient and existing HTTP clients.
+      </description>
+    </intents-client-location>
+
+    <client-pattern-reference>
+      <description>
+        Follow the pattern established in backend/api/memory_client.py
+      </description>
+
+      <structure>
+        <![CDATA[
+class IntentsClient:
+    """Async HTTP client for agentic-memories intents service."""
+
+    DEFAULT_TIMEOUT = 10.0
+
+    def __init__(self, memories_url: Optional[str] = None):
+        # Load from config or use default
+        config = get_config()
+        self.memories_url = memories_url or config.get("AGENTIC_MEMORIES_URL")
+        self.client = httpx.AsyncClient(timeout=self.DEFAULT_TIMEOUT)
+
+    async def create_intent(self, user_id: str, intent_data: dict) -> dict:
+        """Create a new intent/trigger."""
+        url = f"{self.memories_url}/v1/intents"
+        response = await self.client.post(url, json=intent_data)
+        # ... handle response
+
+    async def list_intents(self, user_id: str, filters: dict = None) -> dict:
+        """List user's intents."""
+        url = f"{self.memories_url}/v1/intents"
+        response = await self.client.get(url, params={"user_id": user_id, ...})
+        # ... handle response
+
+    async def update_intent(self, intent_id: str, updates: dict) -> dict:
+        """Update existing intent."""
+        url = f"{self.memories_url}/v1/intents/{intent_id}"
+        response = await self.client.put(url, json=updates)
+        # ... handle response
+
+    async def delete_intent(self, intent_id: str, user_id: str) -> dict:
+        """Delete intent."""
+        url = f"{self.memories_url}/v1/intents/{intent_id}"
+        response = await self.client.delete(url, params={"user_id": user_id})
+        # ... handle response
+        ]]>
+      </structure>
+    </client-pattern-reference>
+
+    <mcp-to-backend-flow>
+      <description>
+        MCP tool handler calls IntentsClient, which calls agentic-memories HTTP API
+      </description>
+
+      <flow>
+        <![CDATA[
+1. LLM calls MCP tool: create_trigger(user_id, intent_name, trigger_type, ...)
+2. MCP tool handler (in mcp_server/tools.py):
+   - Import IntentsClient (needs to be accessible from MCP server)
+   - PROBLEM: IntentsClient is in backend/, MCP server is separate service
+   - SOLUTION: MCP tools call backend API endpoint, which uses IntentsClient
+
+Revised flow:
+1. LLM calls MCP tool: create_trigger(...)
+2. MCP tool handler makes HTTP call to backend endpoint
+3. Backend endpoint (backend/api/routes/intents.py) uses IntentsClient
+4. IntentsClient calls agentic-memories
+5. Response flows back to MCP tool → LLM
+
+Alternative (simpler for Story 13.2):
+1. MCP tool handler directly calls agentic-memories intents API
+2. No backend intermediary needed
+3. Similar to how store_memory_tool works currently
+        ]]>
+      </flow>
+    </mcp-to-backend-flow>
+
+    <recommended-approach>
+      <description>
+        For Story 13.2: MCP tools call agentic-memories intents API directly via HTTP.
+        This matches the pattern used by store_memory_tool and get_portfolio_tool.
+
+        No need for IntentsClient abstraction in MCP tools.
+        Backend can create its own IntentsClient later if needed for other features.
+      </description>
+
+      <rationale>
+        - Simpler: One less abstraction layer
+        - Consistent: Matches existing MCP tool patterns
+        - Faster: Direct communication, no backend hop
+        - Tools already make HTTP calls to agentic-memories
+      </rationale>
+    </recommended-approach>
+  </backend-integration>
+
+  <tool-descriptions-guidance>
+    <importance>
+      Tool descriptions are CRITICAL. They teach the LLM when and how to use proactive features.
+      The description is the LLM's primary instruction manual for the tool.
+    </importance>
+
+    <description-structure>
+      <section name="purpose">What the tool does</section>
+      <section name="use-when">Signal phrases and user intent patterns</section>
+      <section name="examples">Common use cases with concrete examples</section>
+      <section name="process">Step-by-step workflow if multi-step</section>
+      <section name="caveats">Important notes, warnings, edge cases</section>
+    </description-structure>
+
+    <example-good-description>
+      <![CDATA[
+"description": """
+Create a proactive trigger that will cause Annie to initiate contact with the user.
+
+USE THIS WHEN USER WANTS:
+- Reminders: "Remind me to...", "Every morning tell me...", "On Friday..."
+- Alerts: "Let me know when NVDA drops below $130", "Alert me if any stock moves 5%"
+- Check-ins: "If I don't message you for 2 days, check in", "Ping me if I'm silent"
+- Scheduled updates: "Every weekday, give me a portfolio summary"
+
+CRON EXPRESSIONS (for scheduled triggers):
+- "every morning at 9am" → "0 9 * * *"
+- "every weekday at 8:30" → "30 8 * * 1-5"
+- "every Friday at 5pm" → "0 17 * * 5"
+- "twice a day (9am and 5pm)" → "0 9,17 * * *"
+
+ACTION_CONTEXT GUIDANCE:
+Write a comprehensive briefing for the wake-up AI that includes:
+1. original_request: User's exact words
+2. intent_summary: What this trigger should accomplish (1-3 sentences)
+3. user_context: Name, timezone, communication preferences (NOT dynamic data like holdings)
+4. execution_instructions: Step-by-step guide for wake-up AI
+5. message_guidance: Tone, length, formatting preferences
+6. edge_cases: How to handle errors or missing data
+
+IMPORTANT:
+- NEVER put dynamic data (portfolio holdings, prices) in action_context
+- execution_instructions MUST say "Retrieve current portfolio/profile first"
+- Be thorough - this briefing is everything the wake-up AI knows
+"""
+      ]]>
+    </example-good-description>
+  </tool-descriptions-guidance>
+
+  <implementation-notes>
+    <files-to-create>
+      <file>mcp_server/tools/triggers.py</file>
+      <description>New module for trigger management tools</description>
+      <contents>
+        - create_trigger_tool_handler()
+        - list_triggers_tool_handler()
+        - update_trigger_tool_handler()
+        - delete_trigger_tool_handler()
+        - Tool definitions (4 dictionaries)
+      </contents>
+    </files-to-create>
+
+    <files-to-modify>
+      <file>mcp_server/server.py</file>
+      <changes>
+        - Import trigger tools from tools/triggers.py
+        - Register in register_default_tools()
+        - Add to tool count logging
+      </changes>
+    </files-to-modify>
+
+    <files-to-modify>
+      <file>mcp_server/tools.py</file>
+      <changes>
+        - Import trigger tools from tools/triggers module
+        - Export for server.py to use
+      </changes>
+    </files-to-modify>
+
+    <testing-approach>
+      <unit-tests>
+        - Test each tool handler with valid inputs
+        - Test error cases (network errors, API errors)
+        - Test schema validation
+      </unit-tests>
+
+      <integration-tests>
+        - Test MCP server can list trigger tools
+        - Test calling create_trigger via JSON-RPC
+        - Test tool responses format correctly
+      </integration-tests>
+
+      <manual-tests>
+        - Call tools via MCP server HTTP endpoint
+        - Verify LLM can discover and call tools
+        - Test full conversation flow: "Remind me every morning..."
+      </manual-tests>
+    </testing-approach>
+
+    <dependencies>
+      <dependency>Story 13.1 - IntentsClient (if using backend route approach)</dependency>
+      <dependency>agentic-memories Epic 5 - Intents API endpoints must exist</dependency>
+    </dependencies>
+
+    <api-endpoints-reference>
+      <description>
+        agentic-memories intents API endpoints (from Epic 5)
+      </description>
+
+      <endpoints>
+        <endpoint>
+          <method>POST</method>
+          <path>/v1/intents</path>
+          <description>Create new intent/trigger</description>
+          <required-fields>user_id, intent_name, trigger_type, action_context</required-fields>
+          <optional-fields>schedule, condition, enabled, priority</optional-fields>
+        </endpoint>
+
+        <endpoint>
+          <method>GET</method>
+          <path>/v1/intents</path>
+          <description>List user's intents</description>
+          <query-params>user_id, trigger_type (optional), include_disabled (optional)</query-params>
+        </endpoint>
+
+        <endpoint>
+          <method>PUT</method>
+          <path>/v1/intents/{intent_id}</path>
+          <description>Update existing intent</description>
+          <body>Partial update fields</body>
+        </endpoint>
+
+        <endpoint>
+          <method>DELETE</method>
+          <path>/v1/intents/{intent_id}</path>
+          <description>Delete intent</description>
+          <query-params>user_id, confirm=true</query-params>
+        </endpoint>
+      </endpoints>
+    </api-endpoints-reference>
+  </implementation-notes>
+
+  <related-documentation>
+    <doc>
+      <path>/Users/ankit/dev/annie/docs/design/proactive-ai-architecture.md</path>
+      <sections>
+        - Section 3: Trigger Types
+        - Section 4: Action Context Specification
+        - Section 5: MCP Tool Definitions (complete schemas with examples)
+      </sections>
+    </doc>
+
+    <doc>
+      <path>/Users/ankit/dev/annie/mcp_server/tools.py</path>
+      <description>Reference for existing tool patterns and registration</description>
+    </doc>
+
+    <doc>
+      <path>/Users/ankit/dev/annie/mcp_server/server.py</path>
+      <description>Tool registration in MCPServer class</description>
+    </doc>
+
+    <doc>
+      <path>/Users/ankit/dev/annie/backend/api/memory_client.py</path>
+      <description>HTTP client pattern for calling external services</description>
+    </doc>
+  </related-documentation>
+
+  <verification-checklist>
+    <item>LLM can create scheduled triggers via conversation</item>
+    <item>LLM can create condition triggers via conversation</item>
+    <item>LLM can list user's triggers</item>
+    <item>LLM can update/pause triggers</item>
+    <item>LLM confirms before deleting triggers</item>
+    <item>Tool descriptions are comprehensive and teach LLM when to use</item>
+    <item>Error messages are LLM-friendly and actionable</item>
+    <item>Tools return structured responses with status field</item>
+    <item>All tools handle network errors gracefully</item>
+    <item>Tools log operations with structured logging</item>
+  </verification-checklist>
+</story-context>

@@ -10,8 +10,11 @@ aiohttp==3.9.1
 # Environment configuration
 python-dotenv==1.0.0
 
-# Data validation (optional)
-pydantic==2.5.0
+# Timezone handling
+pytz>=2024.1
+
+# Data validation
+pydantic>=2.9.0
 
 # Redis client (for future caching)
 redis==5.0.0

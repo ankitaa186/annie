@@ -68,9 +68,9 @@ class TestPortfolioSummarizers:
         }
 
         summary = summarize_portfolio_result(result)
-        # Message is exactly 50 chars: "Portfolio service unavailable. Please try again la"
-        assert len(summary) == 50
-        assert summary.startswith("Portfolio service unavailable")
+        # Messages under 500 chars are not truncated
+        assert summary == "Portfolio service unavailable. Please try again later."
+        assert len(summary) <= 500
 
     def test_add_holding_created(self):
         """Test add_holding summarizer for newly created holding."""
@@ -215,9 +215,9 @@ class TestStockSummarizers:
         }
 
         summary = summarize_analyze_stock_result(result)
-        # Message is exactly 50 chars
-        assert len(summary) == 50
-        assert summary.startswith("Invalid ticker format")
+        # Messages under 500 chars are not truncated
+        assert summary == "Invalid ticker format: 'xyz'. Ticker must be uppercase."
+        assert len(summary) <= 500
 
 
 class TestProfileSummarizer:
@@ -541,18 +541,18 @@ class TestEdgeCases:
         assert "???" in summary  # Ticker defaults to ???
 
     def test_error_message_truncation(self):
-        """Test that error messages are truncated to 50 chars."""
+        """Test that error messages are truncated to 500 chars."""
         from api.status_summarizers import summarize_portfolio_result
 
-        long_error = "A" * 100
+        long_error = "A" * 600  # Longer than 500 char limit
         result = {
             "status": "error",
             "message": long_error
         }
 
         summary = summarize_portfolio_result(result)
-        assert len(summary) == 50
-        assert summary == "A" * 50
+        assert len(summary) == 500
+        assert summary == "A" * 500
 
     def test_error_message_short(self):
         """Test that short error messages are not truncated."""
@@ -570,15 +570,15 @@ class TestEdgeCases:
         """Test that generic fallback truncates long error messages."""
         from api.status_summarizers import summarize_tool_result
 
-        long_error = "B" * 100
+        long_error = "B" * 600  # Longer than 500 char limit
         result = {
             "status": "error",
             "message": long_error
         }
 
         summary = summarize_tool_result("unknown_tool", result)
-        assert len(summary) == 50
-        assert summary == "B" * 50
+        assert len(summary) == 500
+        assert summary == "B" * 500
 
     def test_summary_conciseness(self):
         """Test that summaries are concise (<50 chars when possible)."""

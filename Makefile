@@ -6,6 +6,10 @@
 # Detect Docker Compose command (v2 or v1)
 COMPOSE_CMD := $(shell if docker compose version >/dev/null 2>&1; then echo "docker compose"; else echo "docker-compose"; fi)
 
+# Detect uv or fallback to pip
+UV_AVAILABLE := $(shell command -v uv 2>/dev/null)
+PYTHON_VERSION := 3.12
+
 # Activate venv for all test commands
 VENV := . .venv/bin/activate &&
 
@@ -35,14 +39,25 @@ help: ## Show this help message
 
 # Ensure venv exists and dependencies are installed
 .venv/bin/activate: backend/requirements.txt mcp_server/requirements.txt telegram_bot/requirements.txt
+ifdef UV_AVAILABLE
+	@if [ ! -d ".venv" ]; then \
+		echo "Creating virtual environment with uv (Python $(PYTHON_VERSION))..."; \
+		uv venv --python $(PYTHON_VERSION); \
+	fi
+	@echo "Installing dependencies with uv..."
+	@uv pip install -q -r backend/requirements.txt -r mcp_server/requirements.txt -r telegram_bot/requirements.txt
+else
+	@echo "uv not found, using pip (install uv for faster installs: curl -LsSf https://astral.sh/uv/install.sh | sh)"
 	@if [ ! -d ".venv" ]; then \
 		echo "Creating virtual environment..."; \
-		python3 -m venv .venv; \
+		python$(PYTHON_VERSION) -m venv .venv || python3 -m venv .venv; \
 	fi
 	@echo "Installing dependencies..."
+	@$(VENV) pip install --upgrade pip -q
 	@$(VENV) pip install -q -r backend/requirements.txt
 	@$(VENV) pip install -q -r mcp_server/requirements.txt
 	@$(VENV) pip install -q -r telegram_bot/requirements.txt
+endif
 	@touch .venv/bin/activate
 
 venv: .venv/bin/activate ## Setup venv and install all dependencies

@@ -103,6 +103,409 @@ Never use generic IDs like 'anonymous_user' - always use the specific user_id.
 """
 
 
+# Proactive capabilities section
+PROACTIVE_CAPABILITIES_SECTION = """
+## PROACTIVE CAPABILITIES
+
+You can initiate contact with users autonomously! This is a key differentiator that makes you more helpful.
+
+### When to Offer Proactive Features
+
+Listen for these signals and OFFER to set up triggers:
+
+**Signal Phrases:**
+- "I want to keep an eye on..." or "Watch NVDA for me" → Offer condition-based trigger (price or portfolio)
+- "Remind me every morning..." or "Every weekday at 9am..." → Offer scheduled trigger (cron)
+- "Let me know if..." or "Alert me when..." → Offer condition-based trigger
+- "Check in with me if I go quiet..." → Offer silence-based trigger
+- "Every Friday..." or "Twice a day..." → Offer scheduled trigger (cron)
+
+**Example Responses:**
+- User: "I want to keep an eye on NVDA" → "Want me to alert you if NVDA crosses a certain price? What threshold should I watch for?"
+- User: "Remind me every morning at 8am" → "I'll check in every morning at 8 AM. What would you like me to help you with each morning?"
+- User: "Let me know if any stock drops 5%" → "I can watch your portfolio for drops. Should I alert you immediately or summarize at specific times?"
+
+### Trigger Types Available
+
+1. **price** - Monitor specific stock price thresholds
+   - "Notify me when NVDA drops below $130"
+   - "Alert me if AAPL reaches $200"
+
+2. **portfolio** - Watch overall portfolio conditions
+   - "Alert me if any stock drops 5%"
+   - "Notify me if portfolio value exceeds $50k"
+
+3. **silence** - Check in after inactivity
+   - "Check in if I haven't messaged in 4 hours"
+   - "Ping me if I go quiet for 2 days"
+
+4. **cron** - Regular scheduled times (uses cron syntax internally)
+   - "Send me a market briefing every day at 8am"
+   - "Check in every Friday at 5pm"
+
+5. **interval** - Regular time intervals
+   - "Remind me every 2 hours to check my portfolio"
+   - "Message me every 6 hours while markets are open"
+
+6. **once** - One-time future trigger
+   - "Remind me tomorrow at 3pm to review earnings"
+   - "Alert me in 2 hours about the market close"
+
+### Creating Triggers - Best Practices
+
+When a user signals interest in proactive features, follow this flow:
+
+1. **CLARIFY** the intent:
+   "Just to confirm - you want me to alert you when NVDA drops below $130?"
+
+2. **CONFIRM** the schedule/condition:
+   "I'll ping you weekdays at 9 AM Pacific. Sound right?"
+
+3. **EXPLAIN** what will happen:
+   "When it fires, I'll check your portfolio and give you the highlights in 2-3 sentences."
+
+4. **OFFER** customization:
+   "Want me to skip days when nothing significant happened? Or always send regardless?"
+
+### Schedule Translation Examples
+
+When users describe schedules naturally, translate them:
+
+- "every morning" → 9 AM daily
+- "every weekday morning" → 9 AM Mon-Fri (cron: "0 9 * * 1-5")
+- "every Friday" → Friday 9 AM or 5 PM (ask for preference)
+- "twice a day" → 9 AM and 5 PM
+- "market open" → 9:30 AM ET weekdays (cron: "30 9 * * 1-5" in ET)
+- "end of day" → 5 PM
+- "tomorrow morning" → One-time, tomorrow 9 AM
+- "in 2 hours" → One-time, calculated from current time
+
+### Managing Existing Triggers
+
+When user asks about their triggers:
+1. Call the list_triggers tool to fetch active triggers
+2. Present them clearly with human-readable descriptions
+3. Offer to modify, pause, or delete
+
+**Modification Patterns:**
+- "Pause my morning reminders" → update_trigger with enabled=false
+- "Stop the NVDA alerts permanently" → delete_trigger (ALWAYS confirm first!)
+- "Change my briefing to 8am instead" → update_trigger with new schedule
+- "Make it every other day" → update_trigger with adjusted cron expression
+
+**Important:** ALWAYS confirm before deleting triggers. Users may regret permanent deletions.
+
+### Writing Good action_context
+
+When creating triggers, your action_context is a **comprehensive briefing for a future AI** that will execute the trigger. The wake-up LLM only sees the action_context (plus fresh dynamic data). Make it thorough!
+
+**Required Sections:**
+
+1. **original_request** (string)
+   - User's exact words that led to trigger creation
+   - Provides ground truth if wake-up LLM is unsure
+
+2. **intent_summary** (string)
+   - 1-3 sentences distilling what this trigger should accomplish
+   - Capture the WHY, not just the WHAT
+   - Note any user preferences or constraints
+
+3. **user_context** (object)
+   - ⚠️ **CRITICAL:** Only include INVARIANT information (things that rarely change)
+   - DO include: name, timezone, communication style, risk tolerance, general interests
+   - DO NOT include: current portfolio holdings, stock prices, positions, balances
+   - Why: Dynamic data becomes stale and contradicts fresh tool calls, confusing wake-up LLM
+   - Example GOOD: "User is interested in tech stocks, particularly Apple"
+   - Example BAD: "User owns 50 shares of AAPL at $175 avg" (this will become outdated!)
+
+4. **execution_instructions** (string, multiline)
+   - Step-by-step guide for wake-up LLM
+   - Include: which tools to call to gather fresh data, how to analyze results
+   - Be explicit about decision points and skip conditions
+   - Start with data gathering: "Use [relevant tools] to get current state"
+
+5. **message_guidance** (string, multiline)
+   - Tone description (casual? formal? urgent?)
+   - If user explicitly wants brief: respect that preference
+   - Otherwise: default to rich, informative content with insights and context
+   - MULTIPLE good and bad voice examples showing depth and personality
+   - Edge case handling (what if data is missing? what if extreme move?)
+   - Remember: Explain WHY things matter, not just WHAT the numbers are
+   - action_context preferences take precedence over defaults
+
+6. **available_tools** (string, multiline)
+   - Which tools are relevant for this trigger
+   - Which tools to prioritize vs avoid
+   - How to use them efficiently
+
+7. **edge_cases** (string, multiline)
+   - Unusual situations and how to handle them
+   - Market closed scenarios, API errors, empty portfolio, extreme moves
+   - First-time trigger, user messaged recently, etc.
+
+8. **meta** (object)
+   - created_at, created_by, notes about user emphasis or special requests
+
+**Remember:** The wake-up LLM is executing WITHOUT the conversation history. Your action_context is its ONLY briefing. Be comprehensive!
+
+### Daily Limits and Constraints
+
+- Users can receive up to **5 proactive messages per day** (prevents spam)
+- **Quiet hours:** 10pm-8am in user's local timezone (no proactive messages)
+- Users can **opt out** entirely via preferences (respect this!)
+- Triggers can be **paused, modified, or deleted** at any time
+
+When limits are reached or constraints apply:
+- Inform user if they're approaching daily limit
+- Explain quiet hours if they request late-night triggers
+- Offer to queue messages for next available time
+"""
+
+# Proactive feedback handling guidance (Story 13.10)
+PROACTIVE_FEEDBACK_GUIDANCE = """
+## FEEDBACK HANDLING GUIDANCE
+
+The user's message may be feedback about the proactive message Annie just sent. Interpret their response and take appropriate action:
+
+### NEGATIVE FEEDBACK
+**Signals:** "This is annoying" / "Stop these messages" / "Too much" / "Don't send these"
+**Action:**
+- Apologize sincerely and acknowledge their frustration
+- Offer to disable the trigger or adjust frequency
+- Use `update_trigger` tool with `enabled=false` if they confirm they want to stop
+- Example: "I'm sorry these messages are bothering you! I can stop sending them completely or just reduce the frequency. What would you prefer?"
+
+### THRESHOLD FEEDBACK
+**Signals:** "Don't message me about small moves" / "Only for big changes" / "5% is too low"
+**Action:**
+- Suggest updating skip conditions in execution_instructions
+- Use `update_trigger` to adjust thresholds
+- Example: "Got it! I'll only alert you for moves of 10% or more. Let me update that trigger for you."
+
+### LENGTH FEEDBACK
+**Signals:** "Make these shorter" / "Too much detail" / "Keep it brief" / "Just the key points"
+**Action:**
+- Update message_guidance to be more concise
+- Use `update_trigger` to adjust tone/length preferences in action_context
+- Example: "I'll keep future updates shorter and more to-the-point!"
+
+### TIMING FEEDBACK
+**Signals:** "Too early" / "Wake me later" / "Different time" / "Not during work hours"
+**Action:**
+- Suggest schedule adjustment
+- Use `update_trigger` to modify cron schedule or timing preferences
+- Example: "I can move this to 10 AM instead. Would that work better for you?"
+
+### FREQUENCY FEEDBACK
+**Signals:** "Too often" / "Reduce frequency" / "Once a week is enough" / "Space these out"
+**Action:**
+- Offer to change schedule mode or interval
+- Use `update_trigger` to modify schedule
+- Example: "I can change this from daily to weekly. Should I send these every Monday instead?"
+
+### POSITIVE FEEDBACK
+**Signals:** "This is helpful" / "Keep them coming" / "Perfect" / "Love these updates"
+**Action:**
+- Acknowledge warmly and encourage
+- No trigger changes needed
+- Implicit approval - this is working well
+- Example: "So glad you find these helpful! I'll keep the updates coming."
+
+### CONVERSATIONAL
+**Signals:** User engages normally with the information (asks follow-up questions, discusses content)
+**Action:**
+- Respond naturally to their questions
+- No trigger changes needed
+- This counts as implicit approval - the proactive message served its purpose
+
+### IMPORTANT GUIDELINES
+1. **Always explain what you're changing** before calling update_trigger
+2. **Get user confirmation** for significant changes like disabling triggers
+3. **Be specific** about what settings you're modifying
+4. **Offer alternatives** rather than just removing functionality
+5. **Remember the context** - you initiated contact, so be humble about adjustments
+
+### UPDATE_TRIGGER USAGE
+When calling update_trigger based on feedback:
+- Be precise about which fields to update
+- Preserve user's original intent/request in action_context
+- Test your changes mentally before applying
+- Confirm successful update to the user
+
+Example update patterns:
+- Disable: `update_trigger(trigger_id, enabled=false)`
+- Change threshold: Update `execution_instructions` with new skip conditions
+- Adjust tone: Update `message_guidance` in action_context
+- Reschedule: Update `schedule` object with new cron/interval
+"""
+
+
+def format_proactive_context_for_prompt(proactive_context: Dict[str, Any]) -> Optional[str]:
+    """
+    Format proactive trigger context for system prompt injection.
+
+    This function is used when a user responds to a recent proactive message,
+    allowing the LLM to understand the context and handle feedback appropriately.
+
+    Args:
+        proactive_context: Proactive context dict with trigger_id, message_id, sent_at, trigger_details
+
+    Returns:
+        Formatted context string or None if context is empty
+    """
+    if not proactive_context:
+        return None
+
+    sections = []
+
+    # Add trigger identification
+    trigger_id = proactive_context.get("trigger_id")
+    trigger_details = proactive_context.get("trigger_details", {})
+    intent_name = trigger_details.get("intent_name", "Unknown")
+    trigger_type = trigger_details.get("trigger_type", "unknown")
+
+    sections.append(f"Trigger ID: {trigger_id}")
+    sections.append(f"Trigger Name: {intent_name}")
+    sections.append(f"Trigger Type: {trigger_type}")
+
+    # Add timing information
+    sent_at = proactive_context.get("sent_at")
+    time_since = proactive_context.get("time_since_message_seconds")
+    if sent_at and time_since is not None:
+        # Convert seconds to human-readable format
+        if time_since < 60:
+            time_str = f"{int(time_since)} seconds ago"
+        elif time_since < 3600:
+            time_str = f"{int(time_since / 60)} minutes ago"
+        else:
+            time_str = f"{int(time_since / 3600)} hours ago"
+
+        sections.append(f"Message Sent: {sent_at} ({time_str})")
+
+    # Add action context for LLM reference
+    action_context = trigger_details.get("action_context", {})
+    if action_context:
+        sections.append("\nTrigger Configuration:")
+
+        if action_context.get("original_request"):
+            sections.append(f"  Original Request: {action_context['original_request']}")
+
+        if action_context.get("intent_summary"):
+            sections.append(f"  Intent: {action_context['intent_summary']}")
+
+        if action_context.get("message_guidance"):
+            sections.append(f"  Message Guidance: {action_context['message_guidance']}")
+
+        if action_context.get("execution_instructions"):
+            sections.append(f"  Execution Instructions: {action_context['execution_instructions']}")
+
+    # Add schedule/condition info if relevant
+    if trigger_type == "scheduled":
+        schedule = trigger_details.get("schedule", {})
+        if schedule:
+            mode = schedule.get("mode", "")
+            expression = schedule.get("expression", "")
+            timezone = schedule.get("timezone", "UTC")
+            sections.append(f"\nSchedule: {mode} - {expression} ({timezone})")
+
+    elif trigger_type == "condition":
+        condition = trigger_details.get("condition", {})
+        if condition:
+            cond_type = condition.get("type", "")
+            expression = condition.get("expression", "")
+            sections.append(f"\nCondition: {cond_type} - {expression}")
+
+    return "\n".join(sections)
+
+
+def format_triggers_for_prompt(triggers: list) -> Optional[str]:
+    """
+    Format user's active triggers for system prompt injection.
+
+    Args:
+        triggers: List of trigger dictionaries from IntentsClient
+
+    Returns:
+        Formatted trigger summary string or None if no triggers
+    """
+    if not triggers:
+        return None
+
+    lines = []
+    for idx, trigger in enumerate(triggers, 1):
+        intent_name = trigger.get("intent_name", "Unnamed trigger")
+        trigger_type = trigger.get("trigger_type", "unknown")
+
+        # Format schedule or condition description
+        if trigger_type == "scheduled":
+            schedule = trigger.get("schedule", {})
+            mode = schedule.get("mode", "")
+            expression = schedule.get("expression", "")
+            timezone = schedule.get("timezone", "UTC")
+
+            # Try to make it human-readable
+            if mode == "cron":
+                # Simple cron translation (can be enhanced)
+                if expression == "0 9 * * 1-5":
+                    desc = "Weekdays 9 AM"
+                elif expression == "0 9 * * *":
+                    desc = "Daily 9 AM"
+                elif expression == "0 17 * * 5":
+                    desc = "Fridays 5 PM"
+                else:
+                    desc = f"Cron: {expression}"
+                desc += f" {timezone}"
+            elif mode == "interval":
+                desc = f"Every {expression}"
+            elif mode == "once":
+                desc = f"Once at {expression}"
+            else:
+                desc = f"Scheduled ({mode})"
+        elif trigger_type == "condition":
+            condition = trigger.get("condition", {})
+            cond_type = condition.get("type", "")
+            expression = condition.get("expression", "")
+
+            if cond_type == "price":
+                desc = f"When {expression}"
+            elif cond_type == "portfolio":
+                desc = f"Portfolio condition: {expression}"
+            elif cond_type == "silence":
+                desc = f"If silent for {expression}"
+            else:
+                desc = f"Condition: {expression}"
+        else:
+            desc = "Custom trigger"
+
+        # Format last fired time
+        last_fired = trigger.get("last_fired_at")
+        if last_fired:
+            # Simple relative time formatting
+            try:
+                from datetime import datetime, timezone as dt_timezone
+                fired_dt = datetime.fromisoformat(last_fired.replace('Z', '+00:00'))
+                now = datetime.now(dt_timezone.utc)
+                delta = now - fired_dt
+
+                if delta.days == 0:
+                    fired_str = "today"
+                elif delta.days == 1:
+                    fired_str = "yesterday"
+                elif delta.days < 7:
+                    fired_str = f"{delta.days} days ago"
+                else:
+                    fired_str = f"{delta.days // 7} weeks ago"
+            except (ValueError, AttributeError):
+                fired_str = "recently"
+        else:
+            fired_str = "Never fired yet"
+
+        # Build line
+        lines.append(f'{idx}. "{intent_name}" - {desc} - Last fired: {fired_str}')
+
+    return "\n".join(lines)
+
+
 def format_portfolio_for_prompt(portfolio: Dict[str, Any]) -> Optional[str]:
     """
     Format user portfolio data for system prompt injection.
@@ -270,10 +673,12 @@ def build_system_prompt(
     platform: str = "api",
     include_tool_instructions: bool = True,
     profile: Optional[Dict[str, Any]] = None,
-    portfolio: Optional[Dict[str, Any]] = None
+    portfolio: Optional[Dict[str, Any]] = None,
+    triggers: Optional[list] = None,
+    proactive_context: Optional[Dict[str, Any]] = None
 ) -> str:
     """
-    Build system prompt with optional user_id, profile, portfolio, and platform-specific formatting.
+    Build system prompt with optional user_id, profile, portfolio, triggers, proactive_context, and platform-specific formatting.
 
     Args:
         user_id: Optional user identifier for tool usage instructions
@@ -281,11 +686,16 @@ def build_system_prompt(
         include_tool_instructions: Whether to include tool usage instructions
         profile: Optional user profile dictionary from ProfileManager
         portfolio: Optional user portfolio dictionary from PortfolioManager
+        triggers: Optional list of active trigger dictionaries from IntentsClient
+        proactive_context: Optional proactive feedback context (Story 13.10)
 
     Returns:
         Complete system prompt string
     """
     prompt_parts = [BASE_SYSTEM_PROMPT]
+
+    # Add proactive capabilities section (core capability, goes early)
+    prompt_parts.append("\n\n" + PROACTIVE_CAPABILITIES_SECTION)
 
     # Add user_id if provided
     if user_id:
@@ -304,7 +714,24 @@ def build_system_prompt(
         if portfolio_str:
             prompt_parts.append("\n\nUSER PORTFOLIO:")
             prompt_parts.append(portfolio_str)
-    
+
+    # Add active triggers if provided
+    if triggers:
+        triggers_str = format_triggers_for_prompt(triggers)
+        if triggers_str:
+            prompt_parts.append("\n\nYOUR ACTIVE TRIGGERS:")
+            prompt_parts.append(triggers_str)
+            prompt_parts.append("\nYou can reference these triggers when relevant, and help users manage them.")
+
+    # Add proactive feedback context if provided (Story 13.10)
+    if proactive_context:
+        proactive_str = format_proactive_context_for_prompt(proactive_context)
+        if proactive_str:
+            prompt_parts.append("\n\nPROACTIVE FEEDBACK CONTEXT:")
+            prompt_parts.append("The user is responding to a proactive message you sent:")
+            prompt_parts.append(proactive_str)
+            prompt_parts.append("\n" + PROACTIVE_FEEDBACK_GUIDANCE)
+
     # Get Pacific time with daylight saving adjustment
     pacific = pytz.timezone("US/Pacific")
     now_pacific = datetime.now(pacific)

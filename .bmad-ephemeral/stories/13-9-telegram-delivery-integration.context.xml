@@ -1,0 +1,679 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <metadata>
+    <story-id>13.9</story-id>
+    <epic-id>13</epic-id>
+    <epic-name>Proactive AI Worker</epic-name>
+    <story-title>Telegram Delivery Integration</story-title>
+    <status>drafted</status>
+    <estimated-effort>0.25 days</estimated-effort>
+    <dependencies>
+      <dependency>Story 13.6 - Wake-Up Agent (for message delivery)</dependency>
+      <dependency>Telegram Bot infrastructure (already implemented)</dependency>
+    </dependencies>
+  </metadata>
+
+  <story-summary>
+    <user-story>
+      As a system, I want to send proactive messages to users via Telegram, so that trigger messages reach users through their preferred channel.
+    </user-story>
+    <description>
+      This story implements the delivery mechanism for sending proactive AI-generated messages to users via Telegram.
+      It provides a clean interface for the wake-up agent to deliver messages, handles rate limits gracefully,
+      and manages errors without crashing the background worker.
+    </description>
+  </story-summary>
+
+  <acceptance-criteria>
+    <criterion id="AC1">
+      <title>Delivery Function</title>
+      <given>message to send</given>
+      <when>deliver called</when>
+      <then>
+        - Looks up user's Telegram chat_id from Redis/profile
+        - Sends message via Telegram Bot API
+        - Returns message_id for tracking
+      </then>
+    </criterion>
+    <criterion id="AC2">
+      <title>Rate Limit Handling</title>
+      <given>Telegram rate limit hit</given>
+      <when>sending</when>
+      <then>
+        - Respects 429 responses
+        - Implements exponential backoff
+        - Retries up to 3 times
+      </then>
+    </criterion>
+    <criterion id="AC3">
+      <title>Error Handling</title>
+      <given>delivery failure</given>
+      <when>exception occurs</when>
+      <then>
+        - Returns None for message_id
+        - Logs error with context
+        - Does not crash worker
+      </then>
+    </criterion>
+  </acceptance-criteria>
+
+  <technical-context>
+    <architecture>
+      <overview>
+        Annie's Telegram bot already has full infrastructure for receiving and sending messages.
+        This story adds a delivery module that allows the proactive worker to send messages to users
+        by reusing the existing Telegram bot infrastructure.
+      </overview>
+
+      <telegram-bot-structure>
+        <description>
+          The Telegram bot service runs as a separate Docker container (telegram-bot) with long polling.
+          It uses the python-telegram-bot library and communicates with the backend via HTTP.
+        </description>
+        <key-files>
+          <file path="telegram_bot/bot.py">Main bot initialization and polling setup</file>
+          <file path="telegram_bot/handlers/message.py">Message handlers with rate limit handling</file>
+          <file path="telegram_bot/backend_client.py">HTTP client for backend communication</file>
+          <file path="telegram_bot/config.py">Environment configuration</file>
+        </key-files>
+      </telegram-bot-structure>
+
+      <message-delivery-approach>
+        <option name="Direct Bot API" selected="true">
+          <description>
+            Create delivery module in backend that directly calls Telegram Bot API using bot token.
+            This is the recommended approach for proactive messaging.
+          </description>
+          <pros>
+            - Independent of bot polling process
+            - Can send messages from background worker
+            - Full control over rate limiting and retries
+            - No need to route through telegram-bot service
+          </pros>
+          <implementation>
+            Create backend/api/proactive/delivery.py that uses python-telegram-bot's Bot class directly
+            to send messages. The Bot class handles HTTP API calls to Telegram servers.
+          </implementation>
+        </option>
+        <option name="Via Telegram Bot Service">
+          <description>Add HTTP endpoint to telegram-bot service for sending messages</description>
+          <cons>
+            - Requires adding HTTP server to telegram-bot service (currently only has polling)
+            - Adds architectural complexity
+            - Not recommended for background worker pattern
+          </cons>
+        </option>
+      </message-delivery-approach>
+
+      <chat-id-lookup>
+        <description>
+          Telegram requires a chat_id to send messages to users. The chat_id is the Telegram user ID,
+          which is captured when users first interact with the bot.
+        </description>
+        <current-storage>
+          <location>Not explicitly stored yet</location>
+          <note>
+            The user_id in our system IS the Telegram chat_id (see message handler).
+            When users send messages, update.message.from_user.id becomes the user_id.
+            This is passed to backend in ChatRequest as user_id (string format).
+          </note>
+          <evidence file="telegram_bot/handlers/message.py" lines="1072-1089">
+            user_id = message.from_user.id  # This is the Telegram user ID
+            chat_id = message.chat_id       # For 1-on-1 chats, same as user_id
+          </evidence>
+        </current-storage>
+        <implementation-approach>
+          Since user_id in our system is already the Telegram chat_id (as string),
+          we can use it directly for message delivery. No additional lookup needed.
+
+          For safety, we should:
+          1. Store platform="telegram" in session (already done in state.py)
+          2. Use user_id directly as chat_id (convert to int)
+          3. Handle case where user_id might be from different platform (future-proofing)
+        </implementation-approach>
+      </chat-id-lookup>
+    </architecture>
+
+    <telegram-rate-limits>
+      <official-limits source="Telegram Bot API">
+        <limit>30 messages per second to different chats</limit>
+        <limit>1 message per second to same chat</limit>
+        <limit>Burst limit: 20 messages per minute to same chat</limit>
+      </official-limits>
+      <rate-limit-response>
+        <http-status>429 Too Many Requests</http-status>
+        <retry-after-header>Retry-After (seconds to wait)</retry-after-header>
+        <exception-class>telegram.error.RetryAfter</exception-class>
+      </rate-limit-response>
+      <handling-pattern>
+        <approach>Exponential backoff with jitter</approach>
+        <max-retries>3</max-retries>
+        <backoff-formula>wait_time = retry_after or (2 ** attempt)</backoff-formula>
+        <example-from-codebase file="telegram_bot/handlers/message.py" lines="579-592">
+          except RetryAfter as retry_error:
+              rate_limit_until = current_time_ms + (retry_error.retry_after * 1000)
+              logger.warning(
+                  "Message edit rate limited by Telegram",
+                  extra={
+                      "user_id": user_id,
+                      "retry_after_seconds": retry_error.retry_after,
+                      "event": "telegram_rate_limited"
+                  }
+              )
+        </example-from-codebase>
+      </handling-pattern>
+    </telegram-rate-limits>
+
+    <existing-patterns>
+      <sending-messages>
+        <description>
+          The Telegram bot uses python-telegram-bot library with async API.
+          Messages are sent using context.bot.send_message() or message.reply_text().
+        </description>
+        <example file="telegram_bot/handlers/message.py" lines="1226-1227">
+          status_msg = await message.reply_text("🔄 Annie is thinking...")
+        </example>
+        <key-methods>
+          <method name="Bot.send_message">
+            <signature>async send_message(chat_id: int, text: str, parse_mode: str = None) -> Message</signature>
+            <description>Send text message to specific chat</description>
+            <returns>Message object with message_id</returns>
+          </method>
+          <method name="Bot.edit_message_text">
+            <signature>async edit_message_text(chat_id: int, message_id: int, text: str, parse_mode: str = None)</signature>
+            <description>Edit existing message</description>
+          </method>
+        </key-methods>
+        <parse-modes>
+          <mode name="HTML">Supports &lt;b&gt;, &lt;i&gt;, &lt;code&gt;, &lt;pre&gt;, &lt;a&gt; tags</mode>
+          <mode name="Markdown">Supports markdown syntax (deprecated, use MarkdownV2)</mode>
+          <converter file="telegram_bot/handlers/message.py" function="markdown_to_telegram_html">
+            Converts LLM markdown output to Telegram-safe HTML
+          </converter>
+        </parse-modes>
+      </sending-messages>
+
+      <error-handling>
+        <description>
+          The codebase uses structured error handling with detailed logging.
+          Errors are logged with context but don't crash the service.
+        </description>
+        <pattern>
+          try:
+              # Operation
+          except SpecificError as e:
+              logger.error(
+                  "Operation failed",
+                  extra={
+                      "user_id": user_id,
+                      "error": str(e),
+                      "error_type": type(e).__name__,
+                      "event": "operation_failed"
+                  },
+                  exc_info=True
+              )
+              # Graceful degradation or return error indicator
+        </pattern>
+        <common-exceptions>
+          <exception>telegram.error.RetryAfter - Rate limit hit</exception>
+          <exception>telegram.error.BadRequest - Invalid parameters</exception>
+          <exception>telegram.error.TelegramError - General Telegram API error</exception>
+          <exception>aiohttp.ClientError - Network error</exception>
+        </common-exceptions>
+      </error-handling>
+
+      <redis-patterns>
+        <description>
+          The system uses Redis for state management and caching.
+          The StateManager and ProfileManager provide async Redis access.
+        </description>
+        <example file="backend/api/state.py">
+          async with StateManager() as state:
+              session = await state.get_session(user_id)
+              # session contains: user_id, platform, conversation_id, timestamps
+        </example>
+        <session-fields>
+          <field name="user_id">User identifier (Telegram user ID as string)</field>
+          <field name="platform">Platform name (e.g., "telegram")</field>
+          <field name="conversation_id">Unique conversation identifier</field>
+          <field name="created_at">Session creation timestamp</field>
+          <field name="last_activity">Last activity timestamp</field>
+        </session-fields>
+      </redis-patterns>
+    </existing-patterns>
+
+    <configuration>
+      <environment-variables>
+        <var name="TELEGRAM_BOT_TOKEN" required="true">
+          <description>Telegram bot token from BotFather</description>
+          <location>telegram_bot/config.py</location>
+          <note>Required in backend for direct API access</note>
+        </var>
+        <var name="LOG_LEVEL" default="INFO">
+          <description>Logging level</description>
+        </var>
+      </environment-variables>
+      <bot-initialization file="telegram_bot/bot.py" lines="69-70">
+        app = ApplicationBuilder().token(bot_token).build()
+        # This creates a Bot instance that can send messages
+      </bot-initialization>
+    </configuration>
+  </technical-context>
+
+  <implementation-tasks>
+    <task id="1" priority="high">
+      <title>Create delivery module</title>
+      <description>Create backend/api/proactive/delivery.py with DeliveryResult dataclass</description>
+      <files-to-create>
+        <file>backend/api/proactive/__init__.py</file>
+        <file>backend/api/proactive/delivery.py</file>
+      </files-to-create>
+      <data-structures>
+        <dataclass name="DeliveryResult">
+          <field name="success" type="bool">Whether delivery succeeded</field>
+          <field name="message_id" type="Optional[int]">Telegram message ID if successful</field>
+          <field name="error" type="Optional[str]">Error message if failed</field>
+        </dataclass>
+      </data-structures>
+    </task>
+
+    <task id="2" priority="high">
+      <title>Implement chat_id lookup</title>
+      <description>Get chat_id from user_id (they are the same for Telegram)</description>
+      <implementation>
+        - User_id in system is Telegram chat_id (as string)
+        - Convert to int for Telegram API
+        - Validate platform is "telegram" (optional, for future-proofing)
+      </implementation>
+      <error-cases>
+        <case>user_id is None or empty - log error and return failure</case>
+        <case>user_id is not numeric - log error and return failure</case>
+      </error-cases>
+    </task>
+
+    <task id="3" priority="high">
+      <title>Implement message sending</title>
+      <description>Create deliver_message(user_id: str, message: str) -> DeliveryResult</description>
+      <function-signature>
+        async def deliver_message(
+            user_id: str,
+            message: str,
+            parse_mode: str = "HTML"
+        ) -> DeliveryResult
+      </function-signature>
+      <steps>
+        <step>1. Validate inputs (user_id, message not empty)</step>
+        <step>2. Initialize Bot instance with TELEGRAM_BOT_TOKEN</step>
+        <step>3. Convert user_id (string) to chat_id (int)</step>
+        <step>4. Call bot.send_message(chat_id, message, parse_mode)</step>
+        <step>5. Extract message_id from returned Message object</step>
+        <step>6. Return DeliveryResult(success=True, message_id=..., error=None)</step>
+      </steps>
+      <dependencies>
+        <import>from telegram import Bot</import>
+        <import>from telegram.error import RetryAfter, TelegramError</import>
+        <import>from api.config import get_config</import>
+        <import>from api.logging import get_logger</import>
+      </dependencies>
+    </task>
+
+    <task id="4" priority="high">
+      <title>Implement rate limit handling</title>
+      <description>Handle 429 responses with exponential backoff and retry</description>
+      <retry-logic>
+        <max-attempts>3</max-attempts>
+        <backoff-strategy>
+          - On RetryAfter exception, wait retry_error.retry_after seconds
+          - If no retry_after, use exponential: 2 ** (attempt - 1)
+          - Log each retry attempt with context
+        </backoff-strategy>
+        <example-code>
+          for attempt in range(1, max_retries + 1):
+              try:
+                  message_obj = await bot.send_message(chat_id, message, parse_mode=parse_mode)
+                  return DeliveryResult(success=True, message_id=message_obj.message_id, error=None)
+              except RetryAfter as e:
+                  wait_time = e.retry_after
+                  logger.warning(f"Rate limited, retrying after {wait_time}s")
+                  if attempt &lt; max_retries:
+                      await asyncio.sleep(wait_time)
+                  else:
+                      return DeliveryResult(success=False, message_id=None, error=f"Rate limited after {max_retries} retries")
+        </example-code>
+      </retry-logic>
+    </task>
+
+    <task id="5" priority="medium">
+      <title>Add error handling</title>
+      <description>Wrap in try/except and log errors gracefully</description>
+      <error-types>
+        <error type="RetryAfter">Rate limit - handled by retry logic</error>
+        <error type="BadRequest">Invalid parameters - log and return failure</error>
+        <error type="TelegramError">General API error - log and return failure</error>
+        <error type="Exception">Unexpected error - log with exc_info and return failure</error>
+      </error-types>
+      <logging-pattern>
+        logger.error(
+            "Failed to deliver message to Telegram",
+            extra={
+                "user_id": user_id,
+                "message_preview": message[:50],  # First 50 chars
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "event": "telegram_delivery_failed"
+            },
+            exc_info=True
+        )
+      </logging-pattern>
+      <graceful-degradation>
+        All errors should return DeliveryResult(success=False, message_id=None, error=str(e))
+        Never raise exceptions - the worker must continue running
+      </graceful-degradation>
+    </task>
+  </implementation-tasks>
+
+  <testing-approach>
+    <unit-tests>
+      <test name="test_deliver_message_success">
+        <description>Test successful message delivery</description>
+        <setup>Mock Bot.send_message to return Message with message_id</setup>
+        <verify>
+          - DeliveryResult.success is True
+          - message_id is set correctly
+          - error is None
+        </verify>
+      </test>
+      <test name="test_deliver_message_rate_limit">
+        <description>Test rate limit handling with retry</description>
+        <setup>
+          - First call raises RetryAfter(1)
+          - Second call succeeds
+        </setup>
+        <verify>
+          - Function waits and retries
+          - Eventually succeeds
+          - Logs rate limit warning
+        </verify>
+      </test>
+      <test name="test_deliver_message_exhausted_retries">
+        <description>Test failure after max retries</description>
+        <setup>All calls raise RetryAfter</setup>
+        <verify>
+          - DeliveryResult.success is False
+          - message_id is None
+          - error contains "Rate limited"
+        </verify>
+      </test>
+      <test name="test_deliver_message_invalid_user_id">
+        <description>Test handling of invalid user_id</description>
+        <setup>user_id is empty or non-numeric</setup>
+        <verify>
+          - DeliveryResult.success is False
+          - error describes validation failure
+        </verify>
+      </test>
+      <test name="test_deliver_message_telegram_error">
+        <description>Test handling of Telegram API errors</description>
+        <setup>Mock raises TelegramError</setup>
+        <verify>
+          - DeliveryResult.success is False
+          - error is logged
+          - No exception raised
+        </verify>
+      </test>
+    </unit-tests>
+
+    <integration-tests>
+      <test name="test_deliver_to_real_telegram">
+        <description>Manual test with real Telegram bot (development only)</description>
+        <steps>
+          <step>1. Get authorized user_id from .env (AUTHORIZED_USER_IDS)</step>
+          <step>2. Call deliver_message with test message</step>
+          <step>3. Verify message appears in Telegram chat</step>
+          <step>4. Check message_id is returned</step>
+        </steps>
+        <note>This should be a manual test, not automated (requires real Telegram account)</note>
+      </test>
+    </integration-tests>
+  </testing-approach>
+
+  <code-examples>
+    <example name="Basic delivery function skeleton">
+      <code language="python"><![CDATA[
+from dataclasses import dataclass
+from typing import Optional
+import asyncio
+
+from telegram import Bot
+from telegram.error import RetryAfter, BadRequest, TelegramError
+
+from api.config import get_config
+from api.logging import get_logger
+
+logger = get_logger(__name__)
+
+@dataclass
+class DeliveryResult:
+    """Result of message delivery attempt."""
+    success: bool
+    message_id: Optional[int]
+    error: Optional[str]
+
+async def deliver_message(
+    user_id: str,
+    message: str,
+    parse_mode: str = "HTML",
+    max_retries: int = 3
+) -> DeliveryResult:
+    """
+    Deliver proactive message to user via Telegram.
+
+    Args:
+        user_id: User identifier (Telegram chat_id as string)
+        message: Message text to send
+        parse_mode: Telegram parse mode (HTML or Markdown)
+        max_retries: Maximum retry attempts for rate limits
+
+    Returns:
+        DeliveryResult with success status and message_id
+    """
+    # Input validation
+    if not user_id or not user_id.strip():
+        error_msg = "user_id cannot be empty"
+        logger.error(error_msg, extra={"event": "delivery_validation_failed"})
+        return DeliveryResult(success=False, message_id=None, error=error_msg)
+
+    if not message or not message.strip():
+        error_msg = "message cannot be empty"
+        logger.error(error_msg, extra={"user_id": user_id, "event": "delivery_validation_failed"})
+        return DeliveryResult(success=False, message_id=None, error=error_msg)
+
+    try:
+        # Convert user_id (string) to chat_id (int)
+        try:
+            chat_id = int(user_id)
+        except ValueError:
+            error_msg = f"Invalid user_id format: {user_id}"
+            logger.error(error_msg, extra={"user_id": user_id, "event": "delivery_validation_failed"})
+            return DeliveryResult(success=False, message_id=None, error=error_msg)
+
+        # Initialize Bot
+        config = get_config()
+        bot_token = config.get("TELEGRAM_BOT_TOKEN")
+        bot = Bot(token=bot_token)
+
+        # Retry loop for rate limiting
+        for attempt in range(1, max_retries + 1):
+            try:
+                logger.info(
+                    "Attempting to deliver message",
+                    extra={
+                        "user_id": user_id,
+                        "chat_id": chat_id,
+                        "message_length": len(message),
+                        "attempt": attempt,
+                        "event": "delivery_attempt"
+                    }
+                )
+
+                # Send message via Telegram API
+                message_obj = await bot.send_message(
+                    chat_id=chat_id,
+                    text=message,
+                    parse_mode=parse_mode
+                )
+
+                logger.info(
+                    "Message delivered successfully",
+                    extra={
+                        "user_id": user_id,
+                        "chat_id": chat_id,
+                        "message_id": message_obj.message_id,
+                        "attempt": attempt,
+                        "event": "delivery_success"
+                    }
+                )
+
+                return DeliveryResult(
+                    success=True,
+                    message_id=message_obj.message_id,
+                    error=None
+                )
+
+            except RetryAfter as e:
+                wait_time = e.retry_after
+                logger.warning(
+                    f"Rate limited by Telegram, retry_after={wait_time}s",
+                    extra={
+                        "user_id": user_id,
+                        "chat_id": chat_id,
+                        "retry_after": wait_time,
+                        "attempt": attempt,
+                        "max_retries": max_retries,
+                        "event": "delivery_rate_limited"
+                    }
+                )
+
+                if attempt < max_retries:
+                    await asyncio.sleep(wait_time)
+                else:
+                    error_msg = f"Rate limited after {max_retries} retries"
+                    logger.error(
+                        error_msg,
+                        extra={
+                            "user_id": user_id,
+                            "chat_id": chat_id,
+                            "event": "delivery_failed_rate_limit"
+                        }
+                    )
+                    return DeliveryResult(success=False, message_id=None, error=error_msg)
+
+    except BadRequest as e:
+        error_msg = f"Invalid Telegram request: {str(e)}"
+        logger.error(
+            error_msg,
+            extra={
+                "user_id": user_id,
+                "error": str(e),
+                "error_type": "BadRequest",
+                "event": "delivery_failed_bad_request"
+            },
+            exc_info=True
+        )
+        return DeliveryResult(success=False, message_id=None, error=error_msg)
+
+    except TelegramError as e:
+        error_msg = f"Telegram API error: {str(e)}"
+        logger.error(
+            error_msg,
+            extra={
+                "user_id": user_id,
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "event": "delivery_failed_telegram_error"
+            },
+            exc_info=True
+        )
+        return DeliveryResult(success=False, message_id=None, error=error_msg)
+
+    except Exception as e:
+        error_msg = f"Unexpected error during delivery: {str(e)}"
+        logger.error(
+            error_msg,
+            extra={
+                "user_id": user_id,
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "event": "delivery_failed_unexpected"
+            },
+            exc_info=True
+        )
+        return DeliveryResult(success=False, message_id=None, error=error_msg)
+]]></code>
+    </example>
+
+    <example name="Usage from wake-up agent">
+      <code language="python"><![CDATA[
+from backend.api.proactive.delivery import deliver_message
+
+# In wake-up agent after generating message
+async def execute_proactive_trigger(user_id: str, trigger_id: str):
+    # ... generate message via LLM ...
+    message = "Hey! Your tech stocks are up 5% this week 🚀"
+
+    # Deliver to user
+    result = await deliver_message(user_id, message)
+
+    if result.success:
+        logger.info(
+            f"Proactive message delivered",
+            extra={
+                "user_id": user_id,
+                "trigger_id": trigger_id,
+                "message_id": result.message_id
+            }
+        )
+        # Store message_id for tracking/feedback
+    else:
+        logger.error(
+            f"Failed to deliver proactive message: {result.error}",
+            extra={
+                "user_id": user_id,
+                "trigger_id": trigger_id
+            }
+        )
+        # Update trigger status or retry later
+]]></code>
+    </example>
+  </code-examples>
+
+  <references>
+    <doc title="Telegram Bot API - sendMessage">https://core.telegram.org/bots/api#sendmessage</doc>
+    <doc title="Telegram Bot API - Rate Limits">https://core.telegram.org/bots/faq#my-bot-is-hitting-limits-how-do-i-avoid-this</doc>
+    <doc title="python-telegram-bot Documentation">https://docs.python-telegram-bot.org/</doc>
+    <file path="telegram_bot/handlers/message.py">Rate limit handling patterns</file>
+    <file path="backend/api/state.py">Redis session management</file>
+    <file path="docs/design/proactive-ai-architecture.md">Proactive AI architecture</file>
+  </references>
+
+  <dev-notes>
+    <note priority="high">
+      User_id in our system IS the Telegram chat_id. This is because when users send messages
+      to the bot, the Telegram user ID (from_user.id) becomes our user_id. So no separate
+      lookup is needed - just convert string to int.
+    </note>
+    <note priority="medium">
+      The Bot class from python-telegram-bot can be used independently of the Application
+      (polling) setup. This allows the backend to send messages without interfering with
+      the telegram-bot service's polling loop.
+    </note>
+    <note priority="medium">
+      Consider adding a message queue for retries if delivery fails. This could be implemented
+      in a future story (similar to memory_queue pattern in memory.py).
+    </note>
+    <note priority="low">
+      For multi-platform support in the future, add platform validation and routing logic.
+      Could store platform-specific chat identifiers in user profile or session.
+    </note>
+  </dev-notes>
+</story-context>

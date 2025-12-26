@@ -1,0 +1,551 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <metadata>
+    <story-id>13.3</story-id>
+    <story-name>System Prompt Enhancement</story-name>
+    <epic>13 - Proactive AI Worker</epic>
+    <status>ready-for-dev</status>
+    <estimated-effort>0.5 days</estimated-effort>
+  </metadata>
+
+  <user-story>
+    <as-a>user</as-a>
+    <i-want>Annie to proactively suggest helpful triggers during conversation</i-want>
+    <so-that>I can benefit from proactive features without needing to know they exist</so-that>
+  </user-story>
+
+  <acceptance-criteria>
+    <ac id="1">
+      <title>Proactive Capabilities Section</title>
+      <given>system prompt loaded</given>
+      <when>building prompt</when>
+      <then>
+        includes:
+        - Explanation of proactive capabilities
+        - When to offer triggers (signal phrases)
+        - Schedule translation examples (natural language → cron)
+        - Best practices for trigger creation
+        - How to manage existing triggers
+      </then>
+    </ac>
+    <ac id="2">
+      <title>Active Triggers in Context</title>
+      <given>user has triggers</given>
+      <when>system prompt built</when>
+      <then>
+        - Includes summary of active triggers
+        - Shows intent_name, schedule/condition, last fired
+        - Helps LLM reference existing triggers
+      </then>
+    </ac>
+    <ac id="3">
+      <title>action_context Guidance</title>
+      <given>system prompt loaded</given>
+      <when>LLM creates trigger</when>
+      <then>
+        - Prompt teaches comprehensive action_context structure
+        - Emphasizes this is briefing for future LLM
+        - Lists required sections
+      </then>
+    </ac>
+  </acceptance-criteria>
+
+  <design-reference>
+    <document>docs/design/proactive-ai-architecture.md</document>
+    <section>6. System Prompt Enhancements</section>
+    <subsections>
+      <subsection>6.1 Proactive Capabilities Section (lines 1103-1174)</subsection>
+      <subsection>6.2 Active Triggers in Context (lines 1176-1189)</subsection>
+      <subsection>Section 4: action_context Specification (lines 378-836)</subsection>
+    </subsections>
+    <key-content>
+      <signal-phrases>
+        - "remind me..." / "let me know when..." / "alert me if..."
+        - "check in with me..." / "wake me up..."
+        - "every morning/evening/week..."
+      </signal-phrases>
+      <schedule-translations>
+        "every morning" → 9 AM daily
+        "every weekday morning" → 9 AM Mon-Fri (cron: "0 9 * * 1-5")
+        "every Friday" → Friday 9 AM or 5 PM
+        "market open" → 9:30 AM ET weekdays
+        "in 2 hours" → One-time calculated
+      </schedule-translations>
+      <action-context-sections>
+        - original_request (user's exact words)
+        - intent_summary (1-3 sentences)
+        - user_context (invariant preferences only, NO dynamic data)
+        - execution_instructions (step-by-step guide for wake-up LLM)
+        - message_guidance (tone, length, examples, edge cases)
+        - available_tools (what to call and when)
+        - edge_cases (unusual situations)
+        - meta (created_at, notes)
+      </action-context-sections>
+    </key-content>
+  </design-reference>
+
+  <current-implementation>
+    <prompt-system>
+      <file>backend/api/prompts.py</file>
+      <current-structure>
+        <constants>
+          - BASE_SYSTEM_PROMPT (lines 16-62): Core Annie personality and behavior
+          - TELEGRAM_FORMAT_INSTRUCTIONS (lines 65-74): Platform-specific formatting
+          - WEB_FORMAT_INSTRUCTIONS (lines 76-85): Web platform formatting
+          - API_FORMAT_INSTRUCTIONS (lines 87-90): API formatting
+          - MEMORY_CONTEXT_HEADER/FOOTER (lines 94-96): Memory context injection
+          - TOOL_USAGE_INSTRUCTIONS (lines 100-103): Current tool safety guidelines
+        </constants>
+        <functions>
+          - build_system_prompt() (lines 268-332):
+            * Assembles system prompt with user_id, platform, profile, portfolio
+            * Current injection points:
+              1. BASE_SYSTEM_PROMPT
+              2. user_id (line 292)
+              3. USER PROFILE section (lines 295-299)
+              4. USER PORTFOLIO section (lines 302-306)
+              5. Current date/time (lines 308-318)
+              6. Platform-specific formatting (lines 320-326)
+              7. TOOL_USAGE_INSTRUCTIONS (lines 329-330)
+          - format_profile_for_prompt() (lines 155-265): Formats user profile data
+          - format_portfolio_for_prompt() (lines 106-152): Formats portfolio holdings
+        </functions>
+      </current-structure>
+      <injection-pattern>
+        prompt_parts = [BASE_SYSTEM_PROMPT]
+        if user_id:
+            prompt_parts.append(f"\nCurrent user ID: {user_id}")
+        if profile:
+            profile_str = format_profile_for_prompt(profile)
+            if profile_str:
+                prompt_parts.append("\n\nUSER PROFILE:")
+                prompt_parts.append(profile_str)
+        # ... portfolio, datetime, formatting, tool instructions
+        return "\n".join(prompt_parts)
+      </injection-pattern>
+    </prompt-system>
+
+    <stream-route-usage>
+      <file>backend/api/routes/stream.py</file>
+      <location>lines 1020-1029</location>
+      <code>
+        from api.prompts import build_system_prompt
+
+        system_message = build_system_prompt(
+            user_id=user_id,
+            platform=platform,
+            include_tool_instructions=True,
+            profile=profile,
+            portfolio=portfolio
+        ) if user_id else None
+      </code>
+      <context-gathering>
+        Profile: Retrieved via ProfileManager.get_cached_profile() (lines 993-1018)
+        Portfolio: Retrieved via PortfolioManager.get_cached_portfolio() (lines 993-1018)
+        Pattern: Both use Redis-cached data with smart refresh
+      </context-gathering>
+    </stream-route-usage>
+
+    <data-fetching-patterns>
+      <profile-manager>
+        <file>backend/api/profile.py</file>
+        <usage>
+          profile_manager = ProfileManager(redis_client)
+          profile = await profile_manager.get_cached_profile(user_id)
+          # Returns: Dict[str, Any] or None
+          # Cached for 15 minutes (PROFILE_CACHE_TTL = 900s)
+          # Background refresh every 5 messages or 15 min
+        </usage>
+      </profile-manager>
+      <portfolio-manager>
+        <file>backend/api/portfolio_context.py</file>
+        <usage>
+          portfolio_manager = PortfolioManager(redis_client)
+          portfolio = await portfolio_manager.get_cached_portfolio(user_id)
+          # Returns: Dict[str, Any] or None
+          # Cached for 5 minutes (PORTFOLIO_CACHE_TTL = 300s)
+          # Shorter TTL due to more dynamic nature
+        </usage>
+      </portfolio-manager>
+    </data-fetching-patterns>
+  </current-implementation>
+
+  <implementation-plan>
+    <task id="1">
+      <title>Add proactive capabilities section to system prompt</title>
+      <file>backend/api/prompts.py</file>
+      <action>
+        Create new constant PROACTIVE_CAPABILITIES_SECTION with content from
+        design doc Section 6.1 (lines 1107-1174). Include:
+        - When to offer proactive features (signal phrase table)
+        - Best practices for creating triggers (clarify, confirm, explain, offer)
+        - Schedule translation table
+        - Managing existing triggers guidance
+        - Writing good action_context guidance
+      </action>
+      <integration>
+        Add to build_system_prompt() after BASE_SYSTEM_PROMPT but before user-specific data.
+        This makes it part of the core personality/capability description.
+      </integration>
+    </task>
+
+    <task id="2">
+      <title>Add action_context guidance section</title>
+      <file>backend/api/prompts.py</file>
+      <action>
+        Create new constant ACTION_CONTEXT_GUIDANCE with comprehensive structure documentation:
+        - All required sections (original_request, intent_summary, user_context, etc.)
+        - Critical warnings about NOT snapshotting dynamic data in user_context
+        - Examples of good vs bad patterns
+        - Emphasis that action_context is for future wake-up LLM
+      </action>
+      <integration>
+        Include this in PROACTIVE_CAPABILITIES_SECTION as the "Writing Good action_context" subsection.
+        Reference design doc Section 4 (lines 378-836) for complete structure.
+      </integration>
+    </task>
+
+    <task id="3">
+      <title>Implement active triggers injection</title>
+      <file>backend/api/prompts.py</file>
+      <action>
+        1. Create format_triggers_for_prompt(triggers: List[Dict]) -> Optional[str]:
+           - Input: List of trigger dictionaries from IntentsClient
+           - Output: Formatted string like design doc Section 6.2 (lines 1180-1189)
+           - Format: "1. {intent_name} - {schedule/condition} - Last fired: {time}"
+
+        2. Update build_system_prompt() signature:
+           - Add parameter: triggers: Optional[List[Dict[str, Any]]] = None
+
+        3. Add injection logic in build_system_prompt():
+           if triggers:
+               triggers_str = format_triggers_for_prompt(triggers)
+               if triggers_str:
+                   prompt_parts.append("\n\nYOUR ACTIVE TRIGGERS:")
+                   prompt_parts.append(triggers_str)
+      </action>
+      <dependencies>
+        BLOCKS: Story 13.1 (IntentsClient) must be complete to fetch trigger data.
+        This story can implement the formatting function, but injection requires 13.1.
+      </dependencies>
+    </task>
+
+    <task id="4">
+      <title>Update stream route to fetch and inject triggers</title>
+      <file>backend/api/routes/stream.py</file>
+      <action>
+        1. After profile and portfolio fetching (around line 1018):
+           # Fetch active triggers for prompt context
+           triggers = None
+           try:
+               intents_client = IntentsClient()
+               triggers = await intents_client.get_active_intents(user_id)
+           except Exception as e:
+               logger.warning(
+                   "Failed to fetch triggers for prompt context",
+                   extra={"user_id": user_id, "error": str(e)}
+               )
+
+        2. Update build_system_prompt() call (line 1023):
+           system_message = build_system_prompt(
+               user_id=user_id,
+               platform=platform,
+               include_tool_instructions=True,
+               profile=profile,
+               portfolio=portfolio,
+               triggers=triggers  # NEW
+           ) if user_id else None
+      </action>
+      <dependencies>
+        REQUIRES: Story 13.1 (IntentsClient with get_active_intents method)
+      </dependencies>
+    </task>
+
+    <task id="5">
+      <title>Add trigger management guidance</title>
+      <file>backend/api/prompts.py</file>
+      <action>
+        Add to PROACTIVE_CAPABILITIES_SECTION:
+        - How to list triggers (call list_triggers tool)
+        - Modification patterns (pause vs delete)
+        - Always confirm before deletion
+        - Update vs create decisions
+      </action>
+      <notes>
+        This is included in design doc Section 6.1 "Managing Existing Triggers" (lines 1151-1162).
+        Integrate into PROACTIVE_CAPABILITIES_SECTION.
+      </notes>
+    </task>
+  </implementation-plan>
+
+  <technical-details>
+    <prompt-placement-strategy>
+      <order>
+        1. BASE_SYSTEM_PROMPT (core personality)
+        2. PROACTIVE_CAPABILITIES_SECTION (new - core capability)
+        3. user_id
+        4. USER PROFILE (dynamic user data)
+        5. USER PORTFOLIO (dynamic financial data)
+        6. YOUR ACTIVE TRIGGERS (dynamic trigger list)
+        7. Current date/time
+        8. Platform-specific formatting
+        9. TOOL_USAGE_INSTRUCTIONS
+      </order>
+      <rationale>
+        Proactive capabilities go early (after personality but before user data) because
+        they're a core system capability, not user-specific. Active triggers come after
+        profile/portfolio because they're dynamic user state like portfolio.
+      </rationale>
+    </prompt-placement-strategy>
+
+    <formatting-pattern>
+      <header-style>
+        Use "## SECTION TITLE" for top-level sections (matches current pattern)
+        Use "### Subsection" for nested sections
+      </header-style>
+      <table-rendering>
+        Signal phrases table should be plain text, not markdown tables (better for LLM consumption):
+
+        "Listen for these signals:
+        - 'I want to keep an eye on...' → Offer condition trigger
+        - 'Remind me every morning...' → Offer scheduled trigger
+        ..."
+      </table-rendering>
+    </formatting-pattern>
+
+    <trigger-summary-format>
+      <structure>
+        For each trigger:
+        1. {intent_name} - {human_readable_schedule_or_condition} - Last fired: {relative_time}
+      </structure>
+      <example>
+        1. "Morning portfolio brief" - Weekdays 8:30 AM PT - Last fired: yesterday
+        2. "NVDA price alert" - When NVDA &lt; $130 - Never fired yet
+        3. "Weekly check-in" - Fridays 5 PM PT - Last fired: 2 days ago
+      </example>
+      <implementation>
+        def format_triggers_for_prompt(triggers: List[Dict]) -> Optional[str]:
+            if not triggers:
+                return None
+
+            lines = []
+            for idx, trigger in enumerate(triggers, 1):
+                intent_name = trigger.get("intent_name", "Unnamed trigger")
+
+                # Format schedule or condition
+                if trigger["trigger_type"] == "scheduled":
+                    schedule = trigger["schedule"]
+                    desc = format_schedule_human_readable(schedule)
+                elif trigger["trigger_type"] == "condition":
+                    condition = trigger["condition"]
+                    desc = condition.get("expression", "Condition-based")
+
+                # Format last fired
+                last_fired = trigger.get("last_fired_at")
+                if last_fired:
+                    fired_str = format_relative_time(last_fired)
+                else:
+                    fired_str = "Never fired yet"
+
+                lines.append(f'{idx}. "{intent_name}" - {desc} - Last fired: {fired_str}')
+
+            return "\n".join(lines)
+      </implementation>
+    </trigger-summary-format>
+
+    <intents-client-interface>
+      <expected-api>
+        # From Story 13.1 - IntentsClient
+        from api.intents_client import IntentsClient
+
+        client = IntentsClient()
+
+        # Get active triggers for user
+        triggers = await client.get_active_intents(user_id)
+        # Returns: List[Dict[str, Any]] or []
+
+        # Each trigger dict contains:
+        {
+            "intent_id": "uuid",
+            "user_id": "telegram_12345",
+            "intent_name": "Morning portfolio brief",
+            "trigger_type": "scheduled",  # or "condition"
+            "schedule": {  # if trigger_type == "scheduled"
+                "mode": "cron",
+                "expression": "0 8 * * 1-5",
+                "timezone": "America/Los_Angeles"
+            },
+            "condition": {  # if trigger_type == "condition"
+                "type": "price",
+                "expression": "NVDA < 130"
+            },
+            "action_context": {...},
+            "enabled": true,
+            "last_fired_at": "2025-12-23T08:30:00Z",
+            "created_at": "2025-12-01T10:00:00Z"
+        }
+      </expected-api>
+      <error-handling>
+        Graceful degradation: If IntentsClient fails, triggers should be None
+        and prompt should build without YOUR ACTIVE TRIGGERS section.
+        Same pattern as profile/portfolio fetching.
+      </error-handling>
+    </intents-client-interface>
+
+    <token-budget-consideration>
+      <concern>
+        Adding proactive section + trigger list increases prompt tokens.
+        Need to balance detail with efficiency.
+      </concern>
+      <mitigation>
+        - Proactive section: ~500 tokens (one-time, always present)
+        - Trigger list: ~50 tokens per trigger (dynamic, user-specific)
+        - Expected: Most users have 0-5 triggers, so 0-250 tokens
+        - Total addition: ~500-750 tokens
+        - This is acceptable given improved proactive suggestions
+      </mitigation>
+      <monitoring>
+        Verify in AC: "Prompt additions don't significantly impact response latency"
+        Can measure via Langfuse token tracking.
+      </monitoring>
+    </token-budget-consideration>
+  </technical-details>
+
+  <testing-strategy>
+    <verification-steps>
+      <step id="1">
+        Test prompt contains proactive capabilities section:
+        - Build system prompt with no user data
+        - Assert "PROACTIVE CAPABILITIES" in prompt
+        - Assert signal phrases present
+        - Assert schedule translation examples present
+      </step>
+      <step id="2">
+        Test action_context guidance present:
+        - Assert "action_context" structure documented
+        - Assert warning about NOT snapshotting dynamic data
+        - Assert all required sections listed
+      </step>
+      <step id="3">
+        Test trigger injection when user has triggers:
+        - Mock IntentsClient.get_active_intents() to return sample triggers
+        - Build system prompt with triggers parameter
+        - Assert "YOUR ACTIVE TRIGGERS:" in prompt
+        - Assert trigger summary formatted correctly
+      </step>
+      <step id="4">
+        Test graceful degradation when no triggers:
+        - Build system prompt with triggers=None
+        - Assert "YOUR ACTIVE TRIGGERS:" NOT in prompt
+        - Assert rest of prompt still works
+      </step>
+      <step id="5">
+        Test LLM behavior (manual):
+        - Send message: "Remind me every morning at 8am to check my portfolio"
+        - Verify Annie offers to create trigger
+        - Verify Annie explains what will happen
+        - Verify Annie asks for confirmation
+      </step>
+      <step id="6">
+        Test LLM knows existing triggers (manual):
+        - Create a trigger for user
+        - Send message: "What reminders do I have set up?"
+        - Verify Annie can reference the active trigger from context
+      </step>
+      <step id="7">
+        Test token impact (observability):
+        - Compare average prompt tokens before/after this story
+        - Use Langfuse to measure impact
+        - Ensure latency doesn't increase significantly
+      </step>
+    </verification-steps>
+  </testing-strategy>
+
+  <dependencies>
+    <blocks>
+      <story id="13.1">
+        Title: IntentsClient HTTP Client
+        Reason: Need IntentsClient.get_active_intents() to fetch trigger list
+        Status: Must be completed before Task 4 (stream route integration)
+      </story>
+    </blocks>
+    <blocked-by>
+      <none>
+        This story can begin immediately. Tasks 1-2 (adding prompt sections) are independent.
+        Task 3 can implement formatting function without IntentsClient.
+        Only Task 4 (stream route integration) requires 13.1 completion.
+      </none>
+    </blocked-by>
+    <enables>
+      <story id="13.2">MCP Tools - Trigger Management</story>
+      <story id="13.6">Wake-Up Agent</story>
+      <story id="13.10">Feedback Handler</story>
+      <note>
+        Enhanced system prompt teaches LLM how to use trigger management tools effectively.
+        Wake-up agent benefits from comprehensive action_context guidance.
+      </note>
+    </enables>
+  </dependencies>
+
+  <implementation-notes>
+    <incremental-approach>
+      1. Start with Tasks 1-2 (add prompt sections) - can complete immediately
+      2. Implement Task 3 (formatting function) - can test with mock data
+      3. Wait for Story 13.1 completion
+      4. Implement Task 4 (stream route integration)
+      5. Run full verification suite
+    </incremental-approach>
+    <suggested-commit-strategy>
+      Commit 1: "Add proactive capabilities and action_context guidance to system prompt"
+      - Tasks 1-2 complete
+      - Update prompts.py with new sections
+
+      Commit 2: "Implement trigger summary formatting for prompt injection"
+      - Task 3 complete
+      - Add format_triggers_for_prompt() function
+      - Update build_system_prompt() signature
+
+      Commit 3: "Integrate active triggers into stream route system prompt"
+      - Task 4 complete (requires 13.1)
+      - Update stream.py to fetch and pass triggers
+    </suggested-commit-strategy>
+    <edge-cases>
+      <case id="1">
+        User has many triggers (>10):
+        - Consider limiting to most recent 10 in prompt
+        - Or summarize: "You have 15 active triggers. Recent: ..."
+      </case>
+      <case id="2">
+        IntentsClient fails during stream route:
+        - Log warning, continue without triggers in prompt
+        - Don't break the chat flow
+      </case>
+      <case id="3">
+        Trigger has malformed data:
+        - format_triggers_for_prompt() should handle missing fields gracefully
+        - Use .get() with defaults, don't crash on KeyError
+      </case>
+    </edge-cases>
+  </implementation-notes>
+
+  <references>
+    <design-docs>
+      <doc path="docs/design/proactive-ai-architecture.md">
+        <section number="6.1" lines="1103-1174">Proactive Capabilities Section</section>
+        <section number="6.2" lines="1176-1189">Active Triggers in Context</section>
+        <section number="4" lines="378-836">Action Context Specification</section>
+      </doc>
+    </design-docs>
+    <code-files>
+      <file path="backend/api/prompts.py">Core prompt construction module</file>
+      <file path="backend/api/routes/stream.py">Stream endpoint using system prompt</file>
+      <file path="backend/api/profile.py">ProfileManager - pattern reference</file>
+      <file path="backend/api/portfolio_context.py">PortfolioManager - pattern reference</file>
+    </code-files>
+    <related-stories>
+      <story id="13.1">IntentsClient (dependency)</story>
+      <story id="13.2">MCP Tools - Trigger Management (enabled by this)</story>
+      <story id="13.6">Wake-Up Agent (benefits from action_context guidance)</story>
+    </related-stories>
+  </references>
+</story-context>

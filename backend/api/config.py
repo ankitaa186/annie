@@ -69,6 +69,7 @@ OPTIONAL_VARS = {
     "MCP_SERVER_URL": "http://mcp-server:8002",
     "BACKEND_PORT": "8000",
     "ENVIRONMENT": "dev",
+    "TELEGRAM_BOT_TOKEN": None,  # Required for proactive worker
 }
 
 # Sensitive variables that should be masked in logs

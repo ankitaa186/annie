@@ -1,0 +1,583 @@
+<story-context id=".bmad/bmm/workflows/4-implementation/story-context/template" v="1.0">
+  <metadata>
+    <epicId>13</epicId>
+    <storyId>13.11</storyId>
+    <title>Integration Testing</title>
+    <status>drafted</status>
+    <generatedAt>2025-12-24</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>.bmad-ephemeral/stories/13-11-integration-testing.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>developer</asA>
+    <iWant>comprehensive tests for the proactive system</iWant>
+    <soThat>I can confidently deploy and maintain the feature</soThat>
+    <tasks>
+      - Task 1: Set up test infrastructure (backend/tests/test_proactive/ directory, pytest fixtures, freezegun for time mocking)
+      - Task 2: Write IntentsClient tests (CRUD operations, claim conflict handling, fire reporting against mock API)
+      - Task 3: Write evaluator tests (PriceEvaluator with mock yfinance, PortfolioEvaluator with mock portfolio, SilenceEvaluator with mock Redis)
+      - Task 4: Write gate tests (each gate check in isolation, gate with all checks passing, defer_until calculation)
+      - Task 5: Write agent tests (mock LLM responses, test skip decision logic, test message composition)
+      - Task 6: Write full flow tests (mock agentic-memories, mock Telegram, test complete trigger → delivery flow)
+      - Task 7: Write feedback tests (proactive message recording, feedback detection, context clearing)
+    </tasks>
+  </story>
+
+  <acceptanceCriteria>
+    - AC #1: Trigger Creation Tests - Create scheduled/condition triggers via MCP tools, verify stored correctly in mock agentic-memories
+    - AC #2: Condition Evaluator Tests - Price evaluator tests &lt;, &gt;, &lt;=, &gt;= operators; Portfolio evaluator tests various expressions; Silence evaluator tests with mock activity times
+    - AC #3: Subconscious Gate Tests - Verify recent contact blocking, daily limit blocking, quiet hours blocking, opt-out blocking
+    - AC #4: Wake-Up Agent Tests - Verify tool calls match briefing, skip conditions respected, message matches guidelines
+    - AC #5: Full Flow Test - Gate passes, agent executes, message "sent" (mock Telegram), fire reported correctly
+    - AC #6: Feedback Handler Tests - Feedback context correctly detected, system prompt includes trigger context, update trigger works, context cleared after processing
+  </acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc>
+        <path>docs/design/proactive-ai-architecture.md</path>
+        <title>Proactive AI Architecture Design Document</title>
+        <section>All Sections</section>
+        <snippet>Complete architecture document defining LLM-driven proactive system, trigger types, action context specification, wake-up agent design, subconscious gate, technical architecture, data models, flow diagrams. CRITICAL reference for all test scenarios and expected behaviors.</snippet>
+      </doc>
+      <doc>
+        <path>docs/epics/epic-13-proactive-ai.md</path>
+        <title>Epic 13: Proactive AI Worker</title>
+        <section>Overview, Architecture Summary, Dependencies</section>
+        <snippet>Epic overview with business value, external dependencies (agentic-memories Epic 5/6), internal dependencies. Two trigger types: scheduled (cron/once) and condition (price/portfolio/silence). Claims-based worker pattern for multi-worker safety.</snippet>
+      </doc>
+      <doc>
+        <path>.bmad-ephemeral/stories/13-1-intents-http-client.md</path>
+        <title>Story 13.1: Intents HTTP Client</title>
+        <section>API Schema Reference</section>
+        <snippet>IntentsClient API reference - CRUD operations, claim_intent (409 on conflict), fire_intent (status reporting), get_pending (returns due intents with in_cooldown flag). Data models: ScheduledIntentCreate, IntentFireRequest, IntentFireResponse.</snippet>
+      </doc>
+      <doc>
+        <path>.bmad-ephemeral/stories/13-4-condition-evaluators.md</path>
+        <title>Story 13.4: Condition Evaluators</title>
+        <section>Expression Parsing Examples, Caching Strategy</section>
+        <snippet>Evaluator patterns - PriceEvaluator (yfinance with retry, 60s cache), PortfolioEvaluator (expression parsing), SilenceEvaluator (Redis activity check). All return False on error (fail-safe). Expression examples for testing.</snippet>
+      </doc>
+    </docs>
+
+    <code>
+      <file>
+        <path>backend/tests/conftest.py</path>
+        <kind>Test Configuration</kind>
+        <symbol>Test fixtures</symbol>
+        <lines>1-113</lines>
+        <reason>Core pytest configuration with environment variable setup, mock_redis fixture, mock_httpx_client fixture. Reuse these patterns for proactive tests. TEST_ENV_VARS includes all necessary config (LLM keys, Redis, agentic-memories URL).</reason>
+      </file>
+
+      <file>
+        <path>backend/tests/unit/test_memory_client.py</path>
+        <kind>HTTP Client Test Pattern</kind>
+        <symbol>TestMemoryClient*</symbol>
+        <lines>1-571</lines>
+        <reason>Complete HTTP client test pattern - initialization, context manager, success cases, error handling (API error, network error, timeout), graceful degradation. Use same structure for IntentsClient tests. Shows AsyncMock usage with httpx, patch patterns.</reason>
+      </file>
+
+      <file>
+        <path>backend/tests/unit/test_memory_manager.py</path>
+        <kind>Manager Test Pattern</kind>
+        <symbol>TestMemoryManager*, TestCircuitBreaker*</symbol>
+        <lines>1-851</lines>
+        <reason>Manager test pattern with circuit breaker, queue for retry, graceful degradation. Shows AsyncMock usage for StateManager, Redis operations (rpush, lpop, scan), time mocking patterns. Reuse for gate tests and feedback tests.</reason>
+      </file>
+
+      <file>
+        <path>backend/tests/e2e/test_streaming_e2e.py</path>
+        <kind>E2E Test Pattern</kind>
+        <symbol>TestEndToEndStreaming</symbol>
+        <lines>1-360</lines>
+        <reason>Full flow test pattern - POST /api/chat → GET /api/stream with mocked LLM and MCP. Shows TestClient usage, SSE streaming validation, concurrent streams testing, error recovery. Use for full trigger → delivery flow tests.</reason>
+      </file>
+
+      <file>
+        <path>backend/tests/unit/test_gemini_provider.py</path>
+        <kind>Provider Test Pattern</kind>
+        <symbol>TestGeminiProvider*</symbol>
+        <lines>1-156</lines>
+        <reason>Provider test pattern showing configuration testing, mock usage with patch, error handling. Shows how to mock external APIs (genai.configure, genai.GenerativeModel). Use for mocking yfinance in evaluator tests.</reason>
+      </file>
+
+      <file>
+        <path>backend/api/memory_client.py</path>
+        <kind>HTTP Client Reference</kind>
+        <symbol>MemoryClient</symbol>
+        <lines>1-300</lines>
+        <reason>HTTP client implementation pattern used by IntentsClient. Shows error classes (MemoryClientError, MemoryNetworkError, MemoryAPIError), context manager, httpx usage, timeout handling. Tests should validate same patterns.</reason>
+      </file>
+
+      <file>
+        <path>backend/api/memory.py</path>
+        <kind>Circuit Breaker Reference</kind>
+        <symbol>MemoryManager</symbol>
+        <lines>1-500</lines>
+        <reason>Circuit breaker implementation in MemoryManager. Shows failure counting, circuit breaker open/close logic, graceful degradation patterns. Tests should verify IntentsClient uses same circuit breaker pattern.</reason>
+      </file>
+
+      <file>
+        <path>backend/pytest.ini</path>
+        <kind>Pytest Configuration</kind>
+        <symbol>Configuration</symbol>
+        <lines>1-26</lines>
+        <reason>Pytest settings - asyncio_mode=auto (important for async tests), markers (unit, integration, asyncio), test discovery patterns. All proactive tests should follow these conventions.</reason>
+      </file>
+    </code>
+
+    <dependencies>
+      <python>
+        <package name="pytest" version=">=7.4.0" notes="Test framework"/>
+        <package name="pytest-asyncio" version=">=0.21.0" notes="Async test support (asyncio_mode=auto in pytest.ini)"/>
+        <package name="httpx" version=">=0.25.0" notes="For mocking HTTP requests to agentic-memories"/>
+        <package name="freezegun" version="Not in requirements.txt yet" notes="REQUIRED - Time mocking for scheduled triggers and gate tests. Add to requirements.txt"/>
+        <package name="fakeredis" version="Optional" notes="Alternative to mocking Redis - can use for more realistic Redis testing"/>
+        <package name="unittest.mock" version="Standard library" notes="AsyncMock, Mock, patch, MagicMock for mocking"/>
+      </python>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    - Test structure: Create backend/tests/test_proactive/ directory with __init__.py, conftest.py (fixtures), and separate test files per component
+    - Mocking strategy: Use httpx mock for agentic-memories (IntentsClient), Mock/AsyncMock for Telegram bot, AsyncMock for LLM responses, fakeredis or mock Redis for state
+    - Time mocking: Use freezegun for scheduled trigger tests, gate tests (quiet hours, cooldown), silence evaluator tests
+    - Fixture organization: Component-specific fixtures in test_proactive/conftest.py, reuse backend/tests/conftest.py for global fixtures
+    - Test markers: Use @pytest.mark.unit for isolated tests, @pytest.mark.integration for multi-component tests, @pytest.mark.asyncio for async tests
+    - Error handling tests: MUST test fail-safe behavior (evaluators return False on error, gate blocks on error, worker doesn't crash)
+    - Coverage target: >80% for all proactive module code (evaluators, gate, agent, worker, intents_client)
+    - Test isolation: Each test should be independent, reset mocks between tests, use autouse fixtures for cleanup
+  </constraints>
+
+  <interfaces>
+    <interface>
+      <name>IntentsClient API Methods</name>
+      <kind>HTTP Client</kind>
+      <signature>create_intent, list_intents, get_intent, update_intent, delete_intent, get_pending, claim_intent, fire_intent, get_history</signature>
+      <path>backend/api/intents_client.py (Story 13.1)</path>
+      <details>Test CRUD operations against mock agentic-memories API. Verify claim_intent returns 409 on conflict, fire_intent clears claim and updates counters, get_pending excludes claimed intents and includes in_cooldown flag.</details>
+    </interface>
+
+    <interface>
+      <name>Condition Evaluators</name>
+      <kind>Python classes</kind>
+      <signature>PriceEvaluator.evaluate(), PortfolioEvaluator.evaluate(), SilenceEvaluator.evaluate()</signature>
+      <path>backend/api/proactive/evaluators.py (Story 13.4)</path>
+      <details>Test expression parsing, operator evaluation (&lt;, &gt;, &lt;=, &gt;=), data fetching (mock yfinance/portfolio/Redis), caching (60s for prices), error handling (return False on failure). Verify fail-safe behavior.</details>
+    </interface>
+
+    <interface>
+      <name>Subconscious Gate</name>
+      <kind>Python class</kind>
+      <signature>SubconsciousGate.should_fire(trigger, user_id) -> GateResult</signature>
+      <path>backend/api/proactive/gate.py (Story 13.5)</path>
+      <details>Test all gate checks: recent contact (3h minimum), daily limit (max 3/day), quiet hours (10pm-8am user local time), opt-out (user disabled proactive), spam prevention. Verify defer_until calculation for blocked triggers.</details>
+    </interface>
+
+    <interface>
+      <name>Wake-Up Agent</name>
+      <kind>Python class</kind>
+      <signature>WakeUpAgent.execute(trigger) -> AgentResult</signature>
+      <path>backend/api/proactive/agent.py (Story 13.6)</path>
+      <details>Test briefing parsing, tool call execution (mock MCP client), skip conditions (LLM decides not to fire), message composition, action_context adherence. Mock LLM streaming responses.</details>
+    </interface>
+
+    <interface>
+      <name>Proactive Feedback Handler</name>
+      <kind>Function</kind>
+      <signature>handle_proactive_feedback(user_id, message, proactive_context)</signature>
+      <path>backend/api/routes/chat.py or proactive/feedback.py (Story 13.10)</path>
+      <details>Test detection of proactive message context, system prompt injection with trigger context, update_intent calls for feedback-based changes, context clearing after processing. Verify closed-loop learning.</details>
+    </interface>
+  </interfaces>
+
+  <tests>
+    <standards>
+      - Testing framework: pytest with pytest-asyncio (asyncio_mode=auto in pytest.ini)
+      - Test directory: backend/tests/test_proactive/ (new directory)
+      - Test files: test_intents_client.py, test_evaluators.py, test_gate.py, test_agent.py, test_worker.py, test_feedback.py, conftest.py
+      - Mocking: Use unittest.mock (AsyncMock, Mock, patch), httpx for API mocking, freezegun for time
+      - Fixtures: Component fixtures in test_proactive/conftest.py, global fixtures from backend/tests/conftest.py
+      - Markers: @pytest.mark.unit, @pytest.mark.integration, @pytest.mark.asyncio
+      - Naming: test_* functions, Test* classes, descriptive test names (test_evaluator_returns_false_on_yfinance_error)
+      - Coverage: >80% for proactive module code
+    </standards>
+
+    <locations>
+      - backend/tests/test_proactive/__init__.py (NEW)
+      - backend/tests/test_proactive/conftest.py (NEW - shared fixtures)
+      - backend/tests/test_proactive/test_intents_client.py (NEW)
+      - backend/tests/test_proactive/test_evaluators.py (NEW)
+      - backend/tests/test_proactive/test_gate.py (NEW)
+      - backend/tests/test_proactive/test_agent.py (NEW)
+      - backend/tests/test_proactive/test_worker.py (NEW)
+      - backend/tests/test_proactive/test_feedback.py (NEW)
+    </locations>
+
+    <ideas>
+      - AC #1 Trigger Creation Tests:
+        * Test create_intent via MCP tool with scheduled trigger (cron mode, once mode)
+        * Test create_intent via MCP tool with condition trigger (price, portfolio, silence)
+        * Mock httpx POST to /v1/intents, verify payload structure
+        * Test error handling (network error, API error)
+        * Verify action_context is preserved in storage
+
+      - AC #2 Condition Evaluator Tests:
+        * PriceEvaluator: Mock yfinance.Ticker().info, test &lt;, &gt;, &lt;=, &gt;= operators
+        * PriceEvaluator: Test caching (60s TTL in Redis), verify cache hit doesn't call yfinance
+        * PriceEvaluator: Test yfinance error returns False (fail-safe)
+        * PriceEvaluator: Test retry with exponential backoff (mock 3 failures then success)
+        * PortfolioEvaluator: Mock get_portfolio, test any_holding_change > 5%, any_holding_down, total_value, total_change expressions
+        * SilenceEvaluator: Mock Redis get last_activity, use freezegun to test time thresholds
+        * SilenceEvaluator: Test various silence periods (2h, 4h, 1d)
+
+      - AC #3 Subconscious Gate Tests:
+        * Test recent contact check: Mock Redis last proactive message timestamp, verify 3h minimum
+        * Test daily limit check: Mock Redis message count for today, verify max 3/day
+        * Test quiet hours check: Use freezegun to set time to 11pm/2am/7am, verify blocking
+        * Test opt-out check: Mock user opt-out preference, verify blocking
+        * Test all checks passing: Verify gate allows trigger to fire
+        * Test defer_until calculation: Verify correct timestamp for next allowed fire
+        * Test gate error handling: Verify gate blocks on Redis error (fail-safe)
+
+      - AC #4 Wake-Up Agent Tests:
+        * Mock LLM client streaming response, verify message composition
+        * Mock action_context briefing, verify agent follows instructions
+        * Mock tool calls (get_portfolio, internet_search), verify tools called as briefed
+        * Test skip decision: Mock LLM returning skip signal, verify no message sent
+        * Test message guideline adherence: Verify tone, length, formatting from action_context
+        * Test error handling: Mock LLM error, verify graceful failure
+
+      - AC #5 Full Flow Tests:
+        * Create mock environment: Mock agentic-memories (IntentsClient), Telegram (bot.send_message), LLM, Redis
+        * Test scheduled trigger flow: Create trigger → claim → gate passes → agent executes → deliver → fire report
+        * Test condition trigger flow: Create trigger → evaluate condition (pass) → claim → gate passes → agent executes → deliver → fire report
+        * Test gate blocking flow: Trigger fires but gate blocks (quiet hours) → fire_intent with status=gate_blocked
+        * Test condition not met flow: Condition evaluates to False → fire_intent with status=condition_not_met
+        * Test claim conflict: Multiple workers claim same trigger → 409 Conflict → one succeeds
+
+      - AC #6 Feedback Handler Tests:
+        * Test proactive message recording: Verify proactive_context stored in Redis after delivery
+        * Test feedback detection: User replies to proactive message → context loaded from Redis
+        * Test system prompt injection: Verify trigger context added to system prompt for follow-up
+        * Test update_intent: User says "change this to daily" → update_intent called with new schedule
+        * Test context clearing: After processing reply → proactive_context cleared from Redis
+        * Test timeout: proactive_context expires after 1 hour → not detected
+
+      - Integration Test Ideas:
+        * Test multiple triggers for same user: Verify only allowed ones fire (gate logic)
+        * Test worker crash recovery: Claimed intent times out (5min) → available for retry
+        * Test cooldown behavior: Condition trigger fires → cooldown active → evaluator skips for X hours
+        * Test timezone handling: Cron triggers respect user timezone (mock pytz)
+        * Test once mode: Trigger fires once → disabled automatically
+        * Test max_executions: Trigger hits execution limit → disabled
+
+      - Performance Test Ideas:
+        * Test evaluator caching reduces API calls (price cache 60s)
+        * Test gate checks are fast (&lt;50ms for all checks)
+        * Test worker can process 100 pending triggers in &lt;30s (with mocks)
+
+      - Edge Case Tests:
+        * Test malformed expressions: Evaluator handles parse errors gracefully
+        * Test missing Redis data: Gate handles missing activity timestamp
+        * Test LLM timeout: Agent handles streaming timeout gracefully
+        * Test Telegram delivery failure: Worker retries or reports failure
+        * Test action_context too large: Verify truncation or error handling
+        * Test user deleted mid-execution: Handle gracefully
+    </ideas>
+  </tests>
+
+  <patterns>
+    <pattern>
+      <name>Async HTTP Client Mocking</name>
+      <example>
+# Pattern from test_memory_client.py
+from unittest.mock import AsyncMock, Mock, patch
+
+@pytest.mark.asyncio
+async def test_client_method(client_instance):
+    mock_response = Mock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"status": "success"}
+
+    with patch.object(client_instance.client, 'post', new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = mock_response
+
+        result = await client_instance.method(param1, param2)
+
+        # Verify result
+        assert result["status"] == "success"
+
+        # Verify POST was called correctly
+        mock_post.assert_called_once()
+        call_args = mock_post.call_args
+        assert call_args[0][0] == "http://expected-url"
+        assert call_args[1]["json"]["field"] == "expected_value"
+      </example>
+    </pattern>
+
+    <pattern>
+      <name>Time Mocking with freezegun</name>
+      <example>
+# Add to requirements.txt: freezegun
+from freezegun import freeze_time
+from datetime import datetime
+
+@freeze_time("2025-12-25 10:00:00")
+def test_scheduled_trigger():
+    # Time is frozen at 10am
+    # Test cron evaluation, quiet hours check, etc.
+    result = gate.should_fire(trigger, user_id)
+    assert result.allowed is True
+
+@freeze_time("2025-12-25 23:00:00")  # 11pm
+def test_quiet_hours_blocking():
+    # Time is frozen at 11pm (quiet hours)
+    result = gate.should_fire(trigger, user_id)
+    assert result.allowed is False
+    assert result.reason == "quiet_hours"
+      </example>
+    </pattern>
+
+    <pattern>
+      <name>Redis Mocking</name>
+      <example>
+# Pattern from test_memory_manager.py
+from unittest.mock import AsyncMock, MagicMock, patch
+
+@pytest.mark.asyncio
+async def test_redis_operation():
+    with patch('api.module.StateManager') as mock_state_class:
+        mock_state = AsyncMock()
+        mock_state.__aenter__.return_value = mock_state
+        mock_state.__aexit__.return_value = None
+        mock_state.redis_client = AsyncMock()
+
+        # Mock specific Redis operations
+        mock_state.redis_client.get = AsyncMock(return_value="cached_value")
+        mock_state.redis_client.set = AsyncMock(return_value=True)
+        mock_state.redis_client.setex = AsyncMock(return_value=True)
+
+        mock_state_class.return_value = mock_state
+
+        # Test code that uses StateManager
+        # ...
+
+        # Verify Redis calls
+        mock_state.redis_client.get.assert_called_once_with("expected_key")
+      </example>
+    </pattern>
+
+    <pattern>
+      <name>LLM Streaming Mock</name>
+      <example>
+# Pattern from test_streaming_e2e.py
+from unittest.mock import Mock, patch
+
+async def mock_llm_stream(messages, tools=None):
+    yield {"type": "token", "content": "Hello"}
+    yield {"type": "token", "content": " world"}
+    yield {"type": "done", "tokens_used": {"prompt": 10, "completion": 2}}
+
+@pytest.mark.asyncio
+async def test_agent_execution():
+    with patch('api.proactive.agent.LLMClient') as MockLLMClient:
+        mock_llm_instance = Mock()
+        MockLLMClient.return_value.__aenter__.return_value = mock_llm_instance
+        mock_llm_instance.chat_completion_stream = mock_llm_stream
+
+        # Test agent execution with mocked LLM
+        result = await agent.execute(trigger)
+
+        assert result.message == "Hello world"
+      </example>
+    </pattern>
+
+    <pattern>
+      <name>Fixture Organization</name>
+      <example>
+# backend/tests/test_proactive/conftest.py
+import pytest
+from unittest.mock import AsyncMock, Mock
+
+@pytest.fixture
+def mock_intents_client():
+    """Mock IntentsClient for tests."""
+    client = AsyncMock()
+    client.create_intent = AsyncMock(return_value={"intent_id": "test_123"})
+    client.claim_intent = AsyncMock(return_value={"claimed_at": "2025-12-24T10:00:00Z"})
+    client.fire_intent = AsyncMock(return_value={"cooldown_active": False})
+    return client
+
+@pytest.fixture
+def sample_scheduled_trigger():
+    """Sample scheduled trigger for testing."""
+    return {
+        "intent_id": "trigger_123",
+        "user_id": "user_456",
+        "trigger_type": "scheduled",
+        "schedule": {
+            "mode": "cron",
+            "cron_expression": "0 9 * * 1-5",
+            "timezone": "America/Los_Angeles"
+        },
+        "action_context": {
+            "intent_summary": "Daily morning check-in",
+            "execution_instructions": "Greet user and ask how they're doing"
+        }
+    }
+
+@pytest.fixture
+def sample_condition_trigger():
+    """Sample condition trigger for testing."""
+    return {
+        "intent_id": "trigger_789",
+        "user_id": "user_456",
+        "trigger_type": "condition",
+        "condition": {
+            "type": "price",
+            "expression": "NVDA < 130",
+            "check_interval_minutes": 5,
+            "cooldown_hours": 24
+        }
+    }
+      </example>
+    </pattern>
+  </patterns>
+
+  <architecture>
+    <overview>
+Proactive AI system implements LLM-driven architecture with two LLMs (Creation LLM and Wake-Up LLM)
+connected via rich action_context briefing. Tests must validate this handoff and ensure:
+1. IntentsClient correctly interfaces with agentic-memories Intents API
+2. Evaluators quickly and safely evaluate conditions (fail-safe on error)
+3. Subconscious gate prevents spam and respects user preferences
+4. Wake-Up agent follows briefing instructions and uses tools appropriately
+5. Full flow from trigger creation → evaluation → gate → execution → delivery works end-to-end
+6. Feedback loop enables closed-loop learning and trigger updates
+    </overview>
+
+    <components>
+      - IntentsClient (Story 13.1): HTTP client for agentic-memories /v1/intents API - CRUD, claim, fire, get_pending
+      - MCP Tools (Story 13.2): create_trigger, list_triggers, update_trigger, delete_trigger, get_trigger tools
+      - System Prompt (Story 13.3): Enhanced system prompt with proactive capabilities and briefing context
+      - Evaluators (Story 13.4): PriceEvaluator, PortfolioEvaluator, SilenceEvaluator - fast condition checks
+      - Subconscious Gate (Story 13.5): Gate with 4 checks (recent contact, daily limit, quiet hours, opt-out)
+      - Wake-Up Agent (Story 13.6): LLM agent that reads briefing, calls tools, composes message
+      - ARQ Worker (Story 13.7): Background worker using arq for async task processing
+      - Activity Tracking (Story 13.8): Redis-based user activity tracking for silence detection
+      - Telegram Delivery (Story 13.9): Integration with Telegram bot for message delivery
+      - Feedback Handler (Story 13.10): Detects proactive context and enables closed-loop learning
+    </components>
+
+    <flowDiagram>
+FULL TRIGGER EXECUTION FLOW (for testing):
+
+1. CREATION (User creates trigger via chat)
+   User: "Remind me every Friday at 5pm to review my portfolio"
+   ↓
+   LLM calls create_trigger MCP tool
+   ↓
+   IntentsClient.create_intent() → POST /v1/intents
+   ↓
+   Trigger stored in agentic-memories
+
+2. POLLING (Worker checks for due triggers)
+   Worker: IntentsClient.get_pending() → GET /v1/intents/pending
+   ↓
+   Returns triggers due for execution (excludes claimed, includes in_cooldown flag)
+
+3. CLAIMING (Worker claims trigger for exclusive processing)
+   Worker: IntentsClient.claim_intent(id) → POST /v1/intents/{id}/claim
+   ↓
+   Returns 200 OK with claimed_at timestamp
+   OR 409 Conflict if already claimed (race condition)
+
+4. EVALUATION (For condition triggers only)
+   Worker: Evaluator.evaluate(condition)
+   ↓
+   Fetch data (yfinance, portfolio, Redis activity)
+   ↓
+   Compare against expression
+   ↓
+   Return True/False (False on error - fail-safe)
+
+5. GATE CHECK (Spam prevention)
+   Worker: SubconsciousGate.should_fire(trigger, user_id)
+   ↓
+   Check: Recent contact (3h minimum)
+   Check: Daily limit (max 3/day)
+   Check: Quiet hours (10pm-8am user local time)
+   Check: Opt-out (user disabled proactive)
+   ↓
+   Return GateResult(allowed: bool, reason: str, defer_until: datetime)
+
+6. EXECUTION (Wake-up LLM generates message)
+   Worker: WakeUpAgent.execute(trigger)
+   ↓
+   Read action_context briefing
+   ↓
+   Call tools (get_portfolio, internet_search, etc.)
+   ↓
+   Stream LLM response with briefing + tool results
+   ↓
+   Compose final message
+
+7. DELIVERY (Send to Telegram)
+   Worker: TelegramClient.send_message(user_id, message)
+   ↓
+   Store proactive_context in Redis (for feedback detection)
+   ↓
+   Return message_id
+
+8. REPORTING (Report execution to agentic-memories)
+   Worker: IntentsClient.fire_intent(id, report)
+   ↓
+   POST /v1/intents/{id}/fire with status (success/failed/gate_blocked/condition_not_met)
+   ↓
+   Clears claimed_at, updates execution_count, last_executed
+   ↓
+   Returns cooldown status for condition triggers
+
+9. FEEDBACK (User replies to proactive message - closed-loop learning)
+   User replies to proactive message
+   ↓
+   Chat endpoint detects proactive_context in Redis
+   ↓
+   System prompt injected with trigger context
+   ↓
+   LLM can call update_trigger if user wants changes
+   ↓
+   Clear proactive_context after processing
+    </flowDiagram>
+  </architecture>
+
+  <references>
+    <reference>
+      <title>Proactive AI Architecture Design Document</title>
+      <path>docs/design/proactive-ai-architecture.md</path>
+      <sections>All sections - critical reference for understanding expected behaviors, trigger types, action_context structure, gate logic, evaluator specs, LLM-driven architecture</sections>
+    </reference>
+    <reference>
+      <title>Epic 13: Proactive AI Worker</title>
+      <path>docs/epics/epic-13-proactive-ai.md</path>
+      <sections>Overview, Dependencies, Architecture Summary, Component Flow</sections>
+    </reference>
+    <reference>
+      <title>Story 13.1: Intents HTTP Client</title>
+      <path>.bmad-ephemeral/stories/13-1-intents-http-client.md</path>
+      <sections>API Schema Reference, CRUD Operations, Polling & Worker Operations</sections>
+    </reference>
+    <reference>
+      <title>Story 13.4: Condition Evaluators</title>
+      <path>.bmad-ephemeral/stories/13-4-condition-evaluators.md</path>
+      <sections>Expression Parsing Examples, Caching Strategy, Error Handling</sections>
+    </reference>
+    <reference>
+      <title>Existing Test Patterns</title>
+      <path>backend/tests/unit/test_memory_client.py, test_memory_manager.py, test_gemini_provider.py</path>
+      <sections>HTTP client mocking, AsyncMock patterns, circuit breaker testing, graceful degradation</sections>
+    </reference>
+  </references>
+</story-context>

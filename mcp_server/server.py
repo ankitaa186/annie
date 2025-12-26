@@ -11,6 +11,9 @@ import json
 import os
 import time
 from datetime import datetime
+import pytz
+
+_PACIFIC_TZ = pytz.timezone("America/Los_Angeles")
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, Request, HTTPException
@@ -31,6 +34,10 @@ from mcp_server.tools import (
     clear_portfolio_tool,
     analyze_stock_tool,
     get_stock_history_tool,
+    create_trigger_tool,
+    list_triggers_tool,
+    update_trigger_tool,
+    delete_trigger_tool,
 )
 
 logger = get_logger(__name__)
@@ -82,6 +89,11 @@ class MCPServer:
         # Stock market analysis tools (Epic 10 - Story 10.6)
         self.tool_registry.register(analyze_stock_tool)
         self.tool_registry.register(get_stock_history_tool)
+        # Proactive AI: Trigger management tools (Epic 13 - Story 13.2)
+        self.tool_registry.register(create_trigger_tool)
+        self.tool_registry.register(list_triggers_tool)
+        self.tool_registry.register(update_trigger_tool)
+        self.tool_registry.register(delete_trigger_tool)
         logger.info(f"Registered {len(self.tool_registry.tools)} tools")
 
     async def handle_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
@@ -294,7 +306,7 @@ async def health_check():
     """Health check endpoint."""
     return JSONResponse(content={
         "status": "ok",
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.now(_PACIFIC_TZ).isoformat(),
         "tools_registered": len(mcp_server.tool_registry.tools)
     })
 

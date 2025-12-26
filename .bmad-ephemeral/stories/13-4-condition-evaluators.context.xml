@@ -1,0 +1,564 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<story-context>
+  <metadata>
+    <story-id>13.4</story-id>
+    <story-name>Condition Evaluators</story-name>
+    <epic>Epic 13 - Proactive AI Worker</epic>
+    <status>ready-for-dev</status>
+    <estimated-effort>0.5 days</estimated-effort>
+    <generated-date>2025-12-24</generated-date>
+  </metadata>
+
+  <story-summary>
+    <description>
+      Implement fast condition evaluators for different trigger types (price, portfolio, silence)
+      that run WITHOUT LLM calls. These evaluators check if a trigger condition is met and return
+      True/False. Only if True does the system invoke the LLM wake-up agent.
+    </description>
+    <business-value>
+      - Fast condition checking (no LLM overhead)
+      - Efficient polling for condition triggers
+      - Fail-safe behavior (return False on error to prevent false alarms)
+      - Caching to avoid rate limits (yfinance)
+    </business-value>
+  </story-summary>
+
+  <acceptance-criteria>
+    <criterion id="AC1">
+      <title>Price Evaluator</title>
+      <requirements>
+        - Fetches current price via yfinance
+        - Parses expression (e.g., "NVDA &lt; 130")
+        - Supports operators: &lt;, &gt;, &lt;=, &gt;=
+        - Returns True if condition met
+        - Caches price for 60 seconds (avoid rate limits)
+        - Reliability handling (yfinance is unofficial scraper):
+          * Retry with exponential backoff (3 attempts)
+          * Fail-safe: return False on error (don't fire on error)
+          * Log errors for monitoring
+      </requirements>
+    </criterion>
+    <criterion id="AC2">
+      <title>Portfolio Evaluator</title>
+      <requirements>
+        - Fetches portfolio via get_portfolio MCP tool
+        - Supports expressions:
+          * any_holding_change &gt; X%
+          * any_holding_down &gt; X%
+          * total_value &gt;= X
+          * total_change &gt; X%
+        - Returns True if condition met
+      </requirements>
+    </criterion>
+    <criterion id="AC3">
+      <title>Silence Evaluator</title>
+      <requirements>
+        - Checks Redis for user:{user_id}:last_activity
+        - Compares against threshold from expression
+        - Returns True if silence exceeded
+      </requirements>
+    </criterion>
+    <criterion id="AC4">
+      <title>Error Handling</title>
+      <requirements>
+        - Returns False on evaluator failure (fail-safe, don't fire on error)
+        - Logs error with trigger details
+        - Does not crash worker
+      </requirements>
+    </criterion>
+  </acceptance-criteria>
+
+  <architecture-references>
+    <design-doc>
+      <path>docs/design/proactive-ai-architecture.md</path>
+      <sections>
+        <section>Section 3.3: Type: condition</section>
+        <section>Condition Types: Price, Portfolio, Silence</section>
+        <section>Data Source Reliability Note (yfinance limitations)</section>
+      </sections>
+      <key-insights>
+        - yfinance is an UNOFFICIAL scraper with known limitations
+        - Rate-limited and can fail during high load
+        - Not suitable for precision alerts
+        - Mitigations: aggressive caching, fail-safe behavior, retry with backoff
+        - Cache prices for 60 seconds minimum
+        - On error, skip evaluation (don't fire)
+      </key-insights>
+    </design-doc>
+    <epic-doc>
+      <path>docs/epics/epic-13-proactive-ai.md</path>
+      <key-points>
+        - LLM-driven architecture with minimal trigger types
+        - Condition evaluators are FAST (no LLM overhead)
+        - LLM only invoked after condition passes
+      </key-points>
+    </epic-doc>
+  </architecture-references>
+
+  <existing-patterns>
+    <pattern name="Portfolio Access">
+      <file>backend/api/portfolio_context.py</file>
+      <description>
+        PortfolioManager class shows existing portfolio access patterns:
+        - Uses MCP client to call get_portfolio tool
+        - Redis caching with 5-minute TTL
+        - Graceful degradation on errors
+        - Returns empty portfolio on failure
+      </description>
+      <code-reference>
+        async def get_portfolio(self, user_id: str, refresh_if_empty: bool = True) -> Dict[str, Any]:
+            portfolio = await self.load_portfolio_from_cache(user_id)
+            if not portfolio.get("cached") and refresh_if_empty:
+                portfolio = await self.refresh_portfolio(user_id)
+            return portfolio
+      </code-reference>
+    </pattern>
+
+    <pattern name="yfinance Price Fetching">
+      <file>mcp_server/tools.py</file>
+      <description>
+        Existing yfinance usage in get_portfolio_tool_handler:
+        - batch_fetch_prices_with_cache() function (lines 815-961)
+        - Redis caching with PRICE_CACHE_TTL = 900 seconds (15 minutes)
+        - Cache key pattern: "stock_price:{ticker}"
+        - Handles both single and multi-ticker responses
+        - Error handling for failed price fetches
+        - Returns tuple: (prices_dict, failed_tickers_list)
+      </description>
+      <code-reference>
+        # Existing price cache pattern (line 784)
+        PRICE_CACHE_TTL = 900  # 15 minutes
+
+        # Cache key pattern (line 862)
+        cache_key = f"stock_price:{ticker}"
+        cached_price = await redis_client.get(cache_key)
+
+        # yfinance batch fetch (line 885)
+        data = yf.download(tickers_to_fetch, period="1d", progress=False, threads=True)
+      </code-reference>
+      <adaptation-needed>
+        Story 13.4 requires SHORTER cache (60 seconds) for price evaluators to be more responsive
+        while still avoiding rate limits. Use separate cache key pattern: "price_cache:{ticker}"
+      </adaptation-needed>
+    </pattern>
+
+    <pattern name="Redis Usage">
+      <file>backend/api/state.py</file>
+      <description>
+        StateManager shows Redis patterns:
+        - Async Redis client (redis.asyncio)
+        - Connection pooling
+        - TTL management
+        - Error handling with redis_exceptions
+      </description>
+      <code-reference>
+        # Redis connection pattern (lines 98-103)
+        config = get_config()
+        redis_host = config.get("REDIS_HOST", "redis")
+        redis_port = int(config.get("REDIS_PORT", 6379))
+        self.redis_client = redis.Redis(host=redis_host, port=redis_port, decode_responses=True)
+
+        # TTL pattern (line 79)
+        SESSION_TTL = 3600  # seconds
+      </code-reference>
+    </pattern>
+
+    <pattern name="Error Handling">
+      <file>backend/api/state.py</file>
+      <file>mcp_server/tools.py</file>
+      <description>
+        Consistent error handling patterns:
+        - Try/except with specific exception types
+        - Logging with extra context
+        - Graceful degradation (return safe defaults on error)
+        - Exception classes for different error types
+      </description>
+      <code-reference>
+        # From state.py (lines 174-191)
+        except redis_exceptions.ConnectionError as e:
+            logger.error(f"Redis connection error: {str(e)}", extra={"user_id": user_id})
+            raise RedisConnectionError(f"Could not connect to Redis: {str(e)}", e)
+
+        # From tools.py (lines 215-236) - Network error handling with retry
+        except (httpx.TimeoutException, httpx.NetworkError, httpx.ConnectError) as e:
+            logger.error("Network error storing memory via MCP tool", extra={"user_id": user_id, "error": str(e)})
+            if attempt &lt; max_retries - 1:
+                await asyncio.sleep(retry_delays[attempt])
+                continue
+            return {"status": "error", "message": f"Network error after {max_retries} attempts"}
+      </code-reference>
+    </pattern>
+
+    <pattern name="Ticker Validation">
+      <file>mcp_server/tools.py</file>
+      <description>
+        Ticker normalization and validation (lines 786-813):
+        - TICKER_PATTERN = re.compile(r'^[A-Z0-9\.]{1,10}$')
+        - normalize_ticker() function: uppercase, strip, validate
+        - Returns None for invalid tickers
+      </description>
+      <code-reference>
+        TICKER_PATTERN = re.compile(r'^[A-Z0-9\.]{1,10}$')
+
+        def normalize_ticker(ticker: str) -> Optional[str]:
+            if not ticker:
+                return None
+            normalized = ticker.upper().strip()
+            if not TICKER_PATTERN.match(normalized):
+                logger.warning(f"Invalid ticker format rejected: {ticker}")
+                return None
+            return normalized
+      </code-reference>
+    </pattern>
+
+    <pattern name="MCP Client Usage">
+      <file>backend/api/portfolio_context.py</file>
+      <description>
+        How to call MCP tools from backend (lines 196-201):
+        - Import MCPClient from api.mcp_client
+        - Use async context manager
+        - Call call_tool() with tool name and params
+      </description>
+      <code-reference>
+        async with MCPClient() as mcp_client:
+            result = await mcp_client.call_tool("get_portfolio", {"user_id": user_id})
+
+        # Check result status
+        if result.get("status") == "success":
+            holdings = result.get("holdings", [])
+      </code-reference>
+    </pattern>
+  </existing-patterns>
+
+  <dependencies>
+    <python-packages>
+      <package>
+        <name>yfinance</name>
+        <version>&gt;=0.2.48</version>
+        <usage>Fetch current stock prices for price evaluators</usage>
+        <location>mcp_server/requirements.txt (line 26)</location>
+        <notes>Already installed for Story 10.6 (Stock Market Analysis)</notes>
+      </package>
+      <package>
+        <name>pandas</name>
+        <version>&gt;=2.0.0</version>
+        <usage>Required by yfinance for data handling</usage>
+        <location>mcp_server/requirements.txt (line 27)</location>
+      </package>
+      <package>
+        <name>redis</name>
+        <version>&gt;=5.0.0</version>
+        <usage>Async Redis client for caching and activity tracking</usage>
+        <location>mcp_server/requirements.txt (line 30)</location>
+        <notes>Already installed for Story 10.5 (Portfolio Performance)</notes>
+      </package>
+    </python-packages>
+
+    <internal-dependencies>
+      <dependency>
+        <component>backend/api/mcp_client.py</component>
+        <usage>Call get_portfolio tool for portfolio evaluator</usage>
+        <status>exists</status>
+      </dependency>
+      <dependency>
+        <component>backend/api/config.py</component>
+        <usage>Get Redis connection config</usage>
+        <status>exists</status>
+      </dependency>
+      <dependency>
+        <component>backend/api/logging.py</component>
+        <usage>Structured logging</usage>
+        <status>exists</status>
+      </dependency>
+      <dependency>
+        <component>mcp_server/tools.py</component>
+        <usage>Reference for yfinance patterns, ticker validation</usage>
+        <status>exists</status>
+      </dependency>
+    </internal-dependencies>
+  </dependencies>
+
+  <implementation-guidance>
+    <file-structure>
+      <new-files>
+        <file>
+          <path>backend/api/proactive/evaluators.py</path>
+          <purpose>Core evaluators module with all condition evaluator classes</purpose>
+        </file>
+        <file>
+          <path>backend/api/proactive/__init__.py</path>
+          <purpose>Package init file</purpose>
+        </file>
+      </new-files>
+    </file-structure>
+
+    <module-structure>
+      <section name="Imports and Setup">
+        <imports>
+          import re
+          import time
+          import asyncio
+          from typing import Dict, Any, Optional
+          from datetime import datetime, timedelta
+
+          import yfinance as yf
+          import pandas as pd
+          import redis.asyncio as redis
+
+          from api.config import get_config
+          from api.logging import get_logger
+          from api.mcp_client import MCPClient
+        </imports>
+      </section>
+
+      <section name="Data Classes">
+        <class>
+          <name>EvaluatorResult</name>
+          <type>dataclass</type>
+          <fields>
+            - met: bool  # Whether condition is met
+            - details: dict  # Additional context (current value, threshold, etc.)
+          </fields>
+        </class>
+      </section>
+
+      <section name="Base Evaluator">
+        <class>
+          <name>Evaluator</name>
+          <type>abstract base class</type>
+          <methods>
+            async def evaluate(self, expression: str, user_id: str) -> EvaluatorResult
+          </methods>
+        </class>
+      </section>
+
+      <section name="Concrete Evaluators">
+        <class>
+          <name>PriceEvaluator</name>
+          <methods>
+            - async def evaluate(expression, user_id) -> EvaluatorResult
+            - _parse_expression(expression) -> (ticker, operator, threshold)
+            - async def _fetch_price_with_retry(ticker) -> Optional[float]
+            - async def _get_cached_price(ticker) -> Optional[float]
+            - async def _cache_price(ticker, price) -> None
+          </methods>
+          <constants>
+            PRICE_CACHE_TTL = 60  # seconds
+            CACHE_KEY_PREFIX = "price_cache:"
+            MAX_RETRIES = 3
+            RETRY_DELAYS = [1, 2, 4]  # exponential backoff
+          </constants>
+        </class>
+
+        <class>
+          <name>PortfolioEvaluator</name>
+          <methods>
+            - async def evaluate(expression, user_id) -> EvaluatorResult
+            - _parse_expression(expression) -> (condition_type, operator, threshold)
+            - async def _fetch_portfolio(user_id) -> dict
+            - _check_any_holding_change(holdings, threshold) -> bool
+            - _check_any_holding_down(holdings, threshold) -> bool
+            - _check_total_value(portfolio, threshold) -> bool
+            - _check_total_change(portfolio, threshold) -> bool
+          </methods>
+        </class>
+
+        <class>
+          <name>SilenceEvaluator</name>
+          <methods>
+            - async def evaluate(expression, user_id) -> EvaluatorResult
+            - _parse_duration(expression) -> timedelta
+            - async def _get_last_activity(user_id) -> Optional[datetime]
+          </methods>
+          <constants>
+            ACTIVITY_KEY_PREFIX = "user:"
+            ACTIVITY_KEY_SUFFIX = ":last_activity"
+          </constants>
+        </class>
+      </section>
+
+      <section name="Factory">
+        <function>
+          <name>get_evaluator</name>
+          <signature>def get_evaluator(condition_type: str) -> Evaluator</signature>
+          <logic>
+            Map condition_type to evaluator class:
+            - "price" -> PriceEvaluator()
+            - "portfolio" -> PortfolioEvaluator()
+            - "silence" -> SilenceEvaluator()
+            - unknown -> raise ValueError
+          </logic>
+        </function>
+      </section>
+    </module-structure>
+
+    <expression-parsing-examples>
+      <example>
+        <type>Price</type>
+        <input>"NVDA &lt; 130"</input>
+        <parsed>
+          ticker = "NVDA"
+          operator = "&lt;"
+          value = 130.0
+        </parsed>
+        <regex>r'([A-Z0-9\.]+)\s*([&lt;&gt;]=?)\s*([\d.]+)'</regex>
+      </example>
+
+      <example>
+        <type>Portfolio</type>
+        <input>"any_holding_change &gt; 5%"</input>
+        <parsed>
+          type = "any_holding_change"
+          operator = "&gt;"
+          value = 5.0
+        </parsed>
+        <regex>r'(any_holding_change|any_holding_down|total_value|total_change)\s*([&lt;&gt;]=?)\s*([\d.]+)%?'</regex>
+      </example>
+
+      <example>
+        <type>Silence</type>
+        <input>"silence &gt; 4h"</input>
+        <parsed>
+          type = "silence"
+          operator = "&gt;"
+          value = timedelta(hours=4)
+        </parsed>
+        <regex>r'silence\s*([&lt;&gt;]=?)\s*(\d+)(h|d|m)'</regex>
+        <units>h=hours, d=days, m=minutes</units>
+      </example>
+    </expression-parsing-examples>
+
+    <caching-strategy>
+      <price-cache>
+        <key-pattern>price_cache:{ticker}</key-pattern>
+        <ttl>60 seconds</ttl>
+        <rationale>
+          Shorter than existing stock price cache (15 min) to be more responsive
+          for condition triggers, but still prevents rate limiting on yfinance.
+        </rationale>
+      </price-cache>
+    </caching-strategy>
+
+    <error-handling-strategy>
+      <principle>Fail-Safe Behavior</principle>
+      <description>
+        On ANY error during evaluation, return EvaluatorResult(met=False, details={...}).
+        This prevents false alarms when external services fail.
+      </description>
+      <logging>
+        Log all errors with:
+        - Trigger type
+        - Expression
+        - User ID
+        - Error message
+        - Duration
+      </logging>
+      <retry-logic>
+        For yfinance price fetching only:
+        - 3 attempts with exponential backoff (1s, 2s, 4s)
+        - Log each attempt
+        - Return None after all retries fail
+      </retry-logic>
+    </error-handling-strategy>
+  </implementation-guidance>
+
+  <testing-guidance>
+    <unit-tests>
+      <test-file>backend/tests/unit/test_evaluators.py</test-file>
+      <test-cases>
+        <test name="test_price_evaluator_parses_expression">
+          - Test parsing "AAPL &lt; 150"
+          - Test parsing "NVDA &gt;= 130"
+          - Test invalid expressions raise error
+        </test>
+        <test name="test_price_evaluator_caching">
+          - Mock Redis to verify cache key usage
+          - Verify 60-second TTL
+          - Test cache hit/miss paths
+        </test>
+        <test name="test_price_evaluator_retry_logic">
+          - Mock yfinance to fail twice, succeed third time
+          - Verify exponential backoff delays
+          - Verify returns False after all retries fail
+        </test>
+        <test name="test_portfolio_evaluator_expressions">
+          - Test "any_holding_change &gt; 5%"
+          - Test "total_value &gt;= 10000"
+          - Mock MCP client to return portfolio
+        </test>
+        <test name="test_silence_evaluator_duration_parsing">
+          - Test "silence &gt; 4h" -> 4 hours
+          - Test "silence &gt; 2d" -> 2 days
+          - Test invalid durations
+        </test>
+        <test name="test_evaluator_factory">
+          - Test get_evaluator("price") returns PriceEvaluator
+          - Test unknown type raises ValueError
+        </test>
+        <test name="test_fail_safe_behavior">
+          - Test Redis errors return False
+          - Test yfinance errors return False
+          - Test MCP errors return False
+        </test>
+      </test-cases>
+    </unit-tests>
+  </testing-guidance>
+
+  <performance-targets>
+    <target>
+      <metric>Price evaluator execution time</metric>
+      <value>&lt; 100ms when cached</value>
+      <value>&lt; 2000ms when fetching from yfinance</value>
+    </target>
+    <target>
+      <metric>Portfolio evaluator execution time</metric>
+      <value>&lt; 500ms (MCP call overhead)</value>
+    </target>
+    <target>
+      <metric>Silence evaluator execution time</metric>
+      <value>&lt; 50ms (Redis lookup)</value>
+    </target>
+  </performance-targets>
+
+  <verification-checklist>
+    <item>Price evaluator correctly evaluates &lt;, &gt;, &lt;=, &gt;= operators</item>
+    <item>Portfolio evaluator handles all expression types</item>
+    <item>Silence evaluator correctly calculates time since activity</item>
+    <item>All evaluators return False on error (fail-safe)</item>
+    <item>Price caching reduces yfinance calls</item>
+    <item>Error logging includes trigger details</item>
+    <item>Expression parsing is robust against invalid input</item>
+    <item>Retry logic works for yfinance failures</item>
+  </verification-checklist>
+
+  <related-stories>
+    <story id="13.3">System Prompt Enhancement - Defines how LLM creates triggers</story>
+    <story id="13.5">Subconscious Gate - Uses evaluators to check conditions</story>
+    <story id="13.6">Wake Up Agent - Invoked after evaluator returns True</story>
+    <story id="13.8">User Activity Tracking - Updates last_activity for silence evaluator</story>
+    <story id="10.5">Portfolio Value Performance Tracking - Provides portfolio data</story>
+    <story id="10.6">Stock Market Analysis Tool - Uses yfinance for stock data</story>
+  </related-stories>
+
+  <notes>
+    <note type="implementation">
+      Start with PriceEvaluator as it's the most critical and has the most complexity
+      (caching, retry logic, yfinance handling). Then PortfolioEvaluator, then SilenceEvaluator.
+    </note>
+    <note type="yfinance-reliability">
+      yfinance is an unofficial Yahoo Finance scraper. It can fail or be rate-limited.
+      The architecture accepts this limitation with aggressive caching and fail-safe behavior.
+      For production, consider switching to a paid API (Polygon.io, Alpha Vantage) if reliability
+      becomes an issue.
+    </note>
+    <note type="portfolio-performance">
+      Portfolio evaluator needs to call get_portfolio with include_prices=True to get
+      current values and calculate changes. This adds ~1-2s latency but is necessary
+      for accurate condition evaluation.
+    </note>
+    <note type="silence-detection">
+      The silence evaluator depends on Story 13.8 (User Activity Tracking) to update
+      the last_activity timestamp. Without it, silence detection won't work.
+    </note>
+  </notes>
+</story-context>

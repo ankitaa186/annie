@@ -23,7 +23,7 @@ logger = get_logger(__name__)
 
 class GeminiProvider(BaseProvider):
     """
-    Gemini 3 Pro (Google AI API) provider implementation.
+    Gemini (Google AI API) provider implementation.
 
     Features:
     - Streaming chat completion with function calling
@@ -32,10 +32,14 @@ class GeminiProvider(BaseProvider):
     - Quota and rate limit handling
     - Cost calculation with tiered pricing
     - Langfuse tracing integration (fire-and-forget)
+    - Supports multiple Gemini models (gemini-3-pro-preview, gemini-2.5-pro, etc.)
     """
 
-    # Gemini 3 Pro API configuration
-    MODEL_NAME = "gemini-3-pro-preview"
+    # Default Gemini model
+    DEFAULT_MODEL = "gemini-3-pro-preview"
+
+    # Supported Gemini models
+    SUPPORTED_MODELS = ["gemini-3-pro-preview", "gemini-3-flash-preview", "gemini-2.5-pro"]
 
     # Safety filter user-friendly messages
     SAFETY_MESSAGES = {
@@ -45,9 +49,13 @@ class GeminiProvider(BaseProvider):
         HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: "I cannot respond due to content policy. Please rephrase.",
     }
 
-    def __init__(self):
+    def __init__(self, model_override: Optional[str] = None):
         """
-        Initialize Gemini 3 Pro provider with configuration from environment.
+        Initialize Gemini provider with configuration from environment.
+
+        Args:
+            model_override: Optional model name to use instead of env config.
+                           Useful for fallback scenarios (e.g., gemini-2.5-pro fallback)
 
         Raises:
             ValueError: If GEMINI_API_KEY is not configured
@@ -59,8 +67,11 @@ class GeminiProvider(BaseProvider):
         if not self.api_key or self.api_key == "REPLACE_ME":
             raise ValueError("GEMINI_API_KEY not configured")
 
-        # Load configuration from environment
-        self.model_name = config.get("GEMINI_MODEL", self.MODEL_NAME)
+        # Load configuration from environment, with optional override
+        if model_override:
+            self.model_name = model_override
+        else:
+            self.model_name = config.get("GEMINI_MODEL", self.DEFAULT_MODEL)
         self.max_output_tokens = int(config.get("GEMINI_MAX_OUTPUT_TOKENS", "8192"))
         self.temperature = float(config.get("GEMINI_TEMPERATURE", "1.0"))
         self.context_cache_ttl = int(config.get("GEMINI_CONTEXT_CACHE_TTL", "300"))
@@ -91,7 +102,7 @@ class GeminiProvider(BaseProvider):
         logger.info(
             "Gemini 3 Pro provider initialized",
             extra={
-                "provider": "gemini-3-pro-preview",
+                "provider": self.model_name,
                 "model": self.model_name,
                 "temperature": self.temperature,
                 "max_output_tokens": self.max_output_tokens,
@@ -147,12 +158,12 @@ class GeminiProvider(BaseProvider):
         pass
 
     def get_provider_name(self) -> str:
-        """Return provider name."""
-        return "gemini-3-pro-preview"
+        """Return provider name (model identifier)."""
+        return self.model_name
 
     def calculate_cost(self, usage: Dict[str, int]) -> Dict[str, float]:
         """
-        Calculate cost for Gemini 3 Pro usage.
+        Calculate cost for Gemini usage.
 
         Args:
             usage: Token usage with keys:
@@ -164,7 +175,7 @@ class GeminiProvider(BaseProvider):
             Cost details dictionary
         """
         return calculate_llm_cost(
-            provider="gemini-3-pro-preview",
+            provider=self.model_name,
             prompt_tokens=usage.get("prompt_tokens", 0),
             completion_tokens=usage.get("completion_tokens", 0),
             sources_used=0,  # Gemini doesn't have live search
@@ -265,7 +276,7 @@ class GeminiProvider(BaseProvider):
                 logger.info(
                     "Converted MCP tools to Gemini format",
                     extra={
-                        "provider": "gemini-3-pro-preview",
+                        "provider": self.model_name,
                         "tool_count": len(gemini_tools)
                     }
                 )
@@ -274,7 +285,7 @@ class GeminiProvider(BaseProvider):
             logger.info(
                 "Starting Gemini 3 Pro streaming request",
                 extra={
-                    "provider": "gemini-3-pro-preview",
+                    "provider": self.model_name,
                     "model": self.model_name,
                     "message_count": len(messages),
                     "has_system_instruction": system_instruction is not None,
@@ -309,7 +320,7 @@ class GeminiProvider(BaseProvider):
                         msg["parts"][0]["text"] = f"{system_instruction}\n\n{msg['parts'][0]['text']}"
                         logger.debug(
                             "Prepended system instruction to first user message in history",
-                            extra={"provider": "gemini-3-pro-preview"}
+                            extra={"provider": self.model_name}
                         )
                         break
             elif system_instruction and not history:
@@ -317,7 +328,7 @@ class GeminiProvider(BaseProvider):
                 last_user_message = f"{system_instruction}\n\n{last_user_message}"
                 logger.debug(
                     "Prepended system instruction to first user message",
-                    extra={"provider": "gemini-3-pro-preview"}
+                    extra={"provider": self.model_name}
                 )
 
             # Build tool configuration
@@ -331,7 +342,7 @@ class GeminiProvider(BaseProvider):
             logger.debug(
                 "Initialized ChatSession for automatic thought_signature handling",
                 extra={
-                    "provider": "gemini-3-pro-preview",
+                    "provider": self.model_name,
                     "history_length": len(history),
                     "has_tools": tools_config is not None
                 }
@@ -367,7 +378,7 @@ class GeminiProvider(BaseProvider):
                             logger.warning(
                                 "Gemini safety filter blocked prompt",
                                 extra={
-                                    "provider": "gemini-3-pro-preview",
+                                    "provider": self.model_name,
                                     "block_reason": str(block_reason)
                                 }
                             )
@@ -400,7 +411,7 @@ class GeminiProvider(BaseProvider):
                                 logger.warning(
                                     "Gemini safety filter blocked response",
                                     extra={
-                                        "provider": "gemini-3-pro-preview",
+                                        "provider": self.model_name,
                                         "finish_reason": str(candidate.finish_reason),
                                         "harm_category": str(harm_category) if harm_category else None
                                     }
@@ -476,7 +487,7 @@ class GeminiProvider(BaseProvider):
                                         logger.info(
                                             f"Gemini requesting tool: {func_name}",
                                             extra={
-                                                "provider": "gemini-3-pro-preview",
+                                                "provider": self.model_name,
                                                 "tool_name": func_name,
                                                 "iteration": tool_iteration
                                             }
@@ -500,7 +511,7 @@ class GeminiProvider(BaseProvider):
                                             logger.info(
                                                 "Gemini 3 Pro first token received",
                                                 extra={
-                                                    "provider": "gemini-3-pro-preview",
+                                                    "provider": self.model_name,
                                                     "latency_ms": first_token_latency_ms
                                                 }
                                             )
@@ -525,7 +536,7 @@ class GeminiProvider(BaseProvider):
                                 logger.debug(
                                     "Gemini finish reason received",
                                     extra={
-                                        "provider": "gemini-3-pro-preview",
+                                        "provider": self.model_name,
                                         "finish_reason": finish_reason_name,
                                         "finish_reason_value": finish_reason_value,
                                         "has_function_calls": bool(function_calls),
@@ -541,7 +552,7 @@ class GeminiProvider(BaseProvider):
                                     logger.info(
                                         "Gemini 3 Pro streaming completed",
                                         extra={
-                                            "provider": "gemini-3-pro-preview",
+                                            "provider": self.model_name,
                                             "duration_ms": duration_ms,
                                             "token_count": token_count,
                                             "finish_reason": finish_reason_name,
@@ -575,7 +586,7 @@ class GeminiProvider(BaseProvider):
                                             # Create generation and finalize with end()
                                             # Langfuse v2 requires end() to be called for proper tracking
                                             generation = trace.generation(
-                                                name="llm_call_gemini-3-pro-preview_streaming",
+                                                name=f"llm_call_{self.model_name}_streaming",
                                                 input=truncated_prompt,
                                                 model=self.model_name,
                                                 model_parameters={
@@ -583,7 +594,7 @@ class GeminiProvider(BaseProvider):
                                                     "max_output_tokens": self.max_output_tokens
                                                 },
                                                 metadata={
-                                                    "provider": "gemini-3-pro-preview",
+                                                    "provider": self.model_name,
                                                     "streaming": True,
                                                     "safety_setting": str(self.safety_setting),
                                                     "tool_iterations": tool_iteration
@@ -610,7 +621,7 @@ class GeminiProvider(BaseProvider):
                                             logger.info(
                                                 "Langfuse generation tracked successfully",
                                                 extra={
-                                                    "provider": "gemini-3-pro-preview",
+                                                    "provider": self.model_name,
                                                     "prompt_tokens": prompt_tokens,
                                                     "completion_tokens": completion_tokens,
                                                     "cost_usd": cost_info.get("total_cost", 0)
@@ -619,7 +630,7 @@ class GeminiProvider(BaseProvider):
                                         except Exception as e:
                                             logger.warning(
                                                 f"Failed to track Gemini streaming in Langfuse: {str(e)}",
-                                                extra={"provider": "gemini-3-pro-preview", "error": str(e)}
+                                                extra={"provider": self.model_name, "error": str(e)}
                                             )
 
                                     # Yield completion event
@@ -643,7 +654,7 @@ class GeminiProvider(BaseProvider):
                             logger.info(
                                 f"Executing {tool_count} parallel tool calls",
                                 extra={
-                                    "provider": "gemini-3-pro-preview",
+                                    "provider": self.model_name,
                                     "tools": tool_names,
                                     "tool_count": tool_count,
                                     "iteration": tool_iteration
@@ -658,7 +669,7 @@ class GeminiProvider(BaseProvider):
                             logger.info(
                                 f"Executing tool {idx}/{tool_count}: {func_call['name']}",
                                 extra={
-                                    "provider": "gemini-3-pro-preview",
+                                    "provider": self.model_name,
                                     "tool_name": func_call["name"],
                                     "tool_position": f"{idx}/{tool_count}",
                                     "iteration": tool_iteration
@@ -718,7 +729,7 @@ class GeminiProvider(BaseProvider):
                             logger.info(
                                 f"All {tool_count} parallel tools completed, continuing conversation",
                                 extra={
-                                    "provider": "gemini-3-pro-preview",
+                                    "provider": self.model_name,
                                     "tools_executed": tool_names,
                                     "tool_count": tool_count,
                                     "iteration": tool_iteration
@@ -728,7 +739,7 @@ class GeminiProvider(BaseProvider):
                             logger.info(
                                 f"Tool '{tool_names[0]}' completed, continuing conversation",
                                 extra={
-                                    "provider": "gemini-3-pro-preview",
+                                    "provider": self.model_name,
                                     "tool_name": tool_names[0],
                                     "iteration": tool_iteration
                                 }
@@ -739,7 +750,7 @@ class GeminiProvider(BaseProvider):
                         tool_names = [fc["name"] for fc in function_calls]
                         logger.error(
                             "Function calls detected but no MCP client provided",
-                            extra={"provider": "gemini-3-pro-preview", "tools": tool_names}
+                            extra={"provider": self.model_name, "tools": tool_names}
                         )
                         for fc in function_calls:
                             yield {
@@ -757,7 +768,7 @@ class GeminiProvider(BaseProvider):
                         logger.warning(
                             "Streaming ended without STOP or function call",
                             extra={
-                                "provider": "gemini-3-pro-preview",
+                                "provider": self.model_name,
                                 "duration_ms": duration_ms,
                                 "token_count": token_count
                             }
@@ -786,7 +797,7 @@ class GeminiProvider(BaseProvider):
                                 truncated_completion = self._truncate_text(full_completion, 1000)
 
                                 generation = trace.generation(
-                                    name="llm_call_gemini-3-pro-preview_streaming",
+                                    name=f"llm_call_{self.model_name}_streaming",
                                     input=truncated_prompt,
                                     model=self.model_name,
                                     model_parameters={
@@ -794,7 +805,7 @@ class GeminiProvider(BaseProvider):
                                         "max_output_tokens": self.max_output_tokens
                                     },
                                     metadata={
-                                        "provider": "gemini-3-pro-preview",
+                                        "provider": self.model_name,
                                         "streaming": True,
                                         "safety_setting": str(self.safety_setting),
                                         "tool_iterations": tool_iteration,
@@ -821,7 +832,7 @@ class GeminiProvider(BaseProvider):
                                 logger.info(
                                     "Langfuse generation tracked (ended without STOP)",
                                     extra={
-                                        "provider": "gemini-3-pro-preview",
+                                        "provider": self.model_name,
                                         "prompt_tokens": prompt_tokens,
                                         "completion_tokens": completion_tokens,
                                         "cost_usd": cost_info.get("total_cost", 0)
@@ -830,7 +841,7 @@ class GeminiProvider(BaseProvider):
                             except Exception as e:
                                 logger.warning(
                                     f"Failed to track Gemini streaming in Langfuse: {str(e)}",
-                                    extra={"provider": "gemini-3-pro-preview", "error": str(e)}
+                                    extra={"provider": self.model_name, "error": str(e)}
                                 )
 
                         # Yield done event even without STOP
@@ -850,21 +861,21 @@ class GeminiProvider(BaseProvider):
                         logger.warning(
                             "Gemini quota/rate limit exceeded",
                             extra={
-                                "provider": "gemini-3-pro-preview",
+                                "provider": self.model_name,
                                 "error": str(e)
                             }
                         )
-                        raise RateLimitError("gemini-3-pro-preview", retry_after=None)
+                        raise RateLimitError(self.model_name, retry_after=None)
 
                     # Re-raise as ProviderError
-                    raise ProviderError("gemini-3-pro-preview", f"Streaming error: {str(e)}", e)
+                    raise ProviderError(self.model_name, f"Streaming error: {str(e)}", e)
 
             # If we exit the loop due to max iterations, log warning
             if tool_iteration >= self.max_tool_iterations:
                 logger.warning(
                     "Max tool iterations reached",
                     extra={
-                        "provider": "gemini-3-pro-preview",
+                        "provider": self.model_name,
                         "max_iterations": self.max_tool_iterations
                     }
                 )
@@ -884,13 +895,13 @@ class GeminiProvider(BaseProvider):
             logger.error(
                 "Unexpected Gemini streaming error",
                 extra={
-                    "provider": "gemini-3-pro-preview",
+                    "provider": self.model_name,
                     "duration_ms": duration_ms,
                     "error_type": type(e).__name__,
                     "error": str(e)
                 }
             )
-            raise ProviderError("gemini-3-pro-preview", f"Unexpected streaming error: {type(e).__name__}", e)
+            raise ProviderError(self.model_name, f"Unexpected streaming error: {type(e).__name__}", e)
 
     async def _execute_tool_call(
         self,
@@ -916,7 +927,7 @@ class GeminiProvider(BaseProvider):
             logger.info(
                 "Executing MCP tool for Gemini",
                 extra={
-                    "provider": "gemini-3-pro-preview",
+                    "provider": self.model_name,
                     "tool_name": tool_name,
                     "arguments": tool_arguments
                 }
@@ -928,7 +939,7 @@ class GeminiProvider(BaseProvider):
             logger.info(
                 "MCP tool execution completed successfully",
                 extra={
-                    "provider": "gemini-3-pro-preview",
+                    "provider": self.model_name,
                     "tool_name": tool_name
                 }
             )
@@ -940,7 +951,7 @@ class GeminiProvider(BaseProvider):
             logger.warning(
                 "MCP server unreachable during Gemini tool call",
                 extra={
-                    "provider": "gemini-3-pro-preview",
+                    "provider": self.model_name,
                     "tool_name": tool_name,
                     "error": str(e)
                 }
@@ -956,7 +967,7 @@ class GeminiProvider(BaseProvider):
             logger.warning(
                 "MCP tool execution failed during Gemini call",
                 extra={
-                    "provider": "gemini-3-pro-preview",
+                    "provider": self.model_name,
                     "tool_name": tool_name,
                     "error": str(e)
                 }
@@ -972,7 +983,7 @@ class GeminiProvider(BaseProvider):
             logger.error(
                 "Unexpected error during Gemini tool execution",
                 extra={
-                    "provider": "gemini-3-pro-preview",
+                    "provider": self.model_name,
                     "tool_name": tool_name,
                     "error": str(e)
                 },
