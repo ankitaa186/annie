@@ -11,7 +11,11 @@ Pricing as of December 2025:
 - Gemini 3 Pro Preview:
           Input: $2.00 per 1M tokens ($0.002 per 1K tokens)
           Output: $12.00 per 1M tokens ($0.012 per 1K tokens)
-          Note: 2x pricing for contexts > 200K tokens (not implemented yet)
+          Note: 2x pricing for contexts > 200K tokens
+- Gemini 2.0 Flash:
+          Input: $0.10 per 1M tokens ($0.0001 per 1K tokens)
+          Output: $0.40 per 1M tokens ($0.0004 per 1K tokens)
+          Note: Much cheaper than Pro models, ideal for fallback
 
 Sources:
 - OpenAI: https://openai.com/api/pricing/
@@ -141,12 +145,47 @@ def calculate_gemini_cost(prompt_tokens: int, completion_tokens: int, cached_tok
     }
 
 
+def calculate_gemini_flash_cost(prompt_tokens: int, completion_tokens: int, cached_tokens: int = 0) -> dict:
+    """
+    Calculate cost for Gemini 2.0 Flash API usage.
+
+    Pricing (as of December 2025):
+    - Input: $0.10 per 1M tokens
+    - Output: $0.40 per 1M tokens
+    - Cached: $0.025 per 1M tokens (1/4 of input cost)
+
+    Args:
+        prompt_tokens: Number of input tokens
+        completion_tokens: Number of output tokens
+        cached_tokens: Number of cached input tokens (reduced pricing)
+
+    Returns:
+        Dictionary with input_cost, output_cost, cached_cost, total_cost in USD
+    """
+    # Gemini 2.0 Flash pricing per 1M tokens
+    INPUT_COST = 0.10      # $0.10 per 1M tokens
+    OUTPUT_COST = 0.40     # $0.40 per 1M tokens
+    CACHED_COST = 0.025    # $0.025 per 1M tokens (1/4 of input)
+
+    input_cost = (prompt_tokens / 1_000_000) * INPUT_COST
+    output_cost = (completion_tokens / 1_000_000) * OUTPUT_COST
+    cached_cost = (cached_tokens / 1_000_000) * CACHED_COST
+
+    return {
+        "input_cost": round(input_cost, 6),
+        "output_cost": round(output_cost, 6),
+        "cached_cost": round(cached_cost, 6),
+        "total_cost": round(input_cost + output_cost + cached_cost, 6),
+        "tier": "flash"
+    }
+
+
 def calculate_llm_cost(provider: str, prompt_tokens: int, completion_tokens: int, sources_used: int = 0, cached_tokens: int = 0) -> dict:
     """
     Calculate cost for LLM API usage based on provider.
 
     Args:
-        provider: LLM provider name ("grok-4", "chatgpt-5", "gemini-3-pro-preview", "gemini-2.5-pro", etc.)
+        provider: LLM provider name ("grok-4", "chatgpt-5", "gemini-3-pro-preview", "gemini-2.5-pro", "gemini-2.0-flash", etc.)
         prompt_tokens: Number of input tokens
         completion_tokens: Number of output tokens
         sources_used: Number of Live Search sources accessed (Grok-4 only)
@@ -162,8 +201,11 @@ def calculate_llm_cost(provider: str, prompt_tokens: int, completion_tokens: int
         return calculate_grok_cost(prompt_tokens, completion_tokens, sources_used)
     elif provider == "chatgpt-5":
         return calculate_chatgpt_cost(prompt_tokens, completion_tokens)
-    elif provider in ("gemini-3-pro-preview", "gemini-2.5-pro", "gemini-2.0-flash"):
-        # All Gemini models use same cost calculation (adjust if pricing differs)
+    elif provider == "gemini-2.0-flash":
+        # Gemini Flash has different (cheaper) pricing
+        return calculate_gemini_flash_cost(prompt_tokens, completion_tokens, cached_tokens)
+    elif provider in ("gemini-3-pro-preview", "gemini-2.5-pro"):
+        # Pro models use tiered pricing
         return calculate_gemini_cost(prompt_tokens, completion_tokens, cached_tokens)
     else:
         raise ValueError(f"Unknown provider: {provider}")

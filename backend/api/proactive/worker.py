@@ -561,7 +561,126 @@ async def check_heartbeat() -> bool:
 # Worker Tasks
 # ============================================================================
 
-@observe(name="poll_triggers", as_type="trace")
+@observe(name="process_pending_triggers", as_type="trace")
+async def _process_pending_triggers(
+    pending: List[Dict[str, Any]],
+    intents_client: IntentsClient,
+    gate: SubconsciousGate,
+    delivery: TelegramDelivery,
+    poll_start: float
+) -> None:
+    """
+    Process pending triggers with Langfuse tracing.
+
+    This function is only called when there are pending triggers,
+    avoiding empty traces for poll cycles with no work.
+
+    Args:
+        pending: List of pending trigger intents
+        intents_client: Client for intent operations
+        gate: Subconscious gate checker
+        delivery: Telegram delivery handler
+        poll_start: Timestamp when poll cycle started
+    """
+    logger.info(
+        f"Found {len(pending)} pending triggers",
+        extra={"pending_count": len(pending)}
+    )
+
+    # Track statistics
+    processed = 0
+    claimed = 0
+    conflicts = 0
+    skipped_cooldown = 0
+    condition_not_met = 0
+
+    # Process each pending intent
+    for trigger in pending:
+        try:
+            trigger_id = trigger.get("id")
+            user_id = trigger.get("user_id")
+            trigger_type = trigger.get("trigger_type")
+            metadata = trigger.get("metadata", {})
+
+            # Check cooldown flag for condition triggers
+            if trigger_type in ["price", "silence", "portfolio"]:
+                if metadata.get("in_cooldown"):
+                    logger.debug(
+                        "Skipping trigger in cooldown",
+                        extra={
+                            "trigger_id": trigger_id,
+                            "user_id": user_id,
+                            "trigger_type": trigger_type
+                        }
+                    )
+                    skipped_cooldown += 1
+                    continue
+
+            # Claim intent for exclusive processing
+            claim_result = await intents_client.claim_intent(trigger_id)
+
+            # Check for conflict (already claimed by another worker)
+            if claim_result.get("conflict"):
+                logger.debug(
+                    "Intent already claimed, skipping",
+                    extra={
+                        "trigger_id": trigger_id,
+                        "user_id": user_id
+                    }
+                )
+                conflicts += 1
+                continue
+
+            claimed += 1
+            logger.info(
+                "Intent claimed successfully",
+                extra={
+                    "trigger_id": trigger_id,
+                    "user_id": user_id,
+                    "trigger_type": trigger_type
+                }
+            )
+
+            # For condition triggers, evaluate condition first
+            if trigger_type in ["price", "silence", "portfolio"]:
+                condition_met = await handle_condition_trigger(trigger, intents_client)
+                if not condition_met:
+                    condition_not_met += 1
+                    continue
+
+            # Process trigger through full pipeline
+            await process_trigger(trigger, intents_client, gate, delivery)
+            processed += 1
+
+        except Exception as e:
+            # Log error but continue processing other triggers
+            logger.error(
+                "Error processing individual trigger",
+                extra={
+                    "trigger_id": trigger.get("id"),
+                    "user_id": trigger.get("user_id"),
+                    "error": str(e),
+                    "error_type": type(e).__name__
+                },
+                exc_info=True
+            )
+
+    # Log summary statistics
+    poll_duration = int((time.time() - poll_start) * 1000)
+    logger.info(
+        "Poll cycle completed",
+        extra={
+            "pending_count": len(pending),
+            "claimed": claimed,
+            "processed": processed,
+            "conflicts": conflicts,
+            "skipped_cooldown": skipped_cooldown,
+            "condition_not_met": condition_not_met,
+            "duration_ms": poll_duration
+        }
+    )
+
+
 async def poll_triggers(ctx: Dict[str, Any]) -> None:
     """
     Main polling task - fetch and process all pending intents.
@@ -572,6 +691,9 @@ async def poll_triggers(ctx: Dict[str, Any]) -> None:
     2. Evaluate condition if applicable (condition triggers only)
     3. Pass to processing pipeline if checks pass
     4. Handle errors gracefully (never crash worker)
+
+    Note: Langfuse tracing only occurs when there are pending triggers,
+    avoiding ~1,440 empty traces per day from idle poll cycles.
 
     Args:
         ctx: Arq worker context (contains redis pool, etc.)
@@ -587,7 +709,7 @@ async def poll_triggers(ctx: Dict[str, Any]) -> None:
     delivery = None
 
     try:
-        logger.info("Polling for pending triggers")
+        logger.debug("Polling for pending triggers")
 
         # Initialize clients
         intents_client = IntentsClient()
@@ -601,102 +723,9 @@ async def poll_triggers(ctx: Dict[str, Any]) -> None:
             logger.debug("No pending triggers found")
             return
 
-        logger.info(
-            f"Found {len(pending)} pending triggers",
-            extra={"pending_count": len(pending)}
-        )
-
-        # Track statistics
-        processed = 0
-        claimed = 0
-        conflicts = 0
-        skipped_cooldown = 0
-        condition_not_met = 0
-
-        # Process each pending intent
-        for trigger in pending:
-            try:
-                trigger_id = trigger.get("id")
-                user_id = trigger.get("user_id")
-                trigger_type = trigger.get("trigger_type")
-                metadata = trigger.get("metadata", {})
-
-                # Check cooldown flag for condition triggers
-                if trigger_type in ["price", "silence", "portfolio"]:
-                    if metadata.get("in_cooldown"):
-                        logger.debug(
-                            "Skipping trigger in cooldown",
-                            extra={
-                                "trigger_id": trigger_id,
-                                "user_id": user_id,
-                                "trigger_type": trigger_type
-                            }
-                        )
-                        skipped_cooldown += 1
-                        continue
-
-                # Claim intent for exclusive processing
-                claim_result = await intents_client.claim_intent(trigger_id)
-
-                # Check for conflict (already claimed by another worker)
-                if claim_result.get("conflict"):
-                    logger.debug(
-                        "Intent already claimed, skipping",
-                        extra={
-                            "trigger_id": trigger_id,
-                            "user_id": user_id
-                        }
-                    )
-                    conflicts += 1
-                    continue
-
-                claimed += 1
-                logger.info(
-                    "Intent claimed successfully",
-                    extra={
-                        "trigger_id": trigger_id,
-                        "user_id": user_id,
-                        "trigger_type": trigger_type
-                    }
-                )
-
-                # For condition triggers, evaluate condition first
-                if trigger_type in ["price", "silence", "portfolio"]:
-                    condition_met = await handle_condition_trigger(trigger, intents_client)
-                    if not condition_met:
-                        condition_not_met += 1
-                        continue
-
-                # Process trigger through full pipeline
-                await process_trigger(trigger, intents_client, gate, delivery)
-                processed += 1
-
-            except Exception as e:
-                # Log error but continue processing other triggers
-                logger.error(
-                    "Error processing individual trigger",
-                    extra={
-                        "trigger_id": trigger.get("id"),
-                        "user_id": trigger.get("user_id"),
-                        "error": str(e),
-                        "error_type": type(e).__name__
-                    },
-                    exc_info=True
-                )
-
-        # Log summary statistics
-        poll_duration = int((time.time() - poll_start) * 1000)
-        logger.info(
-            "Poll cycle completed",
-            extra={
-                "pending_count": len(pending),
-                "claimed": claimed,
-                "processed": processed,
-                "conflicts": conflicts,
-                "skipped_cooldown": skipped_cooldown,
-                "condition_not_met": condition_not_met,
-                "duration_ms": poll_duration
-            }
+        # Process with Langfuse tracing (only when there's work)
+        await _process_pending_triggers(
+            pending, intents_client, gate, delivery, poll_start
         )
 
     except IntentsNetworkError as e:

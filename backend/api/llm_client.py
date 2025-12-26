@@ -86,7 +86,8 @@ class LLMClient:
             "grok-4": bool(grok_api_key and grok_api_key != "REPLACE_ME"),
             "chatgpt-5": bool(chatgpt_api_key and chatgpt_api_key != "REPLACE_ME"),
             "gemini-3-pro-preview": bool(gemini_api_key and gemini_api_key != "REPLACE_ME"),  # Story 9.2
-            "gemini-2.5-pro": bool(gemini_api_key and gemini_api_key != "REPLACE_ME")  # Fallback for Gemini 3
+            "gemini-3-flash-preview": bool(gemini_api_key and gemini_api_key != "REPLACE_ME"),  # Fallback for Gemini 3 Pro
+            "gemini-2.5-pro": bool(gemini_api_key and gemini_api_key != "REPLACE_ME")  # Legacy fallback
         }
 
         # Instantiate provider based on configuration
@@ -166,7 +167,8 @@ class LLMClient:
         Fallback chains:
         - grok-4 → chatgpt-5
         - chatgpt-5 → grok-4
-        - gemini-3-pro-preview → gemini-2.5-pro → grok-4
+        - gemini-3-pro-preview → gemini-3-flash-preview → grok-4
+        - gemini-3-flash-preview → grok-4
         - gemini-2.5-pro → grok-4
 
         Args:
@@ -180,11 +182,13 @@ class LLMClient:
         elif failed_provider == "chatgpt-5" and self.providers_available["grok-4"]:
             return "grok-4"
         elif failed_provider == "gemini-3-pro-preview":
-            # Gemini 3 → Gemini 2.5 → Grok-4
-            if self.providers_available["gemini-2.5-pro"]:
-                return "gemini-2.5-pro"
+            # Gemini 3 Pro → Gemini 3 Flash → Grok-4
+            if self.providers_available["gemini-3-flash-preview"]:
+                return "gemini-3-flash-preview"
             elif self.providers_available["grok-4"]:
                 return "grok-4"
+        elif failed_provider == "gemini-3-flash-preview" and self.providers_available["grok-4"]:
+            return "grok-4"
         elif failed_provider == "gemini-2.5-pro" and self.providers_available["grok-4"]:
             return "grok-4"
         return None
@@ -297,6 +301,8 @@ class LLMClient:
                 fallback_provider = GrokProvider()
             elif fallback_name == "chatgpt-5":
                 fallback_provider = ChatGPTProvider()
+            elif fallback_name == "gemini-3-flash-preview":
+                fallback_provider = GeminiProvider(model_override="gemini-2.0-flash")
             elif fallback_name == "gemini-2.5-pro":
                 fallback_provider = GeminiProvider(model_override="gemini-2.5-pro")
             elif fallback_name == "gemini-3-pro-preview":
