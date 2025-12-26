@@ -256,7 +256,7 @@ def get_logger(name: str = "backend", service_name: str = "backend") -> logging.
     
     # Choose formatter based on environment
     if environment.lower() == "prod":
-        formatter = JSONFormatter()
+        formatter = HumanReadableFormatter()
     else:
         formatter = HumanReadableFormatter()
     

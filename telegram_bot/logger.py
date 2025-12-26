@@ -98,7 +98,7 @@ except ImportError:
         handler.setLevel(logger.level)
         
         if environment.lower() == "prod":
-            formatter = JSONFormatter()
+            formatter = HumanReadableFormatter()
         else:
             formatter = HumanReadableFormatter()
         
