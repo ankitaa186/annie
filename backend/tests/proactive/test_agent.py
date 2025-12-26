@@ -37,11 +37,13 @@ def test_dynamic_state_creation():
         market_status="open",
         hours_since_last_message=2.5,
         recent_context="User asked about stocks",
-        profile={"name": "Test User"}
+        profile={"name": "Test User"},
+        conversation_history=[{"role": "user", "content": "Hello"}]
     )
 
     assert state.day_of_week == "Monday"
     assert state.market_status == "open"
+    assert state.conversation_history is not None
     assert state.hours_since_last_message == 2.5
 
 
@@ -168,7 +170,8 @@ def test_build_agent_prompt_includes_trigger_info():
         market_status="open",
         hours_since_last_message=12.0,
         recent_context=None,
-        profile=None
+        profile=None,
+        conversation_history=None
     )
 
     prompt = build_agent_prompt(trigger, state, [])
@@ -191,7 +194,8 @@ def test_build_agent_prompt_includes_dynamic_state():
         market_status="closed",
         hours_since_last_message=24.0,
         recent_context="User discussed portfolio yesterday",
-        profile={"name": "Ankit"}
+        profile={"name": "Ankit"},
+        conversation_history=[{"role": "user", "content": "Check my portfolio"}]
     )
 
     prompt = build_agent_prompt(trigger, state, [])
@@ -214,7 +218,8 @@ def test_build_agent_prompt_includes_tools():
         market_status="open",
         hours_since_last_message=2.0,
         recent_context=None,
-        profile=None
+        profile=None,
+        conversation_history=None
     )
     tools = ["get_portfolio", "get_stock_price"]
 
@@ -249,7 +254,8 @@ async def test_execute_wake_up_agent_returns_result():
                     market_status="open",
                     hours_since_last_message=5.0,
                     recent_context=None,
-                    profile=None
+                    profile=None,
+                    conversation_history=None
                 )
 
                 # Mock MCP client

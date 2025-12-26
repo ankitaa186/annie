@@ -302,6 +302,98 @@ async def test_process_trigger_full_flow(
 
 
 @pytest.mark.asyncio
+async def test_process_trigger_stores_in_conversation_history(
+    mock_intents_client,
+    mock_gate,
+    mock_delivery,
+    sample_trigger
+):
+    """Test that proactive messages are stored in conversation history."""
+    with patch('api.proactive.worker.execute_wake_up_agent') as mock_agent:
+        with patch('api.proactive.worker.StateManager') as mock_state_class:
+            # Setup agent response
+            mock_agent.return_value = WakeUpResult(
+                skip=False,
+                skip_reason=None,
+                message="Hello! Your portfolio is up 5%.",
+                tools_called=["get_portfolio"],
+                reasoning="User wanted daily update"
+            )
+
+            # Setup StateManager mock
+            mock_state_manager = AsyncMock()
+            mock_state_manager.get_session = AsyncMock(return_value={
+                "user_id": "user_456",
+                "conversation_id": "conv_abc123"
+            })
+            mock_state_manager.add_message = AsyncMock()
+            mock_state_manager.__aenter__ = AsyncMock(return_value=mock_state_manager)
+            mock_state_manager.__aexit__ = AsyncMock(return_value=None)
+            mock_state_class.return_value = mock_state_manager
+
+            await process_trigger(
+                trigger=sample_trigger,
+                intents_client=mock_intents_client,
+                gate=mock_gate,
+                delivery=mock_delivery
+            )
+
+            # Verify message was stored in conversation history
+            mock_state_manager.add_message.assert_called_once()
+            call_args = mock_state_manager.add_message.call_args
+            assert call_args[0][0] == "conv_abc123"  # conversation_id
+            assert call_args[0][1]["role"] == "assistant"
+            assert call_args[0][1]["content"] == "Hello! Your portfolio is up 5%."
+
+
+@pytest.mark.asyncio
+async def test_process_trigger_creates_session_if_missing(
+    mock_intents_client,
+    mock_gate,
+    mock_delivery,
+    sample_trigger
+):
+    """Test that a session is created if user has no active session."""
+    with patch('api.proactive.worker.execute_wake_up_agent') as mock_agent:
+        with patch('api.proactive.worker.StateManager') as mock_state_class:
+            # Setup agent response
+            mock_agent.return_value = WakeUpResult(
+                skip=False,
+                skip_reason=None,
+                message="Hello!",
+                tools_called=[],
+                reasoning="Greeting"
+            )
+
+            # Setup StateManager mock - no existing session
+            mock_state_manager = AsyncMock()
+            mock_state_manager.get_session = AsyncMock(return_value=None)
+            mock_state_manager.create_session = AsyncMock(return_value={
+                "user_id": "user_456",
+                "conversation_id": "conv_new123"
+            })
+            mock_state_manager.add_message = AsyncMock()
+            mock_state_manager.__aenter__ = AsyncMock(return_value=mock_state_manager)
+            mock_state_manager.__aexit__ = AsyncMock(return_value=None)
+            mock_state_class.return_value = mock_state_manager
+
+            await process_trigger(
+                trigger=sample_trigger,
+                intents_client=mock_intents_client,
+                gate=mock_gate,
+                delivery=mock_delivery
+            )
+
+            # Verify session was created
+            mock_state_manager.create_session.assert_called_once_with("user_456", "telegram")
+
+            # Verify message was stored in new conversation
+            mock_state_manager.add_message.assert_called_once()
+            call_args = mock_state_manager.add_message.call_args
+            assert call_args[0][0] == "conv_new123"
+
+
+@pytest.mark.asyncio
 async def test_process_trigger_gate_blocks(
     mock_intents_client,
     mock_gate,

@@ -24,6 +24,7 @@ from api.llm_client import LLMClient
 from api.mcp_client import MCPClient, MCPClientError
 from api.profile import ProfileManager
 from api.memory_client import MemoryClient
+from api.state import StateManager
 
 try:
     from langfuse.decorators import observe, langfuse_context
@@ -59,7 +60,8 @@ class DynamicState:
     market_status: str  # "open" or "closed"
     hours_since_last_message: float
     recent_context: Optional[str]  # Recent conversation summary from agentic-memories
-    profile: Optional[Dict[str, Any]]  # Fresh user profile
+    profile: Optional[Dict[str, Any]]  # Fresh user profile from get_user_profile MCP tool
+    conversation_history: Optional[List[Dict[str, Any]]]  # Recent conversation messages
 
 
 @dataclass
@@ -170,16 +172,37 @@ async def gather_dynamic_state(user_id: str, timezone: str = "America/Los_Angele
             logger.warning(f"Failed to get recent context: {e}")
             recent_context = None
 
-        # Get user profile from cache (non-blocking)
+        # Get conversation history from StateManager
+        conversation_history = None
+        try:
+            async with StateManager() as state_manager:
+                session = await state_manager.get_session(user_id)
+                if session:
+                    conversation_id = session.get("conversation_id")
+                    if conversation_id:
+                        history = await state_manager.get_messages(conversation_id)
+                        # Limit to last 20 messages to keep context manageable
+                        conversation_history = history[-20:] if history else []
+                        logger.info(
+                            "Loaded conversation history for proactive agent",
+                            extra={
+                                "user_id": user_id,
+                                "conversation_id": conversation_id,
+                                "message_count": len(conversation_history)
+                            }
+                        )
+        except Exception as e:
+            logger.warning(f"Failed to get conversation history: {e}")
+            conversation_history = None
+
+        # Get fresh user profile via ProfileManager (calls MCP tool, falls back to cache)
         profile = None
         try:
             profile_manager = ProfileManager()
-            profile = await profile_manager.load_profile_from_cache(user_id)
-            # Trigger background refresh for freshness (non-blocking)
-            await profile_manager.refresh_profile_background(user_id)
+            profile = await profile_manager.fetch_profile_fresh(user_id)
             await profile_manager.close()
         except Exception as e:
-            logger.warning(f"Failed to get fresh profile: {e}")
+            logger.warning(f"Failed to fetch fresh profile: {e}")
             profile = None
 
         duration_ms = int((time.time() - start_time) * 1000)
@@ -192,6 +215,8 @@ async def gather_dynamic_state(user_id: str, timezone: str = "America/Los_Angele
                 "hours_since_last_message": round(hours_since, 2),
                 "has_recent_context": recent_context is not None,
                 "has_profile": profile is not None,
+                "has_conversation_history": conversation_history is not None,
+                "conversation_history_count": len(conversation_history) if conversation_history else 0,
                 "duration_ms": duration_ms
             }
         )
@@ -206,7 +231,8 @@ async def gather_dynamic_state(user_id: str, timezone: str = "America/Los_Angele
                 "market_status": market_status,
                 "hours_since_last_message": hours_since,
                 "recent_context": recent_context,
-                "profile": profile
+                "profile": profile,
+                "conversation_history_count": len(conversation_history) if conversation_history else 0
             }
         )
 
@@ -216,7 +242,9 @@ async def gather_dynamic_state(user_id: str, timezone: str = "America/Los_Angele
                     "market_status": market_status,
                     "hours_since_last_message": round(hours_since, 2),
                     "has_recent_context": recent_context is not None,
-                    "has_profile": profile is not None
+                    "has_profile": profile is not None,
+                    "has_conversation_history": conversation_history is not None,
+                    "conversation_history_count": len(conversation_history) if conversation_history else 0
                 }
             )
 
@@ -226,7 +254,8 @@ async def gather_dynamic_state(user_id: str, timezone: str = "America/Los_Angele
             market_status=market_status,
             hours_since_last_message=hours_since,
             recent_context=recent_context,
-            profile=profile
+            profile=profile,
+            conversation_history=conversation_history
         )
 
     except Exception as e:
@@ -238,7 +267,8 @@ async def gather_dynamic_state(user_id: str, timezone: str = "America/Los_Angele
             market_status="unknown",
             hours_since_last_message=24.0,
             recent_context=None,
-            profile=None
+            profile=None,
+            conversation_history=None
         )
 
 
@@ -281,7 +311,20 @@ def build_agent_prompt(
             profile_str = str(dynamic_state.profile)
 
     # Format recent context
-    recent_context_str = dynamic_state.recent_context or "No recent conversation history."
+    recent_context_str = dynamic_state.recent_context or "No recent conversation summary available."
+
+    # Format conversation history
+    conversation_history_str = "No conversation history available."
+    if dynamic_state.conversation_history:
+        history_lines = []
+        for msg in dynamic_state.conversation_history:
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
+            # Truncate long messages
+            if len(content) > 500:
+                content = content[:500] + "..."
+            history_lines.append(f"[{role}]: {content}")
+        conversation_history_str = "\n".join(history_lines)
 
     # Build tone adjustment guidance
     hours = dynamic_state.hours_since_last_message
@@ -323,10 +366,17 @@ def build_agent_prompt(
         "### Recent Conversation Summary",
         recent_context_str,
         "",
+        "### Conversation History (Last 20 Messages)",
+        "",
+        "This is the actual conversation history with the user. Use this to understand",
+        "what has been discussed recently and avoid repeating information:",
+        "",
+        conversation_history_str,
+        "",
         "### Current User Profile",
         profile_str,
         "",
-        "⚠️ IMPORTANT: If recent_context indicates the user is going through something",
+        "⚠️ IMPORTANT: If conversation history or recent_context indicates the user is going through something",
         "difficult (personal issues, bad news, stress), adjust your tone accordingly.",
         "A chirpy 'Great news about your portfolio!' is inappropriate after a breakup discussion.",
         "",

@@ -39,6 +39,7 @@ from api.proactive.intents_client import (
     IntentsAPIError,
 )
 from api.proactive.telegram_delivery import TelegramDelivery, DeliveryResult
+from api.state import StateManager
 
 try:
     from langfuse.decorators import observe, langfuse_context
@@ -253,6 +254,43 @@ async def process_trigger(
         else:
             # Increment daily gate counter after successful delivery
             await gate.increment_daily_count(user_id)
+
+            # Record proactive message in conversation history
+            # This ensures the LLM has context when user replies
+            try:
+                async with StateManager() as state_manager:
+                    # Get or create session for user
+                    session = await state_manager.get_session(user_id)
+                    if not session:
+                        session = await state_manager.create_session(user_id, "telegram")
+
+                    conversation_id = session.get("conversation_id")
+                    if conversation_id:
+                        proactive_message = {
+                            "role": "assistant",
+                            "content": wake_result.message
+                        }
+                        await state_manager.add_message(conversation_id, proactive_message)
+                        logger.info(
+                            "Proactive message stored in conversation history",
+                            extra={
+                                "trigger_id": trigger_id,
+                                "user_id": user_id,
+                                "conversation_id": conversation_id,
+                                "message_length": len(wake_result.message)
+                            }
+                        )
+            except Exception as e:
+                # Don't fail delivery if history storage fails
+                logger.warning(
+                    "Failed to store proactive message in conversation history",
+                    extra={
+                        "trigger_id": trigger_id,
+                        "user_id": user_id,
+                        "error": str(e),
+                        "error_type": type(e).__name__
+                    }
+                )
 
             logger.info(
                 "Trigger processed successfully",
@@ -793,7 +831,7 @@ class WorkerSettings:
 
     # Worker limits
     max_jobs = 10  # Max concurrent jobs
-    job_timeout = 60  # Job timeout in seconds
+    job_timeout = 600  # Job timeout in seconds (10 min - matches agent internal timeout)
 
     # Logging
     log_level = config.get("LOG_LEVEL", "INFO")
