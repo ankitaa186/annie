@@ -141,7 +141,7 @@ async def gather_dynamic_state(user_id: str, timezone: str = "America/Los_Angele
         )
 
         try:
-            last_activity_str = await redis_client.get(f"user:{user_id}:last_activity")
+            last_activity_str = await redis_client.get(f"activity:{user_id}:last_message")
             if last_activity_str:
                 last_activity = datetime.fromisoformat(last_activity_str)
                 # Make timezone-aware if needed
@@ -398,6 +398,7 @@ def parse_agent_response(response_content: str, tools_called: List[str]) -> Wake
     Parse LLM response into WakeUpResult.
 
     Handles both JSON and plain text responses gracefully.
+    Also handles cases where LLM includes preamble text before JSON.
 
     Args:
         response_content: LLM response content
@@ -410,7 +411,7 @@ def parse_agent_response(response_content: str, tools_called: List[str]) -> Wake
         # Strip markdown code blocks if present (Gemini often wraps JSON in ```json ... ```)
         clean_content = response_content.strip()
         if clean_content.startswith("```"):
-            # Remove opening ```json or ``` 
+            # Remove opening ```json or ```
             lines = clean_content.split("\n")
             if lines[0].startswith("```"):
                 lines = lines[1:]  # Remove first line (```json)
@@ -422,8 +423,27 @@ def parse_agent_response(response_content: str, tools_called: List[str]) -> Wake
                 extra={"original_length": len(response_content), "clean_length": len(clean_content)}
             )
 
-        # Try to parse as JSON
-        data = json.loads(clean_content)
+        # Try to parse as JSON directly first
+        try:
+            data = json.loads(clean_content)
+        except json.JSONDecodeError:
+            # LLM may have included preamble text before JSON - try to extract JSON
+            json_start = clean_content.find('{')
+            json_end = clean_content.rfind('}')
+
+            if json_start != -1 and json_end != -1 and json_end > json_start:
+                json_str = clean_content[json_start:json_end + 1]
+                logger.debug(
+                    "Extracted JSON from mixed content",
+                    extra={
+                        "preamble_length": json_start,
+                        "json_length": len(json_str)
+                    }
+                )
+                data = json.loads(json_str)
+            else:
+                # No JSON found - re-raise to trigger fallback
+                raise
 
         return WakeUpResult(
             skip=data.get("skip", False),

@@ -28,32 +28,35 @@ except ImportError:
     import traceback
     from datetime import datetime
     from typing import Any, Dict
-    
+    import pytz
+
+    _PACIFIC_TZ = pytz.timezone("America/Los_Angeles")
+
     try:
         from config import get_config, mask_sensitive_value
     except ImportError:
         import os
-        
+
         def get_config():
             return {
                 "LOG_LEVEL": os.getenv("LOG_LEVEL", "INFO"),
                 "ENVIRONMENT": os.getenv("ENVIRONMENT", "dev"),
             }
-        
+
         def mask_sensitive_value(value: str, show_first: int = 4, show_last: int = 4) -> str:
             if not value or len(value) <= show_first + show_last:
                 return "***"
             return f"{value[:show_first]}...{value[-show_last:]}"
-    
+
     SENSITIVE_FIELDS = [
         "api_key", "token", "password", "secret", "authorization",
         "brave_search_api_key", "stock_api_key",
     ]
-    
+
     class JSONFormatter(std_logging.Formatter):
         def format(self, record: std_logging.LogRecord) -> str:
             log_data: Dict[str, Any] = {
-                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "timestamp": datetime.now(_PACIFIC_TZ).isoformat(),
                 "level": record.levelname,
                 "service": getattr(record, "service", "mcp-server"),
                 "message": str(record.getMessage()),
@@ -66,9 +69,15 @@ except ImportError:
         def __init__(self):
             super().__init__(
                 fmt="[%(asctime)s] [%(levelname)-8s] [%(service)s] %(message)s",
-                datefmt="%Y-%m-%dT%H:%M:%SZ"
+                datefmt="%Y-%m-%dT%H:%M:%S"
             )
-        
+
+        def formatTime(self, record: std_logging.LogRecord, datefmt=None) -> str:
+            ct = datetime.fromtimestamp(record.created, tz=_PACIFIC_TZ)
+            if datefmt:
+                return ct.strftime(datefmt)
+            return ct.isoformat()
+
         def format(self, record: std_logging.LogRecord) -> str:
             if not hasattr(record, "service"):
                 record.service = "mcp-server"

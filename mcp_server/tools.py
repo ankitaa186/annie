@@ -2731,6 +2731,13 @@ REQUIRED SECTIONS:
 7. edge_cases: How to handle errors, missing data, unusual situations
 
 CRITICAL RULES:
+- ⚠️ PRE-FLIGHT CHECK: Before calling this tool, you MUST call list_triggers first to check
+  if a similar trigger already exists. If a similar intent exists (e.g., user wants to change
+  the time of an existing alert), use update_trigger instead. Only use create_trigger for
+  brand new intents. DO NOT create duplicate triggers!
+- If in doubt whether to create a new trigger or update an existing one, ASK THE USER to confirm
+  before proceeding. Example: "I see you already have a '9am portfolio update' - should I update
+  that one to 1pm, or create a separate trigger?"
 - NEVER put dynamic data (holdings, prices) in action_context - fetch fresh via tools
 - Wake-up AI should use tools liberally to gather current information
 - action_context preferences take precedence - if user wants brief, respect it

@@ -14,6 +14,11 @@ from datetime import datetime
 from functools import wraps
 from typing import Any, Dict, Optional
 
+import pytz
+
+# Pacific timezone for log timestamps
+_PACIFIC_TZ = pytz.timezone("America/Los_Angeles")
+
 try:
     from .config import get_config, mask_sensitive_value
 except ImportError:
@@ -53,7 +58,7 @@ class JSONFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         """Format log record as JSON."""
         log_data: Dict[str, Any] = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(_PACIFIC_TZ).isoformat(),
             "level": record.levelname,
             "service": getattr(record, "service", "backend"),
             "message": self._mask_sensitive_data(str(record.getMessage())),
@@ -120,13 +125,20 @@ class JSONFormatter(logging.Formatter):
 
 class HumanReadableFormatter(logging.Formatter):
     """Human-readable formatter for development logs."""
-    
+
     def __init__(self):
         super().__init__(
             fmt="[%(asctime)s] [%(levelname)-8s] [%(service)s] %(message)s",
-            datefmt="%Y-%m-%dT%H:%M:%SZ"
+            datefmt="%Y-%m-%dT%H:%M:%S"
         )
-    
+
+    def formatTime(self, record: logging.LogRecord, datefmt: Optional[str] = None) -> str:
+        """Format time in Pacific timezone."""
+        ct = datetime.fromtimestamp(record.created, tz=_PACIFIC_TZ)
+        if datefmt:
+            return ct.strftime(datefmt)
+        return ct.isoformat()
+
     def format(self, record: logging.LogRecord) -> str:
         """Format log record as human-readable text."""
         # Ensure service name is set

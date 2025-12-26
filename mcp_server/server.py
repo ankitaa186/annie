@@ -11,6 +11,9 @@ import json
 import os
 import time
 from datetime import datetime
+import pytz
+
+_PACIFIC_TZ = pytz.timezone("America/Los_Angeles")
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, Request, HTTPException
@@ -303,7 +306,7 @@ async def health_check():
     """Health check endpoint."""
     return JSONResponse(content={
         "status": "ok",
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.now(_PACIFIC_TZ).isoformat(),
         "tools_registered": len(mcp_server.tool_registry.tools)
     })
 

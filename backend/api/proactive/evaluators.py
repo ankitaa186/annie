@@ -793,8 +793,8 @@ class SilenceEvaluator(Evaluator):
     - Fail-safe: returns False on any error
     """
 
-    # Activity key pattern (from Story 13.8)
-    ACTIVITY_KEY_PATTERN = "user:{user_id}:last_activity"
+    # Activity key pattern (matches ActivityTracker module)
+    ACTIVITY_KEY_PATTERN = "activity:{user_id}:last_message"
 
     # Expression parsing regex: "silence OPERATOR DURATION"
     EXPRESSION_PATTERN = re.compile(r'silence\s*([<>]=?)\s*(\d+)(h|d|m)')

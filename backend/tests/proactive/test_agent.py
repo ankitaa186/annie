@@ -127,7 +127,25 @@ def test_parse_agent_response_invalid_json():
 
     assert result.skip is False
     assert result.message == response
-    assert "some_tool" in result.tools_called
+
+
+def test_parse_agent_response_with_preamble_text():
+    """Test parsing JSON with preamble text before it."""
+    response = '''Based on the trigger and your preferences, I've analyzed the data.
+
+{
+    "skip": false,
+    "message": "📉 Market update: NVDA down 5%",
+    "tools_called": ["get_portfolio", "analyze_stock"],
+    "reasoning": "Found significant price movement"
+}'''
+    result = parse_agent_response(response, [])
+
+    assert result.skip is False
+    assert result.message == "📉 Market update: NVDA down 5%"
+    assert "get_portfolio" in result.tools_called
+    assert "analyze_stock" in result.tools_called
+    assert result.reasoning == "Found significant price movement"
 
 
 # ============================================================================

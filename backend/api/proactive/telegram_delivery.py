@@ -19,6 +19,7 @@ import asyncio
 import json
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Optional
 
 import redis.asyncio as redis
@@ -399,7 +400,7 @@ async def record_proactive_message(
     value = json.dumps({
         "trigger_id": trigger_id,
         "message_id": message_id,
-        "sent_at": time.time()
+        "sent_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     })
 
     # Store with 2-hour TTL (feedback window)
