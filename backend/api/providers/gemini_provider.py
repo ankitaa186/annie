@@ -765,14 +765,56 @@ class GeminiProvider(BaseProvider):
                         # This can happen when Gemini finishes without explicit STOP signal
                         duration_ms = int((time.time() - start_time) * 1000)
 
+                        # Get finish reason info for error message (may be set from chunk loop)
+                        fr_name = finish_reason_name if 'finish_reason_name' in dir() else "UNKNOWN"
+                        fr_value = finish_reason_value if 'finish_reason_value' in dir() else -1
+
                         logger.warning(
                             "Streaming ended without STOP or function call",
                             extra={
                                 "provider": self.model_name,
                                 "duration_ms": duration_ms,
-                                "token_count": token_count
+                                "token_count": token_count,
+                                "finish_reason": fr_name,
+                                "finish_reason_value": fr_value,
+                                "tool_iteration": tool_iteration
                             }
                         )
+
+                        # CRITICAL: If no tokens were generated, send error to user
+                        # This happens with finish_reason like THINKING_OVERFLOW (12),
+                        # BLOCKLIST (7), PROHIBITED_CONTENT (8), etc.
+                        if token_count == 0:
+                            # Map common finish reasons to user-friendly messages
+                            error_messages = {
+                                7: "I couldn't complete my response due to content restrictions.",
+                                8: "I couldn't complete my response due to content policy.",
+                                9: "I couldn't complete my response due to sensitive information detection.",
+                                12: "I ran into a processing limit while thinking. Please try rephrasing or simplifying your request.",
+                            }
+
+                            user_message = error_messages.get(
+                                fr_value,
+                                "I wasn't able to generate a response. Please try again or rephrase your request."
+                            )
+
+                            logger.error(
+                                "Empty response from Gemini - sending error to user",
+                                extra={
+                                    "provider": self.model_name,
+                                    "finish_reason": fr_name,
+                                    "finish_reason_value": fr_value,
+                                    "tool_iteration": tool_iteration,
+                                    "error_message": user_message
+                                }
+                            )
+
+                            # Yield error event so user sees feedback
+                            yield {
+                                "type": "error",
+                                "message": user_message,
+                                "code": f"EMPTY_RESPONSE_{fr_name}"
+                            }
 
                         # Still track in Langfuse for this case
                         if trace and token_count > 0:
