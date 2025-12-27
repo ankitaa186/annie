@@ -148,8 +148,10 @@ async def stream_generator(
             MCPClient() as mcp_client,
             StatusContext(conversation_id, status_callback)
         ):
-            # Emit initial "thinking" status
-            emit_status("Annie is thinking...")
+            # NOTE: Initial "thinking" status is already sent by telegram_bot
+            # before connecting to SSE stream. Emitting here causes duplicate
+            # which Telegram rejects with "Message is not modified" error.
+            # emit_status("Annie is thinking...")
 
             logger.info(
                 "Starting SSE stream with tool orchestration",
