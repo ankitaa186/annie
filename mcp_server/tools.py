@@ -951,8 +951,10 @@ def normalize_ticker(ticker: str) -> Optional[str]:
     """
     Normalize ticker to uppercase and validate format.
 
+    Converts hyphens to dots (BRK-B -> BRK.B) for yfinance compatibility.
+
     Args:
-        ticker: Stock ticker symbol (e.g., 'aapl', 'GOOGL', 'BRK.B')
+        ticker: Stock ticker symbol (e.g., 'aapl', 'GOOGL', 'BRK.B', 'BRK-B')
 
     Returns:
         Normalized uppercase ticker or None if invalid
@@ -960,7 +962,8 @@ def normalize_ticker(ticker: str) -> Optional[str]:
     if not ticker:
         return None
 
-    normalized = ticker.upper().strip()
+    # Uppercase, strip whitespace, convert hyphens to dots (BRK-B -> BRK.B)
+    normalized = ticker.upper().strip().replace('-', '.')
 
     if not normalized:
         return None

@@ -97,7 +97,7 @@ class GeminiProvider(BaseProvider):
         self.tool_adapter = GeminiToolAdapter()
 
         # Load max tool iterations from config (prevent infinite loops)
-        self.max_tool_iterations = int(config.get("GEMINI_MAX_TOOL_ITERATIONS", "5"))
+        self.max_tool_iterations = int(config.get("GEMINI_MAX_TOOL_ITERATIONS", "10"))
 
         logger.info(
             "Gemini 3 Pro provider initialized",
