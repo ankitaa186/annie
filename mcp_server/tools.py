@@ -313,7 +313,7 @@ store_memory_tool = {
 async def retrieve_memories_tool_handler(
     user_id: str,
     query: str,
-    limit: int = 50,
+    limit: int = 100,
     persona: str = None
 ) -> Dict[str, Any]:
     """
@@ -326,7 +326,7 @@ async def retrieve_memories_tool_handler(
     Args:
         user_id: User identifier
         query: Search query describing the decision context (e.g., 'stock investment decisions', 'career choices')
-        limit: Maximum number of memories to retrieve (default: 50, range: 20-1000)
+        limit: Maximum number of memories to retrieve (default: 100, range: 20-1000)
         persona: Optional persona filter (e.g., 'stock_trader', 'career_advisor') to filter memories by decision-making context
 
     Returns:
@@ -531,8 +531,8 @@ retrieve_memories_tool = {
             },
             "limit": {
                 "type": "integer",
-                "description": "Maximum number of memories to retrieve (default: 50, range: 20-1000)",
-                "default": 50,
+                "description": "Maximum number of memories to retrieve (default: 100, min:20, max: 1000)",
+                "default": 100,
                 "minimum": 20,
                 "maximum": 1000
             }
@@ -2548,8 +2548,24 @@ async def create_trigger_tool_handler(
         # Map condition trigger to API format
         condition_type = condition.get("condition_type", "price")
         api_trigger_type = condition_type  # "price", "silence", or "portfolio"
+
+        # Set default check_interval_minutes based on condition type
+        # Price: every 2 hours (120 min) - balances responsiveness with API limits
+        # Portfolio: every 24 hours (1440 min) - daily check is sufficient
+        # Silence: every 60 min - checking user inactivity hourly is sufficient
+        default_check_intervals = {
+            "price": 120,
+            "portfolio": 1440,
+            "silence": 60
+        }
+        check_interval = condition.get(
+            "check_interval_minutes",
+            default_check_intervals.get(condition_type, 120)
+        )
+
         api_condition = {
             "expression": condition.get("expression"),
+            "check_interval_minutes": check_interval,
             "cooldown_hours": condition.get("cooldown_hours", 1),
             "fire_mode": condition.get("fire_mode", "recurring")
         }
@@ -2801,7 +2817,7 @@ CRITICAL RULES:
                     },
                     "check_interval_minutes": {
                         "type": "integer",
-                        "description": "How often to evaluate (default: 5 for price, 15 for portfolio, 60 for silence)"
+                        "description": "How often to evaluate in minutes (default: 120 for price, 1440 for portfolio, 60 for silence)"
                     },
                     "cooldown_hours": {
                         "type": "integer",
