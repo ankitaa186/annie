@@ -543,6 +543,166 @@ retrieve_memories_tool = {
 }
 
 
+async def compact_memories_tool_handler(
+    user_id: str,
+    skip_reextract: bool = True,
+    skip_consolidate: bool = False
+) -> Dict[str, Any]:
+    """
+    Run memory compaction for a user to clean up and consolidate memories.
+
+    Compaction performs:
+    - TTL cleanup: Removes expired short-term memories
+    - Deduplication: Merges duplicate or near-duplicate memories
+    - Consolidation: Combines related memories into "golden records", this is not as expensive as re-extraction but should be skipped unless there are conflicts or duplicates in retreieved memories.
+    - Warning: re-extraction is very expensive(time and money) and should be skipped unless user explicitly requests it.
+
+    Args:
+        user_id: User identifier
+        skip_reextract: Skip very expensive LLM re-extraction unless user explicitly requests it (default: True, recommended)
+        skip_consolidate: Skip memory consolidation unless user explicitly requests it (default: True - consolidation runs)
+
+    Returns:
+        dict: Result with status and compaction statistics
+    """
+    start_time = time.time()
+
+    # Get agentic-memories URL from config
+    try:
+        config = get_config()
+        memories_url = config.get("AGENTIC_MEMORIES_URL", "http://host.docker.internal:8080")
+    except Exception as e:
+        logger.warning(f"Failed to load config, using default: {e}")
+        memories_url = "http://host.docker.internal:8080"
+
+    logger.info(
+        "Triggering memory compaction",
+        extra={
+            "user_id": user_id,
+            "skip_reextract": skip_reextract,
+            "skip_consolidate": skip_consolidate
+        }
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=300.0) as client:  # 5 min timeout for compaction
+            response = await client.post(
+                f"{memories_url}/v1/maintenance/compact",
+                params={
+                    "user_id": user_id,
+                    "skip_reextract": str(skip_reextract).lower(),
+                    "skip_consolidate": str(skip_consolidate).lower()
+                }
+            )
+
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            if response.status_code == 200:
+                result = response.json()
+                stats = result.get("stats", {})
+
+                logger.info(
+                    "Memory compaction completed",
+                    extra={
+                        "user_id": user_id,
+                        "duration_ms": duration_ms,
+                        "status": result.get("status"),
+                        "ttl_deleted": stats.get("ttl_deleted", 0),
+                        "consolidated_count": stats.get("consolidated_count", 0),
+                        "sources_removed": stats.get("sources_removed", 0)
+                    }
+                )
+
+                return {
+                    "status": "success",
+                    "message": "Memory compaction completed",
+                    "stats": {
+                        "ttl_deleted": stats.get("ttl_deleted", 0),
+                        "consolidated_count": stats.get("consolidated_count", 0),
+                        "sources_removed": stats.get("sources_removed", 0),
+                        "applied_upserts": stats.get("applied_upserts", 0),
+                        "applied_deletes": stats.get("applied_deletes", 0),
+                        "duration_ms": stats.get("duration_ms", duration_ms)
+                    }
+                }
+            else:
+                error_msg = f"Compaction failed with status {response.status_code}"
+                logger.error(
+                    error_msg,
+                    extra={
+                        "user_id": user_id,
+                        "duration_ms": duration_ms,
+                        "status_code": response.status_code
+                    }
+                )
+                return {
+                    "status": "error",
+                    "message": error_msg
+                }
+
+    except httpx.TimeoutException:
+        duration_ms = int((time.time() - start_time) * 1000)
+        logger.error(
+            "Memory compaction timed out",
+            extra={"user_id": user_id, "duration_ms": duration_ms}
+        )
+        return {
+            "status": "error",
+            "message": "Compaction timed out after 5 minutes"
+        }
+    except Exception as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+        logger.error(
+            f"Memory compaction failed: {e}",
+            extra={"user_id": user_id, "duration_ms": duration_ms}
+        )
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
+
+compact_memories_tool = {
+    "name": "compact_memories",
+    "description": """Run memory compaction to clean up and consolidate user memories.
+
+Use this tool when:
+- User asks to clean up or organize their memories
+- User reports duplicate or conflicting memories
+- Performing periodic maintenance
+- After deleting multiple memories
+
+Compaction performs:
+- TTL cleanup: Removes expired short-term memories
+- Deduplication: Merges duplicate memories
+- Consolidation: Combines related memories into cleaner "golden records"
+
+Note: This operation may take 1-2 minutes to complete.
+""",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "user_id": {
+                "type": "string",
+                "description": "User identifier"
+            },
+            "skip_reextract": {
+                "type": "boolean",
+                "description": "EXPENSIVE OPERATION - Skip LLM re-extraction. Default: true. ONLY set to false if user EXPLICITLY requests 'reprocess', 're-extract', or 'rebuild' memories.",
+                "default": True
+            },
+            "skip_consolidate": {
+                "type": "boolean",
+                "description": "EXPENSIVE OPERATION - Skip memory consolidation. Default: false. ONLY set to true if user EXPLICITLY requests to skip consolidation.",
+                "default": False
+            }
+        },
+        "required": ["user_id"]
+    },
+    "handler": compact_memories_tool_handler
+}
+
+
 async def get_user_profile_tool_handler(
     user_id: str
 ) -> Dict[str, Any]:

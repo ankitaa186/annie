@@ -26,6 +26,7 @@ from mcp_server.tools import (
     health_check_tool,
     store_memory_tool,
     retrieve_memories_tool,
+    compact_memories_tool,
     get_user_profile_tool,
     get_portfolio_tool,
     add_holding_tool,
@@ -79,6 +80,7 @@ class MCPServer:
         self.tool_registry.register(health_check_tool)
         self.tool_registry.register(store_memory_tool)
         self.tool_registry.register(retrieve_memories_tool)
+        self.tool_registry.register(compact_memories_tool)
         self.tool_registry.register(get_user_profile_tool)
         # Portfolio management tools (Epic 10)
         self.tool_registry.register(get_portfolio_tool)
