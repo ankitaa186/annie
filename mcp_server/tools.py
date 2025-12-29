@@ -98,21 +98,48 @@ health_check_tool = {
 
 async def store_memory_tool_handler(
     user_id: str,
-    history: list,
-    metadata: dict = None
+    content: str,
+    importance: float = 0.8,
+    layer: str = "semantic",
+    persona_tags: list = None,
+    metadata: dict = None,
+    # Episodic fields
+    event_timestamp: str = None,
+    location: str = None,
+    participants: list = None,
+    # Emotional fields
+    emotional_state: str = None,
+    valence: float = None,
+    arousal: float = None,
+    # Procedural fields
+    skill_name: str = None,
+    proficiency_level: str = None
 ) -> Dict[str, Any]:
     """
-    Store conversation transcript in agentic-memories service.
+    Store a critical memory directly in agentic-memories service.
 
-    The service will automatically extract memories from the conversation history.
+    This tool stores pre-formatted memory content directly using the fast
+    /v1/memories/direct endpoint, bypassing the slow LangGraph extraction pipeline.
+    Use for critical information that the user explicitly asks to remember.
 
     Args:
         user_id: User identifier
-        history: List of conversation messages with role and content
-        metadata: Optional metadata (platform, conversation_id, etc.)
+        content: Pre-formatted memory content to store (max 5000 chars)
+        importance: Importance level 0.0-1.0, higher = more critical (default: 0.8)
+        layer: Memory layer - "short-term", "semantic", "long-term" (default: "semantic")
+        persona_tags: Tags for memory categorization (max 10)
+        metadata: Optional metadata (source, conversation_id, trigger)
+        event_timestamp: When the event occurred (ISO 8601) - for episodic memories
+        location: Where it happened - for episodic memories
+        participants: Who was involved - for episodic memories
+        emotional_state: Primary emotional state (e.g., 'happy', 'anxious')
+        valence: Emotional valence -1.0 (negative) to 1.0 (positive)
+        arousal: Emotional arousal 0.0 (calm) to 1.0 (excited)
+        skill_name: Name of skill/procedure - for procedural memories
+        proficiency_level: User's proficiency ("beginner", "intermediate", "advanced", "expert")
 
     Returns:
-        dict: Result with status, memories_created, and memory IDs
+        dict: Result with status, memory_id, storage details, and stored content
     """
     start_time = time.time()
 
@@ -124,84 +151,154 @@ async def store_memory_tool_handler(
         logger.warning(f"Failed to load config, using default: {e}")
         memories_url = "http://host.docker.internal:8080"
 
-    # Build request payload
-    payload = {
-        "user_id": user_id,
-        "history": history
-    }
+    # Apply defaults for mutable arguments
+    if persona_tags is None:
+        persona_tags = []
+
+    # Limit persona_tags to max 10 items (AC #3)
+    persona_tags = persona_tags[:10]
+
+    # Build request payload with required fields
+    # Build metadata with source: "llm_explicit" merged with user-provided metadata (AC #3)
+    merged_metadata = {"source": "llm_explicit"}
     if metadata:
-        payload["metadata"] = metadata
+        merged_metadata.update(metadata)
+
+    payload = {
+        # Required fields
+        "user_id": user_id,
+        "content": content,
+        # General fields (AC #3)
+        "layer": layer,
+        "type": "explicit",  # Always explicit for LLM-stored memories
+        "importance": importance,
+        "confidence": 0.95,  # High confidence for explicit storage
+        "persona_tags": persona_tags,
+        "metadata": merged_metadata
+    }
+
+    # Add optional episodic fields if provided (AC #3)
+    if event_timestamp is not None:
+        payload["event_timestamp"] = event_timestamp
+    if location is not None:
+        payload["location"] = location
+    if participants is not None:
+        payload["participants"] = participants
+
+    # Add optional emotional fields if provided (AC #3)
+    if emotional_state is not None:
+        payload["emotional_state"] = emotional_state
+    if valence is not None:
+        payload["valence"] = valence
+    if arousal is not None:
+        payload["arousal"] = arousal
+
+    # Add optional procedural fields if provided (AC #3)
+    if skill_name is not None:
+        payload["skill_name"] = skill_name
+    if proficiency_level is not None:
+        payload["proficiency_level"] = proficiency_level
+
+    # Error codes that should NOT trigger retry (AC #5)
+    NO_RETRY_ERRORS = ["VALIDATION_ERROR", "INTERNAL_ERROR"]
 
     # Make HTTP request to agentic-memories with retry logic
     max_retries = 3
     retry_delays = [1, 2, 4]  # Exponential backoff: 1s, 2s, 4s
 
-    async with httpx.AsyncClient(timeout=180.0) as client:  # 3 minutes for LLM-based memory extraction and storage
+    # Timeout reduced to 10s - direct storage should complete in 1-3s (AC #2)
+    async with httpx.AsyncClient(timeout=10.0) as client:
         for attempt in range(max_retries):
             try:
                 logger.info(
-                    "Storing conversation transcript via MCP tool",
+                    "Storing critical memory via direct endpoint",
                     extra={
                         "user_id": user_id,
-                        "message_count": len(history),
+                        "content_length": len(content),
+                        "importance": importance,
+                        "layer": layer,
+                        "has_episodic": event_timestamp is not None,
+                        "has_emotional": emotional_state is not None,
+                        "has_procedural": skill_name is not None,
                         "attempt": attempt + 1,
-                        "url": memories_url
+                        "endpoint": "/v1/memories/direct"
                     }
                 )
 
+                # Call /v1/memories/direct endpoint (AC #1)
                 response = await client.post(
-                    f"{memories_url}/v1/store",
+                    f"{memories_url}/v1/memories/direct",
                     json=payload,
                     headers={"Content-Type": "application/json"}
                 )
 
                 duration_ms = int((time.time() - start_time) * 1000)
 
-                if response.status_code == 200:
+                if response.status_code == 200 or response.status_code == 201:
                     result = response.json()
+                    memory_id = result.get("memory_id")
+                    storage_details = result.get("storage", {})
+
                     logger.info(
-                        "Conversation transcript stored successfully via MCP tool",
+                        "Critical memory stored successfully via direct endpoint",
                         extra={
                             "user_id": user_id,
-                            "memories_created": result.get("memories_created", 0),
+                            "memory_id": memory_id,
                             "duration_ms": duration_ms,
-                            "attempts": attempt + 1
+                            "attempts": attempt + 1,
+                            "storage": storage_details
                         }
                     )
+
+                    # Return success response with storage details (AC #4)
                     return {
                         "status": "success",
-                        "memories_created": result.get("memories_created", 0),
-                        "memory_ids": result.get("ids", []),
-                        "summary": result.get("summary", "")
+                        "memory_id": memory_id,
+                        "message": result.get("message", "Memory stored successfully"),
+                        "storage": storage_details,
+                        "content": content
                     }
                 else:
+                    # Parse error response (AC #4, AC #5)
                     error_msg = f"HTTP {response.status_code}"
+                    error_code = None
                     try:
                         error_data = response.json()
                         error_msg = error_data.get("message", error_msg)
+                        error_code = error_data.get("error_code")
                     except Exception:
                         error_msg = response.text or error_msg
 
                     logger.error(
-                        "Memory storage failed via MCP tool",
+                        "Memory storage failed via direct endpoint",
                         extra={
                             "user_id": user_id,
                             "status_code": response.status_code,
                             "error": error_msg,
+                            "error_code": error_code,
                             "attempt": attempt + 1,
                             "duration_ms": duration_ms
                         }
                     )
 
-                    # Don't retry on client errors (4xx)
-                    if 400 <= response.status_code < 500:
+                    # Handle error codes with appropriate retry logic (AC #5)
+                    # VALIDATION_ERROR and INTERNAL_ERROR: No retry
+                    if error_code in NO_RETRY_ERRORS:
                         return {
                             "status": "error",
                             "message": f"Failed to store memory: {error_msg}",
-                            "error_code": response.status_code
+                            "error_code": error_code or response.status_code
                         }
 
-                    # Retry on server errors (5xx)
+                    # Don't retry on client errors (4xx) unless it's a retryable error code
+                    if 400 <= response.status_code < 500 and error_code not in ["EMBEDDING_ERROR", "STORAGE_ERROR"]:
+                        return {
+                            "status": "error",
+                            "message": f"Failed to store memory: {error_msg}",
+                            "error_code": error_code or response.status_code
+                        }
+
+                    # EMBEDDING_ERROR, STORAGE_ERROR, and server errors (5xx): Retry with backoff
                     if attempt < max_retries - 1:
                         await asyncio.sleep(retry_delays[attempt])
                         continue
@@ -209,13 +306,37 @@ async def store_memory_tool_handler(
                     return {
                         "status": "error",
                         "message": f"Failed to store memory after {max_retries} attempts: {error_msg}",
-                        "error_code": response.status_code
+                        "error_code": error_code or response.status_code
                     }
 
-            except (httpx.TimeoutException, httpx.NetworkError, httpx.ConnectError) as e:
+            except httpx.TimeoutException as e:
                 duration_ms = int((time.time() - start_time) * 1000)
                 logger.error(
-                    "Network error storing memory via MCP tool",
+                    "Timeout storing memory via direct endpoint",
+                    extra={
+                        "user_id": user_id,
+                        "error": str(e),
+                        "attempt": attempt + 1,
+                        "duration_ms": duration_ms,
+                        "timeout_seconds": 10
+                    }
+                )
+
+                # Retry on timeout errors
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delays[attempt])
+                    continue
+
+                return {
+                    "status": "error",
+                    "message": f"Timeout after {max_retries} attempts (10s timeout): {str(e)}",
+                    "error_code": "TIMEOUT_ERROR"
+                }
+
+            except (httpx.NetworkError, httpx.ConnectError) as e:
+                duration_ms = int((time.time() - start_time) * 1000)
+                logger.error(
+                    "Network error storing memory via direct endpoint",
                     extra={
                         "user_id": user_id,
                         "error": str(e),
@@ -238,7 +359,7 @@ async def store_memory_tool_handler(
             except Exception as e:
                 duration_ms = int((time.time() - start_time) * 1000)
                 logger.error(
-                    "Unexpected error storing memory via MCP tool",
+                    "Unexpected error storing memory via direct endpoint",
                     extra={
                         "user_id": user_id,
                         "error": str(e),
@@ -262,51 +383,335 @@ async def store_memory_tool_handler(
 # Store memory tool definition
 store_memory_tool = {
     "name": "store_memory",
-    "description": "Store conversation transcript in agentic-memories service for long-term memory retention. The service will automatically extract key information (decisions, preferences, topics) from the conversation history. Use this tool when a conversation ends (user says goodbye/thanks) or when significant decisions are made.",
+    "description": """Store a critical memory directly in agentic-memories service.
+
+IMPORTANT: Only use this tool for CRITICAL information that:
+1. User explicitly asks you to remember ("Remember that I...", "Don't forget...")
+2. Is a permanent preference/constraint ("I'm allergic to...", "Never recommend...")
+3. Is a life-changing decision with lasting impact
+4. Would be dangerous to forget (medical conditions, safety constraints)
+
+DO NOT use for routine information - background extraction handles that automatically.
+
+Examples of good uses:
+- "User is severely allergic to shellfish - carries EpiPen"
+- "User's risk tolerance is conservative - never recommend high-risk investments"
+- "User's mother passed away in March 2024 - sensitive topic"
+
+Examples of bad uses (handled by background extraction):
+- Daily activities or routine conversations
+- Temporary preferences or moods
+- Information already in their profile
+- Topics just discussed""",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            # Required fields
+            "user_id": {
+                "type": "string",
+                "description": "User identifier for memory storage"
+            },
+            "content": {
+                "type": "string",
+                "description": "Pre-formatted memory content to store. Should be a clear, complete statement of what to remember.",
+                "maxLength": 5000
+            },
+
+            # General fields (always stored in ChromaDB)
+            "importance": {
+                "type": "number",
+                "description": "Importance level from 0.0 to 1.0. Higher values = more critical. Default: 0.8",
+                "minimum": 0.0,
+                "maximum": 1.0,
+                "default": 0.8
+            },
+            "layer": {
+                "type": "string",
+                "description": "Memory layer for storage. Default: 'semantic' (persistent).",
+                "enum": ["short-term", "semantic", "long-term"],
+                "default": "semantic"
+            },
+            "persona_tags": {
+                "type": "array",
+                "description": "Tags for memory categorization. Max 10 tags.",
+                "items": {"type": "string"},
+                "maxItems": 10,
+                "default": []
+            },
+            "metadata": {
+                "type": "object",
+                "description": "Optional metadata (source, conversation_id, trigger)",
+                "properties": {
+                    "source": {"type": "string"},
+                    "conversation_id": {"type": "string"},
+                    "trigger": {"type": "string"}
+                }
+            },
+
+            # Optional episodic fields -> triggers episodic_memories write
+            "event_timestamp": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When the event occurred (ISO 8601). Include for episodic memories (events with time/place)."
+            },
+            "location": {
+                "type": "string",
+                "description": "Where the event happened. Used with event_timestamp for episodic memories."
+            },
+            "participants": {
+                "type": "array",
+                "description": "Who was involved in the event. Used with event_timestamp for episodic memories.",
+                "items": {"type": "string"}
+            },
+
+            # Optional emotional fields -> triggers emotional_memories write
+            "emotional_state": {
+                "type": "string",
+                "description": "Primary emotional state (e.g., 'happy', 'anxious', 'excited'). Include for emotionally significant memories."
+            },
+            "valence": {
+                "type": "number",
+                "description": "Emotional valence from -1.0 (negative) to 1.0 (positive). Used with emotional_state.",
+                "minimum": -1.0,
+                "maximum": 1.0
+            },
+            "arousal": {
+                "type": "number",
+                "description": "Emotional arousal from 0.0 (calm) to 1.0 (excited). Used with emotional_state.",
+                "minimum": 0.0,
+                "maximum": 1.0
+            },
+
+            # Optional procedural fields -> triggers procedural_memories write
+            "skill_name": {
+                "type": "string",
+                "description": "Name of skill or procedure being learned. Include for how-to or skill memories."
+            },
+            "proficiency_level": {
+                "type": "string",
+                "description": "User's proficiency level. Used with skill_name.",
+                "enum": ["beginner", "intermediate", "advanced", "expert"]
+            }
+        },
+        "required": ["user_id", "content"]
+    },
+    "handler": store_memory_tool_handler
+}
+
+
+async def delete_memory_tool_handler(
+    user_id: str,
+    memory_id: str,
+    reason: str = None
+) -> Dict[str, Any]:
+    """
+    Delete a specific memory by ID from agentic-memories service.
+
+    This tool permanently deletes a memory. The memory ID should be obtained
+    from retrieve_memories first. Use when user explicitly asks to forget
+    something or when a memory is identified as incorrect.
+
+    Args:
+        user_id: User identifier
+        memory_id: The ID of the memory to delete (from retrieve_memories)
+        reason: Optional explanation for deletion (for audit trail)
+
+    Returns:
+        dict: Result with status, deleted flag, memory_id, and message
+    """
+    start_time = time.time()
+
+    # Get agentic-memories URL from config
+    try:
+        config = get_config()
+        memories_url = config.get("AGENTIC_MEMORIES_URL", "http://host.docker.internal:8080")
+    except Exception as e:
+        logger.warning(f"Failed to load config, using default: {e}")
+        memories_url = "http://host.docker.internal:8080"
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.delete(
+                f"{memories_url}/v1/memories/{memory_id}",
+                params={"user_id": user_id}
+            )
+
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            if response.status_code == 200:
+                result = response.json()
+
+                if result.get("deleted"):
+                    logger.info(
+                        "Memory deleted successfully",
+                        extra={
+                            "user_id": user_id,
+                            "memory_id": memory_id,
+                            "reason": reason,
+                            "duration_ms": duration_ms
+                        }
+                    )
+                    return {
+                        "status": "success",
+                        "deleted": True,
+                        "memory_id": memory_id,
+                        "message": "Memory deleted successfully"
+                    }
+                else:
+                    logger.info(
+                        "Memory not found for deletion",
+                        extra={
+                            "user_id": user_id,
+                            "memory_id": memory_id,
+                            "reason": reason,
+                            "duration_ms": duration_ms
+                        }
+                    )
+                    return {
+                        "status": "error",
+                        "deleted": False,
+                        "memory_id": memory_id,
+                        "message": result.get("message", "Memory not found")
+                    }
+
+            elif response.status_code == 403:
+                logger.warning(
+                    "Unauthorized delete attempt",
+                    extra={
+                        "user_id": user_id,
+                        "memory_id": memory_id,
+                        "reason": reason,
+                        "duration_ms": duration_ms
+                    }
+                )
+                return {
+                    "status": "error",
+                    "deleted": False,
+                    "memory_id": memory_id,
+                    "message": "Unauthorized: cannot delete this memory"
+                }
+
+            elif response.status_code == 404:
+                logger.info(
+                    "Memory not found for deletion (404)",
+                    extra={
+                        "user_id": user_id,
+                        "memory_id": memory_id,
+                        "reason": reason,
+                        "duration_ms": duration_ms
+                    }
+                )
+                return {
+                    "status": "error",
+                    "deleted": False,
+                    "memory_id": memory_id,
+                    "message": "Memory not found"
+                }
+
+            else:
+                logger.error(
+                    "Delete memory failed",
+                    extra={
+                        "user_id": user_id,
+                        "memory_id": memory_id,
+                        "reason": reason,
+                        "status_code": response.status_code,
+                        "duration_ms": duration_ms
+                    }
+                )
+                return {
+                    "status": "error",
+                    "deleted": False,
+                    "memory_id": memory_id,
+                    "message": f"Delete failed: {response.status_code}"
+                }
+
+    except httpx.TimeoutException:
+        duration_ms = int((time.time() - start_time) * 1000)
+        logger.error(
+            "Delete memory timed out",
+            extra={
+                "user_id": user_id,
+                "memory_id": memory_id,
+                "reason": reason,
+                "duration_ms": duration_ms
+            }
+        )
+        return {
+            "status": "error",
+            "deleted": False,
+            "memory_id": memory_id,
+            "message": "Request timed out"
+        }
+
+    except Exception as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+        logger.error(
+            f"Delete memory failed: {e}",
+            extra={
+                "user_id": user_id,
+                "memory_id": memory_id,
+                "reason": reason,
+                "duration_ms": duration_ms
+            }
+        )
+        return {
+            "status": "error",
+            "deleted": False,
+            "memory_id": memory_id,
+            "message": str(e)
+        }
+
+
+# Delete memory tool definition
+delete_memory_tool = {
+    "name": "delete_memory",
+    "description": """Delete a specific memory by ID.
+
+Use this tool when:
+- User explicitly asks to forget something ("Forget that I...", "Remove the memory about...")
+- A memory is identified as incorrect or outdated
+- Removing duplicate or conflicting information
+- User wants to correct previously stored information
+
+IMPORTANT WORKFLOW:
+1. First use retrieve_memories to find the memory ID
+2. Show the user which memory you found and confirm they want to delete it
+3. Only delete memories that belong to the current user
+4. This action cannot be undone - always confirm with user before proceeding
+
+Args:
+    user_id: The user's ID (from system message)
+    memory_id: The ID of the memory to delete (from retrieve_memories result)
+    reason: Brief explanation for deletion (optional, for audit trail)
+
+Example usage:
+User: "Forget what I said about being allergic to shellfish, that was wrong"
+1. Call retrieve_memories with query="allergic shellfish"
+2. Find the memory with ID "mem_abc123"
+3. Confirm: "I found a memory about shellfish allergy. Delete it?"
+4. User confirms
+5. Call delete_memory with memory_id="mem_abc123", reason="User correction - not actually allergic"
+""",
     "inputSchema": {
         "type": "object",
         "properties": {
             "user_id": {
                 "type": "string",
-                "description": "User identifier for memory storage"
+                "description": "User identifier"
             },
-            "history": {
-                "type": "array",
-                "description": "Recent conversation messages (2-3 messages) containing the information to store. Include only the relevant context needed for memory extraction.",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "role": {
-                            "type": "string",
-                            "enum": ["user", "assistant", "system"],
-                            "description": "Message role"
-                        },
-                        "content": {
-                            "type": "string",
-                            "description": "Message content"
-                        }
-                    },
-                    "required": ["role", "content"]
-                }
+            "memory_id": {
+                "type": "string",
+                "description": "Memory ID to delete (from retrieve_memories)"
             },
-            "metadata": {
-                "type": "object",
-                "description": "Optional metadata (platform, conversation_id, etc.)",
-                "properties": {
-                    "platform": {
-                        "type": "string",
-                        "description": "Platform identifier (e.g., telegram, web)"
-                    },
-                    "conversation_id": {
-                        "type": "string",
-                        "description": "Conversation identifier"
-                    }
-                }
+            "reason": {
+                "type": "string",
+                "description": "Reason for deletion (optional, for audit trail)"
             }
         },
-        "required": ["user_id", "history"]
+        "required": ["user_id", "memory_id"]
     },
-    "handler": store_memory_tool_handler
+    "handler": delete_memory_tool_handler
 }
 
 

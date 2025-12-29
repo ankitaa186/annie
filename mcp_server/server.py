@@ -25,6 +25,7 @@ from mcp_server.tools import (
     ToolRegistry,
     health_check_tool,
     store_memory_tool,
+    delete_memory_tool,
     retrieve_memories_tool,
     compact_memories_tool,
     get_user_profile_tool,
@@ -79,6 +80,7 @@ class MCPServer:
         """Register default tools."""
         self.tool_registry.register(health_check_tool)
         self.tool_registry.register(store_memory_tool)
+        self.tool_registry.register(delete_memory_tool)
         self.tool_registry.register(retrieve_memories_tool)
         self.tool_registry.register(compact_memories_tool)
         self.tool_registry.register(get_user_profile_tool)

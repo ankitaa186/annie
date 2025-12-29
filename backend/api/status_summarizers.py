@@ -248,7 +248,20 @@ def summarize_profile_result(result: Dict[str, Any]) -> str:
 def summarize_store_memory_result(result: Dict[str, Any]) -> str:
     """Summarize store_memory tool result.
 
-    Result shape:
+    Result shape (updated for Story 14.5):
+        {
+            "status": "success"|"error",
+            "memory_id": str,              # UUID of stored memory
+            "message": str,
+            "storage": {
+                "chromadb": bool,          # Always true on success
+                "episodic": bool,          # True if event_timestamp provided
+                "emotional": bool,         # True if emotional_state provided
+                "procedural": bool         # True if skill_name provided
+            }
+        }
+
+    Also handles legacy format:
         {
             "status": "success",
             "memories_created": 2,
@@ -262,17 +275,61 @@ def summarize_store_memory_result(result: Dict[str, Any]) -> str:
         Concise summary string
 
     Examples:
+        "Memory saved (abc123def4...)"
         "Memory saved (2 items)"
         "Memory saved"
     """
     if result.get("status") == "error":
         return result.get("message", "Failed")[:500]
 
+    # New format with memory_id (Story 14.5)
+    memory_id = result.get("memory_id")
+    if memory_id:
+        # Show truncated memory_id (first 12 chars)
+        truncated_id = memory_id[:12] if len(memory_id) > 12 else memory_id
+        return f"Memory saved ({truncated_id}...)"
+
+    # Legacy format with memories_created
     memories_created = result.get("memories_created", 0)
     if memories_created > 1:
         return f"Memory saved ({memories_created} items)"
     else:
         return "Memory saved"
+
+
+def summarize_delete_memory_result(result: Dict[str, Any]) -> str:
+    """Summarize delete_memory tool result (Story 14.5).
+
+    Result shape:
+        {
+            "status": "success"|"error",
+            "deleted": bool,
+            "memory_id": str,
+            "message": str,
+            "storage": {
+                "chromadb": bool,
+                "episodic": bool,
+                "emotional": bool,
+                "procedural": bool
+            }
+        }
+
+    Args:
+        result: Tool result dictionary
+
+    Returns:
+        Concise summary string
+
+    Examples:
+        "Memory deleted"
+        "Delete failed: Memory not found"
+        "Delete failed: Unauthorized"
+    """
+    if result.get("status") == "error" or not result.get("deleted", False):
+        message = result.get("message", "Failed")
+        return f"Delete failed: {message}"[:500]
+
+    return "Memory deleted"
 
 
 def summarize_retrieve_memories_result(result: Dict[str, Any]) -> str:
@@ -375,6 +432,7 @@ SUMMARIZERS = {
     "get_stock_history": summarize_stock_history_result,
     "get_user_profile": summarize_profile_result,
     "store_memory": summarize_store_memory_result,
+    "delete_memory": summarize_delete_memory_result,  # Story 14.5
     "retrieve_memories": summarize_retrieve_memories_result,
     "internet_search": summarize_internet_search_result,
     "health_check": summarize_health_check_result,
