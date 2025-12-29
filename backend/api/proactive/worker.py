@@ -599,7 +599,6 @@ async def check_heartbeat() -> bool:
 # Worker Tasks
 # ============================================================================
 
-@observe(name="process_pending_triggers", as_type="trace")
 async def _process_pending_triggers(
     pending: List[Dict[str, Any]],
     intents_client: IntentsClient,
