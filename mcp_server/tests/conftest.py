@@ -25,6 +25,8 @@ TEST_ENV_VARS = {
     # Tool API Keys
     "BRAVE_SEARCH_API_KEY": "test-brave-key",
     "STOCK_API_KEY": "test-stock-key",
+    # Reddit API (optional - tests mock when needed)
+    "REDDIT_USER_AGENT": "annie-bot/1.0 test",
     # MCP Server Configuration
     "MCP_SERVER_PORT": "8002",
 }

@@ -1338,6 +1338,314 @@ get_user_profile_tool = {
 
 
 # =============================================================================
+# Update User Profile Tool (Story 15.4)
+# =============================================================================
+
+# Allowed categories for profile updates
+ALLOWED_PROFILE_CATEGORIES = {"basics", "preferences", "goals", "interests", "background"}
+
+
+async def update_user_profile_tool_handler(
+    user_id: str,
+    category: str,
+    field_name: str,
+    value: Any,
+    reason: str = None
+) -> Dict[str, Any]:
+    """
+    Update a specific field in the user's profile in agentic-memories.
+
+    This tool makes a PUT request to the agentic-memories profile API to update
+    a specific field. Use when the user explicitly shares new information about
+    themselves that should be persisted.
+
+    Args:
+        user_id: User identifier
+        category: Profile category (basics, preferences, goals, interests, background)
+        field_name: Field name within the category (e.g., 'location', 'communication_style')
+        value: New value (string, number, boolean, or array)
+        reason: Optional reason for the update (for audit trail)
+
+    Returns:
+        dict: Result with status, updated value, previous value, and metadata
+    """
+    start_time = time.time()
+
+    # Validate category against allowed list (AC #2)
+    if category not in ALLOWED_PROFILE_CATEGORIES:
+        logger.warning(
+            "Invalid category for profile update",
+            extra={
+                "user_id": user_id,
+                "category": category,
+                "field_name": field_name,
+                "error": "VALIDATION_ERROR"
+            }
+        )
+        return {
+            "status": "error",
+            "error_message": f"Invalid category '{category}'. Allowed: {', '.join(sorted(ALLOWED_PROFILE_CATEGORIES))}",
+            "error_code": "VALIDATION_ERROR"
+        }
+
+    # Get agentic-memories URL from config
+    try:
+        config = get_config()
+        memories_url = config.get("AGENTIC_MEMORIES_URL", "http://host.docker.internal:8080")
+    except Exception as e:
+        logger.warning(f"Failed to load config, using default: {e}")
+        memories_url = "http://host.docker.internal:8080"
+
+    # Build request payload (AC #4: source="llm_explicit" for audit trail)
+    payload = {
+        "user_id": user_id,
+        "value": value,
+        "source": "llm_explicit"
+    }
+
+    if reason:
+        payload["reason"] = reason
+
+    # Retry configuration: exponential backoff 1s, 2s, 4s (AC #7)
+    max_retries = 3
+    retry_delays = [1, 2, 4]
+
+    # 10 second timeout per request
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        for attempt in range(max_retries):
+            try:
+                logger.info(
+                    "Updating user profile field",
+                    extra={
+                        "user_id": user_id,
+                        "category": category,
+                        "field_name": field_name,
+                        "attempt": attempt + 1,
+                        "has_reason": reason is not None
+                    }
+                )
+
+                response = await client.put(
+                    f"{memories_url}/v1/profile/{category}/{field_name}",
+                    json=payload,
+                    headers={"Content-Type": "application/json"}
+                )
+
+                duration_ms = int((time.time() - start_time) * 1000)
+
+                # Success response (AC #1)
+                if response.status_code in (200, 201):
+                    result = response.json()
+
+                    logger.info(
+                        "Profile field updated successfully",
+                        extra={
+                            "user_id": user_id,
+                            "category": category,
+                            "field_name": field_name,
+                            "duration_ms": duration_ms,
+                            "attempts": attempt + 1
+                        }
+                    )
+
+                    return {
+                        "status": "success",
+                        "user_id": user_id,
+                        "category": category,
+                        "field_name": field_name,
+                        "value": result.get("value"),
+                        "previous_value": result.get("previous_value"),
+                        "confidence": 100.0,
+                        "last_updated": result.get("last_updated")
+                    }
+
+                # Handle 404 Not Found (AC #5)
+                elif response.status_code == 404:
+                    logger.warning(
+                        "Profile field not found",
+                        extra={
+                            "user_id": user_id,
+                            "category": category,
+                            "field_name": field_name,
+                            "duration_ms": duration_ms
+                        }
+                    )
+                    return {
+                        "status": "error",
+                        "error_message": f"Profile field not found: {category}/{field_name}",
+                        "error_code": "NOT_FOUND"
+                    }
+
+                # Handle 400 Bad Request (AC #6)
+                elif response.status_code == 400:
+                    error_msg = "Invalid request"
+                    try:
+                        error_data = response.json()
+                        error_msg = error_data.get("message", error_msg)
+                    except Exception:
+                        error_msg = response.text or error_msg
+
+                    logger.warning(
+                        "Profile update validation error",
+                        extra={
+                            "user_id": user_id,
+                            "category": category,
+                            "field_name": field_name,
+                            "error": error_msg,
+                            "duration_ms": duration_ms
+                        }
+                    )
+                    return {
+                        "status": "error",
+                        "error_message": error_msg,
+                        "error_code": "VALIDATION_ERROR"
+                    }
+
+                # Handle 5xx Server Errors - Retry with backoff (AC #7)
+                elif response.status_code >= 500:
+                    logger.warning(
+                        "Profile update server error, will retry",
+                        extra={
+                            "user_id": user_id,
+                            "category": category,
+                            "field_name": field_name,
+                            "status_code": response.status_code,
+                            "attempt": attempt + 1,
+                            "duration_ms": duration_ms
+                        }
+                    )
+
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(retry_delays[attempt])
+                        continue
+
+                    return {
+                        "status": "error",
+                        "error_message": f"Server error after {max_retries} attempts",
+                        "error_code": "SERVER_ERROR"
+                    }
+
+                # Other error codes
+                else:
+                    logger.error(
+                        "Profile update failed with unexpected status",
+                        extra={
+                            "user_id": user_id,
+                            "category": category,
+                            "field_name": field_name,
+                            "status_code": response.status_code,
+                            "duration_ms": duration_ms
+                        }
+                    )
+                    return {
+                        "status": "error",
+                        "error_message": f"HTTP {response.status_code}",
+                        "error_code": response.status_code
+                    }
+
+            except httpx.TimeoutException:
+                duration_ms = int((time.time() - start_time) * 1000)
+                logger.warning(
+                    "Profile update timeout, will retry",
+                    extra={
+                        "user_id": user_id,
+                        "category": category,
+                        "field_name": field_name,
+                        "attempt": attempt + 1,
+                        "duration_ms": duration_ms
+                    }
+                )
+
+                # Retry on timeout (AC #7)
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delays[attempt])
+                    continue
+
+                return {
+                    "status": "error",
+                    "error_message": f"Timeout after {max_retries} attempts",
+                    "error_code": "TIMEOUT_ERROR"
+                }
+
+            except Exception as e:
+                duration_ms = int((time.time() - start_time) * 1000)
+                logger.error(
+                    "Unexpected error updating profile",
+                    extra={
+                        "user_id": user_id,
+                        "category": category,
+                        "field_name": field_name,
+                        "error": str(e),
+                        "duration_ms": duration_ms
+                    },
+                    exc_info=True
+                )
+                return {
+                    "status": "error",
+                    "error_message": str(e),
+                    "error_code": "INTERNAL_ERROR"
+                }
+
+    # Should never reach here
+    return {
+        "status": "error",
+        "error_message": "Unknown error occurred",
+        "error_code": "UNKNOWN"
+    }
+
+
+# Update user profile tool definition
+update_user_profile_tool = {
+    "name": "update_user_profile",
+    "description": """Update a specific field in the user's profile.
+
+Use this tool when the user:
+1. Explicitly tells you new information about themselves ("I just moved to Seattle")
+2. Corrects previously known information ("Actually, I prefer formal communication")
+3. Expresses a preference or goal change ("I'm now focusing on retirement planning")
+
+Categories and common fields:
+- basics: name, age, location, occupation, timezone
+- preferences: communication_style, topics_of_interest, response_length
+- goals: short_term, long_term, current_focus
+- interests: hobbies, favorite_topics, dislikes
+- background: education, work_history, family
+
+Do NOT use for:
+- Information already in their profile (check first with get_user_profile)
+- Temporary moods or states ("I'm feeling tired today")
+- Speculative information ("You seem like someone who...")""",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "user_id": {
+                "type": "string",
+                "description": "User identifier"
+            },
+            "category": {
+                "type": "string",
+                "enum": ["basics", "preferences", "goals", "interests", "background"],
+                "description": "Profile category to update"
+            },
+            "field_name": {
+                "type": "string",
+                "description": "Field name within the category (e.g., 'location', 'communication_style')"
+            },
+            "value": {
+                "description": "New value (string, number, boolean, or array)"
+            },
+            "reason": {
+                "type": "string",
+                "description": "Optional reason for the update (for audit trail)"
+            }
+        },
+        "required": ["user_id", "category", "field_name", "value"]
+    },
+    "handler": update_user_profile_tool_handler
+}
+
+
+# =============================================================================
 # Portfolio Management Tools (Epic 10)
 # =============================================================================
 
@@ -4056,4 +4364,1334 @@ You: [Call delete_trigger with confirm=true]
         "required": ["user_id", "trigger_id", "confirm"]
     },
     "handler": delete_trigger_tool_handler
+}
+
+
+# =============================================================================
+# Reddit Search Tool (Epic 15 - Story 15.3)
+# =============================================================================
+
+
+def _praw_search_sync(
+    query: str,
+    subreddit: str,
+    sort: str,
+    time_filter: str,
+    limit: int,
+    include_comments: bool,
+    client_id: str,
+    client_secret: str,
+    user_agent: str
+) -> Dict[str, Any]:
+    """
+    Synchronous PRAW search function to be run in executor.
+
+    PRAW is synchronous and must be run in a thread pool to avoid blocking
+    the event loop.
+
+    Args:
+        query: Search query string
+        subreddit: Subreddit name (without r/ prefix) or None for "all"
+        sort: Sort order (relevance, hot, top, new)
+        time_filter: Time filter (hour, day, week, month, year, all)
+        limit: Maximum results to return
+        include_comments: Whether to include top comments
+        client_id: Reddit OAuth client ID
+        client_secret: Reddit OAuth client secret
+        user_agent: User agent string
+
+    Returns:
+        dict: Search results with provider="praw"
+    """
+    import praw
+    from prawcore.exceptions import (
+        Forbidden,
+        NotFound,
+        TooManyRequests,
+        ServerError,
+        RequestException
+    )
+
+    try:
+        reddit = praw.Reddit(
+            client_id=client_id,
+            client_secret=client_secret,
+            user_agent=user_agent
+        )
+
+        # Get subreddit - use "all" if none specified
+        sub = reddit.subreddit(subreddit if subreddit else "all")
+
+        results = []
+        for submission in sub.search(query, sort=sort, time_filter=time_filter, limit=limit):
+            # Build post data
+            post = {
+                "type": "post",
+                "title": submission.title,
+                "subreddit": f"r/{submission.subreddit.display_name}",
+                "author": f"u/{submission.author.name}" if submission.author else "[deleted]",
+                "score": submission.score,
+                "url": f"https://reddit.com{submission.permalink}",
+                "selftext": submission.selftext[:1000] if submission.selftext else None,
+                "num_comments": submission.num_comments,
+                "created_utc": submission.created_utc,
+                "comments": []
+            }
+
+            # Include top comments if requested
+            if include_comments:
+                try:
+                    # Replace "more comments" links with empty to avoid extra API calls
+                    submission.comments.replace_more(limit=0)
+                    for comment in submission.comments[:5]:
+                        # Skip deleted/removed comments
+                        if comment.author is None:
+                            continue
+                        post["comments"].append({
+                            "author": f"u/{comment.author.name}" if comment.author else "[deleted]",
+                            "score": comment.score,
+                            "body": comment.body[:500],
+                            "replies_count": len(comment.replies) if hasattr(comment, 'replies') else 0
+                        })
+                except Exception as e:
+                    # Log but continue - comments are optional
+                    logger.warning(f"Failed to fetch comments: {e}")
+
+            results.append(post)
+
+        return {
+            "status": "success",
+            "provider": "praw",
+            "query": query,
+            "subreddit": subreddit or "all",
+            "results": results
+        }
+
+    except Forbidden as e:
+        # Private subreddit or banned
+        return {
+            "status": "error",
+            "provider": "praw",
+            "query": query,
+            "error_message": f"Subreddit is private or access forbidden: {str(e)}",
+            "error_code": "FORBIDDEN"
+        }
+
+    except NotFound as e:
+        # Subreddit doesn't exist
+        return {
+            "status": "error",
+            "provider": "praw",
+            "query": query,
+            "error_message": f"Subreddit not found: {str(e)}",
+            "error_code": "NOT_FOUND"
+        }
+
+    except TooManyRequests as e:
+        # Rate limited - PRAW usually handles this, but just in case
+        return {
+            "status": "error",
+            "provider": "praw",
+            "query": query,
+            "error_message": f"Rate limited by Reddit: {str(e)}",
+            "error_code": "RATE_LIMITED"
+        }
+
+    except (ServerError, RequestException) as e:
+        # Server error or request failed
+        return {
+            "status": "error",
+            "provider": "praw",
+            "query": query,
+            "error_message": f"Reddit API error: {str(e)}",
+            "error_code": "API_ERROR"
+        }
+
+    except Exception as e:
+        # Unexpected error - let caller handle fallback
+        return {
+            "status": "error",
+            "provider": "praw",
+            "query": query,
+            "error_message": f"PRAW error: {str(e)}",
+            "error_code": "PRAW_ERROR"
+        }
+
+
+# Reddit JSON API cooldown tracking
+# Prevents repeated requests when IP is blocked (HTTP 429 or connection errors)
+_reddit_json_api_cooldown_until: float = 0.0  # Unix timestamp when cooldown expires
+REDDIT_JSON_API_COOLDOWN_SECONDS = 3600  # 1 hour cooldown after failure
+
+
+def _is_reddit_json_api_in_cooldown() -> tuple[bool, int]:
+    """Check if Reddit JSON API is in cooldown period.
+    
+    Returns:
+        Tuple of (is_in_cooldown, seconds_remaining)
+    """
+    global _reddit_json_api_cooldown_until
+    now = time.time()
+    if now < _reddit_json_api_cooldown_until:
+        remaining = int(_reddit_json_api_cooldown_until - now)
+        return True, remaining
+    return False, 0
+
+
+def _set_reddit_json_api_cooldown():
+    """Set cooldown for Reddit JSON API after a failure."""
+    global _reddit_json_api_cooldown_until
+    _reddit_json_api_cooldown_until = time.time() + REDDIT_JSON_API_COOLDOWN_SECONDS
+    logger.warning(
+        f"Reddit JSON API cooldown activated for {REDDIT_JSON_API_COOLDOWN_SECONDS} seconds",
+        extra={
+            "event": "reddit_json_api.cooldown_set",
+            "cooldown_seconds": REDDIT_JSON_API_COOLDOWN_SECONDS,
+            "cooldown_until": _reddit_json_api_cooldown_until
+        }
+    )
+
+
+async def _reddit_json_search(
+    query: str,
+    subreddit: str,
+    sort: str,
+    time_filter: str,
+    limit: int,
+    user_agent: str
+) -> Dict[str, Any]:
+    """
+    Search Reddit using public JSON API as fallback.
+
+    This doesn't require authentication but has limitations:
+    - Cannot include comments in search results
+    - More aggressive rate limiting
+    - Less reliable than OAuth
+
+    Args:
+        query: Search query string
+        subreddit: Subreddit name (without r/ prefix) or None for "all"
+        sort: Sort order (relevance, hot, top, new)
+        time_filter: Time filter (hour, day, week, month, year, all)
+        limit: Maximum results to return
+        user_agent: User agent string
+
+    Returns:
+        dict: Search results with provider="json_api"
+    """
+    try:
+        base_url = "https://www.reddit.com"
+        if subreddit:
+            url = f"{base_url}/r/{subreddit}/search.json"
+        else:
+            url = f"{base_url}/search.json"
+
+        params = {
+            "q": query,
+            "sort": sort,
+            "t": time_filter,
+            "limit": min(limit, 25),
+            "restrict_sr": "on" if subreddit else "off"
+        }
+
+        headers = {"User-Agent": user_agent}
+
+        # Retry with exponential backoff for rate limiting
+        max_retries = 3
+        retry_delays = [1, 2, 4]
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            for attempt in range(max_retries):
+                response = await client.get(
+                    url,
+                    params=params,
+                    headers=headers,
+                    follow_redirects=True
+                )
+
+                if response.status_code == 429:
+                    # Rate limited - wait and retry
+                    if attempt < max_retries - 1:
+                        logger.warning(
+                            f"Reddit JSON API rate limited, retrying in {retry_delays[attempt]}s",
+                            extra={"attempt": attempt + 1, "query": query}
+                        )
+                        await asyncio.sleep(retry_delays[attempt])
+                        continue
+                    else:
+                        return {
+                            "status": "error",
+                            "provider": "json_api",
+                            "query": query,
+                            "error_message": "Rate limited after retries",
+                            "error_code": "RATE_LIMITED"
+                        }
+
+                if response.status_code == 403:
+                    return {
+                        "status": "error",
+                        "provider": "json_api",
+                        "query": query,
+                        "error_message": "Subreddit is private or access forbidden",
+                        "error_code": "FORBIDDEN"
+                    }
+
+                if response.status_code == 404:
+                    return {
+                        "status": "error",
+                        "provider": "json_api",
+                        "query": query,
+                        "error_message": f"Subreddit not found: {subreddit}",
+                        "error_code": "NOT_FOUND"
+                    }
+
+                if response.status_code != 200:
+                    return {
+                        "status": "error",
+                        "provider": "json_api",
+                        "query": query,
+                        "error_message": f"HTTP {response.status_code}",
+                        "error_code": "HTTP_ERROR"
+                    }
+
+                # Success - parse response
+                break
+
+            data = response.json()
+            results = []
+
+            for post_data in data.get("data", {}).get("children", []):
+                post = post_data.get("data", {})
+
+                # Skip deleted posts
+                author = post.get("author", "[deleted]")
+                if author == "[deleted]":
+                    continue
+
+                results.append({
+                    "type": "post",
+                    "title": post.get("title"),
+                    "subreddit": f"r/{post.get('subreddit')}",
+                    "author": f"u/{author}",
+                    "score": post.get("score", 0),
+                    "url": f"https://reddit.com{post.get('permalink')}",
+                    "selftext": (post.get("selftext", "") or "")[:1000],
+                    "num_comments": post.get("num_comments", 0),
+                    "created_utc": post.get("created_utc"),
+                    "comments": []  # JSON API doesn't include comments in search
+                })
+
+            return {
+                "status": "success",
+                "provider": "json_api",
+                "query": query,
+                "subreddit": subreddit or "all",
+                "results": results,
+                "note": "Comments not available via JSON API fallback"
+            }
+
+    except httpx.TimeoutException:
+        return {
+            "status": "error",
+            "provider": "json_api",
+            "query": query,
+            "error_message": "Request timed out",
+            "error_code": "TIMEOUT"
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "provider": "json_api",
+            "query": query,
+            "error_message": str(e),
+            "error_code": "INTERNAL_ERROR"
+        }
+
+
+async def reddit_search_tool_handler(
+    query: str,
+    subreddit: str = None,
+    search_type: str = "posts",
+    sort: str = "relevance",
+    time_filter: str = "all",
+    limit: int = 10,
+    include_comments: bool = True
+) -> Dict[str, Any]:
+    """
+    Search Reddit for posts, comments, and community discussions.
+
+    Uses PRAW (Python Reddit API Wrapper) with OAuth for full-featured access
+    when credentials are configured. Falls back to Reddit's public JSON API
+    when PRAW is unavailable or fails.
+
+    Args:
+        query: Search query string
+        subreddit: Limit search to specific subreddit (without r/ prefix)
+        search_type: Type of content to search (posts, comments, subreddits) - currently only posts supported
+        sort: Sort order (relevance, hot, top, new). Default: relevance
+        time_filter: Time filter (hour, day, week, month, year, all). Default: all
+        limit: Maximum results (1-25). Default: 10
+        include_comments: Include top 5 comments per post (PRAW only). Default: true
+
+    Returns:
+        dict: Search results with status, provider, query, subreddit, and results array
+    """
+    start_time = time.time()
+
+    # Validate parameters
+    if not query or not query.strip():
+        return {
+            "status": "error",
+            "error_message": "Query is required",
+            "error_code": "VALIDATION_ERROR"
+        }
+
+    # Validate sort option
+    valid_sorts = ["relevance", "hot", "top", "new"]
+    if sort not in valid_sorts:
+        return {
+            "status": "error",
+            "error_message": f"Invalid sort option '{sort}'. Valid options: {', '.join(valid_sorts)}",
+            "error_code": "VALIDATION_ERROR"
+        }
+
+    # Validate time_filter option
+    valid_time_filters = ["hour", "day", "week", "month", "year", "all"]
+    if time_filter not in valid_time_filters:
+        return {
+            "status": "error",
+            "error_message": f"Invalid time_filter '{time_filter}'. Valid options: {', '.join(valid_time_filters)}",
+            "error_code": "VALIDATION_ERROR"
+        }
+
+    # Clamp limit to valid range
+    limit = max(1, min(25, limit))
+
+    # Get config for Reddit credentials
+    try:
+        config = get_config()
+    except Exception as e:
+        logger.warning(f"Failed to load config: {e}")
+        config = {}
+
+    client_id = config.get("REDDIT_CLIENT_ID")
+    client_secret = config.get("REDDIT_CLIENT_SECRET")
+    user_agent = config.get("REDDIT_USER_AGENT", "annie-bot/1.0")
+
+    logger.info(
+        "Starting Reddit search",
+        extra={
+            "event": "reddit_search.started",
+            "query": query,
+            "subreddit": subreddit,
+            "sort": sort,
+            "time_filter": time_filter,
+            "limit": limit,
+            "include_comments": include_comments,
+            "has_praw_credentials": bool(client_id and client_secret)
+        }
+    )
+
+    result = None
+
+    # Try PRAW first if credentials are available
+    if client_id and client_secret:
+        try:
+            # Run synchronous PRAW in executor to not block event loop
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None,
+                _praw_search_sync,
+                query,
+                subreddit,
+                sort,
+                time_filter,
+                limit,
+                include_comments,
+                client_id,
+                client_secret,
+                user_agent
+            )
+
+            # Check if PRAW succeeded
+            if result.get("status") == "success":
+                duration_ms = int((time.time() - start_time) * 1000)
+                logger.info(
+                    "Reddit search completed via PRAW",
+                    extra={
+                        "event": "reddit_search.completed",
+                        "provider": "praw",
+                        "query": query,
+                        "subreddit": subreddit,
+                        "result_count": len(result.get("results", [])),
+                        "duration_ms": duration_ms
+                    }
+                )
+                return result
+
+            # PRAW failed - log and fall through to JSON API
+            logger.warning(
+                "PRAW search failed, falling back to JSON API",
+                extra={
+                    "event": "reddit_search.fallback",
+                    "query": query,
+                    "praw_error": result.get("error_message"),
+                    "praw_error_code": result.get("error_code")
+                }
+            )
+
+        except Exception as e:
+            logger.warning(
+                f"PRAW search exception, falling back to JSON API: {e}",
+                extra={
+                    "event": "reddit_search.fallback",
+                    "query": query,
+                    "exception": str(e)
+                }
+            )
+
+    # Check if JSON API is in cooldown (to avoid IP blocks from Reddit)
+    in_cooldown, cooldown_remaining = _is_reddit_json_api_in_cooldown()
+    if in_cooldown:
+        logger.warning(
+            "Reddit JSON API in cooldown, skipping request",
+            extra={
+                "event": "reddit_search.cooldown_blocked",
+                "query": query,
+                "cooldown_remaining_seconds": cooldown_remaining
+            }
+        )
+        return {
+            "status": "error",
+            "provider": None,
+            "query": query,
+            "subreddit": subreddit or "all",
+            "error_message": f"Reddit API temporarily unavailable. Cooldown expires in {cooldown_remaining // 60} minutes.",
+            "error_code": "COOLDOWN_ACTIVE"
+        }
+
+    # Fallback to JSON API (no auth required)
+    logger.info(
+        "Using Reddit JSON API fallback",
+        extra={
+            "event": "reddit_search.json_api",
+            "query": query,
+            "subreddit": subreddit,
+            "reason": "no_credentials" if not (client_id and client_secret) else "praw_failed"
+        }
+    )
+
+    result = await _reddit_json_search(
+        query=query,
+        subreddit=subreddit,
+        sort=sort,
+        time_filter=time_filter,
+        limit=limit,
+        user_agent=user_agent
+    )
+
+    duration_ms = int((time.time() - start_time) * 1000)
+
+    if result.get("status") == "success":
+        logger.info(
+            "Reddit search completed via JSON API",
+            extra={
+                "event": "reddit_search.completed",
+                "provider": "json_api",
+                "query": query,
+                "subreddit": subreddit,
+                "result_count": len(result.get("results", [])),
+                "duration_ms": duration_ms
+            }
+        )
+    else:
+        # Set cooldown on failure (rate limit, connection errors, or persistent failures)
+        error_code = result.get("error_code", "")
+        cooldown_trigger_codes = ("RATE_LIMITED", "HTTP_ERROR", "TIMEOUT", "FORBIDDEN")
+        should_cooldown = error_code in cooldown_trigger_codes
+        
+        if should_cooldown:
+            _set_reddit_json_api_cooldown()
+
+        logger.error(
+            "Reddit search failed",
+            extra={
+                "event": "reddit_search.failed",
+                "query": query,
+                "error_message": result.get("error_message"),
+                "error_code": error_code,
+                "duration_ms": duration_ms,
+                "cooldown_activated": should_cooldown
+            }
+        )
+
+    return result
+
+
+# Reddit search tool definition
+reddit_search_tool = {
+    "name": "reddit_search",
+    "description": "Search Reddit for posts, comments, and community discussions. Useful for finding real user experiences, reviews, and opinions on topics. Great for product research, troubleshooting, and understanding public sentiment.",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Search query"
+            },
+            "subreddit": {
+                "type": "string",
+                "description": "Limit search to specific subreddit (without r/ prefix)"
+            },
+            "search_type": {
+                "type": "string",
+                "enum": ["posts", "comments", "subreddits"],
+                "description": "Type of content to search (default: posts)",
+                "default": "posts"
+            },
+            "sort": {
+                "type": "string",
+                "enum": ["relevance", "hot", "top", "new"],
+                "description": "Sort order for results (default: relevance)",
+                "default": "relevance"
+            },
+            "time_filter": {
+                "type": "string",
+                "enum": ["hour", "day", "week", "month", "year", "all"],
+                "description": "Time filter for results (default: all)",
+                "default": "all"
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Maximum results (default: 10, max: 25)",
+                "default": 10,
+                "minimum": 1,
+                "maximum": 25
+            },
+            "include_comments": {
+                "type": "boolean",
+                "description": "Include top comments for posts (default: true, PRAW only)",
+                "default": True
+            }
+        },
+        "required": ["query"]
+    },
+    "handler": reddit_search_tool_handler
+}
+
+# =============================================================================
+# Web Search Tool (Epic 15 - Story 15.1)
+# =============================================================================
+
+from typing import List
+
+
+async def _tavily_search(
+    query: str,
+    max_results: int,
+    search_depth: str,
+    include_domains: List[str],
+    exclude_domains: List[str],
+    api_key: str
+) -> Dict[str, Any]:
+    """
+    Execute Tavily search API call.
+
+    Args:
+        query: Search query string
+        max_results: Maximum results to return (1-10)
+        search_depth: "basic" (faster/cheaper) or "advanced" (deeper)
+        include_domains: Only include results from these domains
+        exclude_domains: Exclude results from these domains
+        api_key: Tavily API key
+
+    Returns:
+        dict with status, provider, query, and results array (or error info)
+    """
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                "https://api.tavily.com/search",
+                json={
+                    "api_key": api_key,  # Tavily uses body, not header
+                    "query": query,
+                    "search_depth": search_depth,
+                    "max_results": max_results,
+                    "include_domains": include_domains,
+                    "exclude_domains": exclude_domains
+                }
+            )
+
+            if response.status_code == 429:
+                return {
+                    "status": "error",
+                    "provider": "tavily",
+                    "error_message": "Rate limit exceeded",
+                    "error_code": "RATE_LIMIT"
+                }
+
+            if response.status_code >= 500:
+                return {
+                    "status": "error",
+                    "provider": "tavily",
+                    "error_message": f"Server error: {response.status_code}",
+                    "error_code": "SERVER_ERROR"
+                }
+
+            response.raise_for_status()
+            data = response.json()
+
+            return {
+                "status": "success",
+                "provider": "tavily",
+                "query": query,
+                "results": [
+                    {
+                        "title": r.get("title", ""),
+                        "url": r.get("url", ""),
+                        "snippet": r.get("content", ""),
+                        "score": r.get("score", None)  # Relevance score if available
+                    }
+                    for r in data.get("results", [])[:max_results]
+                ]
+            }
+    except httpx.TimeoutException:
+        return {
+            "status": "error",
+            "provider": "tavily",
+            "error_message": "Request timed out",
+            "error_code": "TIMEOUT"
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "provider": "tavily",
+            "error_message": str(e),
+            "error_code": "UNKNOWN"
+        }
+
+
+async def _duckduckgo_search(query: str, max_results: int) -> Dict[str, Any]:
+    """
+    Search using DuckDuckGo as fallback.
+
+    Note: duckduckgo-search is synchronous, run in executor.
+
+    Args:
+        query: Search query string
+        max_results: Maximum results to return
+
+    Returns:
+        dict with status, provider, query, and results array
+    """
+    try:
+        from duckduckgo_search import DDGS
+
+        def _sync_search():
+            ddgs = DDGS()
+            return list(ddgs.text(query, max_results=max_results))
+
+        # Run sync library in executor to not block event loop
+        loop = asyncio.get_event_loop()
+        results = await loop.run_in_executor(None, _sync_search)
+
+        return {
+            "status": "success",
+            "provider": "duckduckgo",
+            "query": query,
+            "results": [
+                {
+                    "title": r.get("title", ""),
+                    "url": r.get("href", ""),
+                    "snippet": r.get("body", ""),
+                    "score": None  # DDG doesn't provide relevance scores
+                }
+                for r in results
+            ]
+        }
+    except Exception as e:
+        logger.error(f"DuckDuckGo search failed: {e}")
+        return {
+            "status": "error",
+            "provider": "duckduckgo",
+            "query": query,
+            "results": [],
+            "error_message": str(e)
+        }
+
+
+async def web_search_tool_handler(
+    query: str,
+    max_results: int = 5,
+    search_depth: str = "basic",
+    include_domains: Optional[List[str]] = None,
+    exclude_domains: Optional[List[str]] = None
+) -> Dict[str, Any]:
+    """
+    Execute web search using Tavily with DuckDuckGo fallback.
+
+    Args:
+        query: Search query string
+        max_results: Maximum results to return (1-10, default 5)
+        search_depth: "basic" (faster/cheaper) or "advanced" (deeper)
+        include_domains: Only include results from these domains
+        exclude_domains: Exclude results from these domains
+
+    Returns:
+        dict with status, provider, query, and results array
+    """
+    start_time = time.time()
+
+    # Validate and cap max_results to range 1-10
+    max_results = max(1, min(max_results, 10))
+
+    # Validate search_depth
+    if search_depth not in ("basic", "advanced"):
+        search_depth = "basic"
+
+    try:
+        config = get_config()
+        tavily_api_key = config.get("TAVILY_API_KEY")
+
+        if tavily_api_key:
+            result = await _tavily_search(
+                query=query,
+                max_results=max_results,
+                search_depth=search_depth,
+                include_domains=include_domains or [],
+                exclude_domains=exclude_domains or [],
+                api_key=tavily_api_key
+            )
+            if result["status"] == "success":
+                logger.info(
+                    "web_search.completed",
+                    extra={
+                        "query": query,
+                        "provider": "tavily",
+                        "results_count": len(result.get("results", [])),
+                        "duration_ms": int((time.time() - start_time) * 1000)
+                    }
+                )
+                return result
+            # Tavily failed, fall through to DuckDuckGo
+            logger.warning(
+                "web_search.fallback",
+                extra={
+                    "primary": "tavily",
+                    "fallback": "duckduckgo",
+                    "reason": result.get("error_message", "unknown")
+                }
+            )
+    except Exception as e:
+        logger.warning(f"Tavily search failed: {e}, falling back to DDG")
+
+    # Fallback to DuckDuckGo
+    result = await _duckduckgo_search(query, max_results)
+
+    logger.info(
+        "web_search.completed",
+        extra={
+            "query": query,
+            "provider": "duckduckgo",
+            "results_count": len(result.get("results", [])),
+            "duration_ms": int((time.time() - start_time) * 1000)
+        }
+    )
+
+    return result
+
+
+# Web search tool definition
+web_search_tool = {
+    "name": "web_search",
+    "description": "Search the web for current information using Tavily (primary) with DuckDuckGo fallback. Returns relevant results with titles, URLs, and snippets. Use for finding up-to-date information about news, products, services, facts, or any topic requiring current web data.",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Search query - be specific for better results"
+            },
+            "max_results": {
+                "type": "integer",
+                "description": "Maximum results to return (default: 5, max: 10)",
+                "default": 5,
+                "minimum": 1,
+                "maximum": 10
+            },
+            "search_depth": {
+                "type": "string",
+                "enum": ["basic", "advanced"],
+                "description": "Search depth: 'basic' (faster, cheaper) or 'advanced' (deeper, more thorough)",
+                "default": "basic"
+            },
+            "include_domains": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Only include results from these domains (e.g., ['reddit.com', 'stackoverflow.com'])"
+            },
+            "exclude_domains": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Exclude results from these domains (e.g., ['pinterest.com'])"
+            }
+        },
+        "required": ["query"]
+    },
+    "handler": web_search_tool_handler
+}
+
+
+# =============================================================================
+# Web Crawl Tool (Epic 15 - Story 15.2)
+# =============================================================================
+
+# Import regex for URL validation (re already imported above)
+from urllib.parse import urlparse
+
+
+def _is_valid_url(url: str) -> bool:
+    """
+    Validate URL format for security.
+
+    - Must be HTTP or HTTPS
+    - Must have a valid domain
+    - Block private/internal IP ranges (SSRF protection)
+
+    Args:
+        url: URL string to validate
+
+    Returns:
+        True if valid, False otherwise
+    """
+    try:
+        parsed = urlparse(url)
+
+        # Must be http or https
+        if parsed.scheme not in ("http", "https"):
+            return False
+
+        # Must have a netloc (domain)
+        if not parsed.netloc:
+            return False
+
+        # Block internal/private IP addresses (security - SSRF protection)
+        hostname = parsed.hostname or ""
+
+        # Block localhost variants
+        if hostname in ("localhost", "127.0.0.1", "0.0.0.0", "::1"):
+            return False
+
+        # Block private IP ranges (10.x.x.x, 172.16-31.x.x, 192.168.x.x)
+        if hostname.startswith("10."):
+            return False
+        if hostname.startswith("192.168."):
+            return False
+        if hostname.startswith(("172.16.", "172.17.", "172.18.", "172.19.",
+                                "172.20.", "172.21.", "172.22.", "172.23.",
+                                "172.24.", "172.25.", "172.26.", "172.27.",
+                                "172.28.", "172.29.", "172.30.", "172.31.")):
+            return False
+
+        # Block link-local addresses (169.254.x.x)
+        if hostname.startswith("169.254."):
+            return False
+
+        return True
+    except Exception:
+        return False
+
+
+async def _crawl4ai_fetch(
+    url: str,
+    include_images: bool,
+    max_length: int,
+    wait_for_js: bool,
+    request_id: str
+) -> Dict[str, Any]:
+    """
+    Fetch page content using crawl4ai.
+
+    Args:
+        url: URL to crawl
+        include_images: Include image descriptions
+        max_length: Maximum content length
+        wait_for_js: Wait for JavaScript rendering
+        request_id: Request ID for logging
+
+    Returns:
+        Dict with crawl result
+
+    Raises:
+        Exception: On crawl failure
+    """
+    try:
+        from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
+    except ImportError as e:
+        logger.error(
+            "crawl4ai not installed",
+            extra={"request_id": request_id, "error": str(e)}
+        )
+        raise Exception("crawl4ai library not available")
+
+    browser_config = BrowserConfig(headless=True)
+    run_config = CrawlerRunConfig(
+        wait_until="domcontentloaded" if not wait_for_js else "networkidle"
+    )
+
+    async with AsyncWebCrawler(config=browser_config) as crawler:
+        result = await crawler.arun(
+            url=url,
+            config=run_config
+        )
+
+        # Check if crawl was successful
+        if not result.success:
+            error_msg = getattr(result, 'error_message', 'Unknown error')
+            raise Exception(f"Crawl failed: {error_msg}")
+
+        # Check for non-HTML content based on content
+        # crawl4ai provides markdown content for HTML pages
+        content = result.markdown or ""
+
+        # If content is empty or looks like binary, it's likely non-HTML
+        if not content or content.strip() == "":
+            # Check if there's any raw HTML
+            if hasattr(result, 'html') and result.html:
+                content_type = "text/html"
+            else:
+                return {
+                    "status": "error",
+                    "provider": "crawl4ai",
+                    "url": url,
+                    "error_message": "No content extracted. Page may be empty or require JavaScript."
+                }
+
+        truncated = False
+
+        # Truncate if exceeds max_length
+        if len(content) > max_length:
+            content = content[:max_length]
+            truncated = True
+
+        # Extract title from metadata or content
+        title = ""
+        if hasattr(result, 'metadata') and result.metadata:
+            title = result.metadata.get("title", "")
+        if not title:
+            # Try to extract from markdown (first # heading)
+            title_match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
+            if title_match:
+                title = title_match.group(1).strip()
+
+        # Build metadata
+        metadata = {}
+        if hasattr(result, 'metadata') and result.metadata:
+            metadata = {
+                "description": result.metadata.get("description"),
+                "author": result.metadata.get("author"),
+                "published_date": result.metadata.get("published_date"),
+            }
+
+        # Count links if available
+        links_count = 0
+        if hasattr(result, 'links') and result.links:
+            links_count = len(result.links.get("internal", [])) + len(result.links.get("external", []))
+        metadata["links_count"] = links_count
+
+        return {
+            "status": "success",
+            "provider": "crawl4ai",
+            "url": url,
+            "title": title,
+            "content": content,
+            "metadata": metadata,
+            "truncated": truncated
+        }
+
+
+async def _jina_reader_fetch(url: str, max_length: int, request_id: str) -> Dict[str, Any]:
+    """
+    Fetch page content using Jina Reader as fallback.
+
+    Jina Reader converts any URL to clean markdown via:
+    GET https://r.jina.ai/{url}
+
+    Args:
+        url: URL to fetch
+        max_length: Maximum content length
+        request_id: Request ID for logging
+
+    Returns:
+        Dict with crawl result
+    """
+    try:
+        config = get_config()
+        jina_api_key = config.get("JINA_API_KEY", "")
+    except Exception:
+        jina_api_key = ""
+
+    headers = {
+        "User-Agent": "annie-bot/1.0",
+        "Accept": "text/plain"
+    }
+    if jina_api_key:
+        headers["Authorization"] = f"Bearer {jina_api_key}"
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            # Jina Reader URL format: https://r.jina.ai/{url}
+            jina_url = f"https://r.jina.ai/{url}"
+
+            response = await client.get(
+                jina_url,
+                headers=headers,
+                follow_redirects=True
+            )
+
+            if response.status_code != 200:
+                return {
+                    "status": "error",
+                    "provider": "jina",
+                    "url": url,
+                    "error_message": f"Jina Reader returned HTTP {response.status_code}"
+                }
+
+            content = response.text
+            truncated = False
+
+            # Truncate if exceeds max_length
+            if len(content) > max_length:
+                content = content[:max_length]
+                truncated = True
+
+            # Try to extract title from markdown (first # heading)
+            title = ""
+            title_match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
+            if title_match:
+                title = title_match.group(1).strip()
+
+            return {
+                "status": "success",
+                "provider": "jina",
+                "url": url,
+                "title": title,
+                "content": content,
+                "metadata": {
+                    "description": None,
+                    "author": None,
+                    "published_date": None,
+                    "links_count": 0
+                },
+                "truncated": truncated
+            }
+
+    except httpx.TimeoutException:
+        return {
+            "status": "error",
+            "provider": "jina",
+            "url": url,
+            "error_message": "Jina Reader request timed out (15s limit)"
+        }
+    except httpx.HTTPError as e:
+        return {
+            "status": "error",
+            "provider": "jina",
+            "url": url,
+            "error_message": f"Network error: {str(e)}"
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "provider": "jina",
+            "url": url,
+            "error_message": str(e)
+        }
+
+
+async def web_crawl_tool_handler(
+    url: str,
+    include_images: bool = False,
+    max_length: int = 10000,
+    wait_for_js: bool = False
+) -> Dict[str, Any]:
+    """
+    Fetch and parse webpage content using crawl4ai with Jina fallback.
+
+    This tool crawls a webpage and returns clean markdown content suitable
+    for LLM consumption. Uses crawl4ai as the primary provider with Jina
+    Reader as a fallback for blocked or problematic sites.
+
+    Args:
+        url: URL to crawl (must be http:// or https://)
+        include_images: Include image descriptions (default: False)
+        max_length: Maximum content length in characters (default: 10000)
+        wait_for_js: Wait for JavaScript to render (default: False, adds latency)
+
+    Returns:
+        Dict with:
+        - status: "success" or "error"
+        - provider: "crawl4ai" or "jina"
+        - url: The crawled URL
+        - title: Page title
+        - content: Clean markdown content
+        - metadata: Description, author, published_date, links_count
+        - truncated: True if content was truncated
+        - error_message: Error details (on failure)
+    """
+    start_time = time.time()
+    request_id = str(uuid.uuid4())[:8]
+
+    # Validate URL format
+    if not _is_valid_url(url):
+        logger.warning(
+            "Invalid URL provided to web_crawl",
+            extra={"url": url, "request_id": request_id}
+        )
+        return {
+            "status": "error",
+            "provider": None,
+            "url": url,
+            "error_message": "Invalid URL format. Please provide a valid HTTP/HTTPS URL (localhost and private IPs are blocked)."
+        }
+
+    # Try crawl4ai first
+    try:
+        result = await _crawl4ai_fetch(url, include_images, max_length, wait_for_js, request_id)
+        duration_ms = int((time.time() - start_time) * 1000)
+
+        if result.get("status") == "success":
+            logger.info(
+                "web_crawl completed via crawl4ai",
+                extra={
+                    "provider": "crawl4ai",
+                    "url": url,
+                    "duration_ms": duration_ms,
+                    "content_length": len(result.get("content", "")),
+                    "truncated": result.get("truncated", False),
+                    "request_id": request_id
+                }
+            )
+            return result
+        else:
+            # crawl4ai returned an error result, try Jina
+            logger.warning(
+                "crawl4ai returned error, falling back to Jina Reader",
+                extra={
+                    "url": url,
+                    "error": result.get("error_message"),
+                    "request_id": request_id
+                }
+            )
+            raise Exception(result.get("error_message", "crawl4ai error"))
+
+    except Exception as e:
+        logger.warning(
+            "crawl4ai failed, falling back to Jina Reader",
+            extra={
+                "url": url,
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "request_id": request_id
+            }
+        )
+
+        # Fall back to Jina Reader
+        try:
+            result = await _jina_reader_fetch(url, max_length, request_id)
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            if result.get("status") == "success":
+                logger.info(
+                    "web_crawl completed via Jina fallback",
+                    extra={
+                        "provider": "jina",
+                        "url": url,
+                        "duration_ms": duration_ms,
+                        "content_length": len(result.get("content", "")),
+                        "truncated": result.get("truncated", False),
+                        "request_id": request_id
+                    }
+                )
+            else:
+                logger.error(
+                    "Both crawl4ai and Jina Reader failed",
+                    extra={
+                        "url": url,
+                        "crawl4ai_error": str(e),
+                        "jina_error": result.get("error_message"),
+                        "duration_ms": duration_ms,
+                        "request_id": request_id
+                    }
+                )
+
+            return result
+
+        except Exception as jina_error:
+            duration_ms = int((time.time() - start_time) * 1000)
+            logger.error(
+                "Both crawl4ai and Jina Reader failed",
+                extra={
+                    "url": url,
+                    "crawl4ai_error": str(e),
+                    "jina_error": str(jina_error),
+                    "duration_ms": duration_ms,
+                    "request_id": request_id
+                }
+            )
+            return {
+                "status": "error",
+                "provider": None,
+                "url": url,
+                "error_message": f"Failed to fetch URL: {str(jina_error)}"
+            }
+
+
+# Web crawl tool definition
+web_crawl_tool = {
+    "name": "web_crawl",
+    "description": """Fetch and read the full content of a webpage.
+
+Use this tool when you need to:
+- Read an article, blog post, or news story
+- Access documentation or reference material
+- Get the full content of a URL the user references
+- Read product pages, reviews, or detailed information
+
+Returns clean markdown text suitable for LLM consumption. Supports JavaScript-rendered pages with wait_for_js option.
+
+IMPORTANT: This tool is for reading webpage content. For searching the web, use web_search instead.
+
+Examples:
+- User shares a link: "Read this article for me: https://example.com/article"
+- User references a page: "What does the React docs say about hooks?"
+- User wants details: "Can you summarize this blog post?"
+""",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "url": {
+                "type": "string",
+                "description": "The URL to crawl and extract content from (must be http:// or https://)"
+            },
+            "include_images": {
+                "type": "boolean",
+                "description": "Include image descriptions in output (default: false)",
+                "default": False
+            },
+            "max_length": {
+                "type": "integer",
+                "description": "Maximum content length in characters (default: 10000, prevents context overflow)",
+                "default": 10000
+            },
+            "wait_for_js": {
+                "type": "boolean",
+                "description": "Wait for JavaScript to render before extracting content. Use for SPAs or dynamic pages. Adds 1-2s latency. (default: false)",
+                "default": False
+            }
+        },
+        "required": ["url"]
+    },
+    "handler": web_crawl_tool_handler
 }

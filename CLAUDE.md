@@ -413,3 +413,139 @@ registry.register(my_new_tool, schema={
     - Projected costs: $56-562/month depending on usage (10-100 users)
     - Logged metrics: search activation, sources accessed, cost per request
     - Monitoring: Use `event="live_search_used"` to filter logs for cost tracking
+
+## Extended MCP Tools (Epic 15)
+
+Annie has additional MCP tools for web access and profile management:
+
+### Web Search Tool (`web_search`)
+Search the web for current information using Tavily (primary) or DuckDuckGo (fallback).
+
+**When to Use:**
+- Current events, news, real-time data
+- Product reviews, comparisons, prices
+- Information that may have changed since knowledge cutoff
+- Fact-checking or verification
+
+**Providers:**
+| Provider | Cost | Rate Limit | Notes |
+|----------|------|------------|-------|
+| Tavily | ~$0.001/search | 1000/month (free tier) | Primary, high quality |
+| DuckDuckGo | Free | ~1 req/sec | Fallback on Tavily failure |
+
+**Schema:**
+```json
+{
+  "query": "string (required)",
+  "max_results": "int (1-10, default 5)",
+  "search_depth": "basic|advanced (default basic)",
+  "include_domains": ["array of domains to whitelist"],
+  "exclude_domains": ["array of domains to blacklist"]
+}
+```
+
+**Response:** title, url, snippet, relevance score
+
+---
+
+### Web Crawl Tool (`web_crawl`)
+Fetch and parse full webpage content using crawl4ai (local) or Jina Reader (fallback).
+
+**When to Use:**
+- Reading full content from URLs user shares
+- Extracting detailed information from specific pages
+- Following up on web search results
+- Parsing articles, documentation, or blog posts
+
+**Providers:**
+| Provider | Cost | Notes |
+|----------|------|-------|
+| crawl4ai | Free | Local library, JS rendering support |
+| Jina Reader | Free | API fallback, simpler parsing |
+
+**Schema:**
+```json
+{
+  "url": "string (required)",
+  "include_images": "bool (default false)",
+  "max_length": "int (default 10000 chars)",
+  "wait_for_js": "bool (default false) - wait for JavaScript rendering"
+}
+```
+
+**Response:** title, content (markdown), metadata, truncated indicator
+
+---
+
+### Reddit Search Tool (`reddit_search`)
+Search Reddit for community discussions using PRAW (OAuth) or JSON API (public).
+
+**When to Use:**
+- Real user opinions and experiences
+- Product/service recommendations from community
+- Community-specific discussions
+- Finding relevant subreddits for topics
+
+**Providers:**
+| Provider | Cost | Rate Limit | Auth Required |
+|----------|------|------------|---------------|
+| PRAW | Free | 60 req/min (auto-handled) | OAuth credentials |
+| JSON API | Free | ~1 req/sec | None |
+
+**Schema:**
+```json
+{
+  "query": "string (required)",
+  "subreddit": "string (optional, without r/ prefix)",
+  "sort": "relevance|hot|top|new (default relevance)",
+  "time_filter": "hour|day|week|month|year|all (default all)",
+  "limit": "int (1-25, default 10)",
+  "include_comments": "bool (default true)"
+}
+```
+
+**Response:** title, subreddit, author, score, selftext, top comments
+
+---
+
+### Update User Profile Tool (`update_user_profile`)
+Update user profile fields in agentic-memories.
+
+**When to Use:**
+- User explicitly shares new personal information
+- User corrects previously known information
+- User states new preferences or goals
+- NEVER update without clear user intent
+
+**Schema:**
+```json
+{
+  "user_id": "string (required)",
+  "category": "basics|preferences|goals|interests|background (required)",
+  "field_name": "string (required)",
+  "value": "any (required) - string, number, boolean, or array",
+  "reason": "string (optional) - reason for update"
+}
+```
+
+**Categories & Common Fields:**
+| Category | Fields |
+|----------|--------|
+| basics | name, age, location, occupation, timezone |
+| preferences | communication_style, topics_of_interest, response_length |
+| goals | short_term, long_term, current_focus |
+| interests | hobbies, favorite_topics, dislikes |
+| background | education, work_history, family |
+
+---
+
+### Fallback Behavior
+
+All external tools implement fallback providers for resilience:
+
+| Tool | Fallback Trigger | Fallback Action |
+|------|------------------|-----------------|
+| web_search | Tavily error/rate limit/timeout (10s) | Use DuckDuckGo |
+| web_crawl | crawl4ai parse failure/timeout (15s) | Use Jina Reader |
+| reddit_search | PRAW OAuth failure/no credentials | Use JSON API |
+| update_user_profile | N/A (single provider) | Retry with backoff |

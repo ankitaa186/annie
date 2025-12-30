@@ -73,6 +73,12 @@ services:
       - BRAVE_SEARCH_API_KEY=${BRAVE_SEARCH_API_KEY}
       - STOCK_API_KEY=${STOCK_API_KEY}
       - AGENTIC_MEMORIES_URL=${AGENTIC_MEMORIES_URL}
+      # Epic 15 - Web & Profile tools
+      - TAVILY_API_KEY=${TAVILY_API_KEY}
+      - JINA_API_KEY=${JINA_API_KEY}
+      - REDDIT_CLIENT_ID=${REDDIT_CLIENT_ID}
+      - REDDIT_CLIENT_SECRET=${REDDIT_CLIENT_SECRET}
+      - REDDIT_USER_AGENT=${REDDIT_USER_AGENT:-annie-bot/1.0}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:

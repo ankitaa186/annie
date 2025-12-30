@@ -112,6 +112,31 @@ Current user ID for all tool calls: {user_id}
 """
 
 
+# Profile update guidance section (Story 15.4)
+PROFILE_UPDATE_GUIDANCE = """
+## PROFILE UPDATES
+
+When the user shares new information about themselves, use the update_user_profile tool:
+
+**Use when:**
+- User explicitly shares personal details: "I just moved to Seattle"
+- User corrects information: "Actually, I prefer formal communication"
+- User states new goals: "I'm now focusing on retirement planning"
+
+**Do NOT use when:**
+- Information is temporary: "I'm feeling tired today"
+- Already in profile (check first with get_user_profile)
+- Speculative: "You seem like someone who..."
+
+**Categories:**
+- basics: name, location, occupation, age
+- preferences: communication_style, topics_of_interest
+- goals: short_term, long_term, current_focus
+- interests: hobbies, favorite_topics
+- background: education, work_history
+"""
+
+
 # Memory management section (Story 14.5)
 MEMORY_MANAGEMENT_SECTION = """
 ## MEMORY MANAGEMENT
@@ -760,6 +785,9 @@ def build_system_prompt(
 
     # Add memory management section (Story 14.5 - after proactive capabilities)
     prompt_parts.append("\n\n" + MEMORY_MANAGEMENT_SECTION)
+
+    # Add profile update guidance section (Story 15.4 - after memory management)
+    prompt_parts.append("\n\n" + PROFILE_UPDATE_GUIDANCE)
 
     # Add user_id if provided
     if user_id:

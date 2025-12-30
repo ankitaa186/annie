@@ -69,6 +69,8 @@ OPTIONAL_VARS = {
 SENSITIVE_VARS = [
     "BRAVE_SEARCH_API_KEY",
     "STOCK_API_KEY",
+    "TAVILY_API_KEY",
+    "REDDIT_CLIENT_SECRET",
 ]
 
 
@@ -116,6 +118,37 @@ def validate_environment() -> dict:
     else:
         logger.warning(
             "STOCK_API_KEY is not set. Stock trader tool will not work until configured."
+        )
+
+    tavily_key = get_env_var("TAVILY_API_KEY")
+    if tavily_key and tavily_key != "REPLACE_ME":
+        config["TAVILY_API_KEY"] = tavily_key
+    else:
+        logger.warning(
+            "TAVILY_API_KEY is not set. Web search will fall back to DuckDuckGo only."
+        )
+
+    # Jina Reader API key (optional - for web_crawl fallback)
+    jina_key = get_env_var("JINA_API_KEY")
+    if jina_key:
+        config["JINA_API_KEY"] = jina_key
+
+    # Reddit API credentials (optional - falls back to JSON API)
+    reddit_client_id = get_env_var("REDDIT_CLIENT_ID")
+    reddit_client_secret = get_env_var("REDDIT_CLIENT_SECRET")
+    reddit_user_agent = get_env_var("REDDIT_USER_AGENT", default="annie-bot/1.0")
+
+    if reddit_client_id and reddit_client_id != "REPLACE_ME":
+        config["REDDIT_CLIENT_ID"] = reddit_client_id
+    if reddit_client_secret and reddit_client_secret != "REPLACE_ME":
+        config["REDDIT_CLIENT_SECRET"] = reddit_client_secret
+    config["REDDIT_USER_AGENT"] = reddit_user_agent
+
+    if not (reddit_client_id and reddit_client_id != "REPLACE_ME" and
+            reddit_client_secret and reddit_client_secret != "REPLACE_ME"):
+        logger.warning(
+            "REDDIT_CLIENT_ID or REDDIT_CLIENT_SECRET is not set. "
+            "Reddit search will use JSON API fallback (no comments)."
         )
 
     # Raise errors only if critical validation failed
