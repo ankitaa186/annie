@@ -38,7 +38,7 @@ class TestDeleteMemoryToolHandler:
             }
         }
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -76,7 +76,7 @@ class TestDeleteMemoryToolHandler:
             "message": "Memory not found"
         }
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -101,7 +101,7 @@ class TestDeleteMemoryToolHandler:
         mock_response = Mock()
         mock_response.status_code = 403
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -126,7 +126,7 @@ class TestDeleteMemoryToolHandler:
         mock_response = Mock()
         mock_response.status_code = 404
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -151,7 +151,7 @@ class TestDeleteMemoryToolHandler:
         mock_response = Mock()
         mock_response.status_code = 500
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -172,7 +172,7 @@ class TestDeleteMemoryToolHandler:
     @pytest.mark.asyncio
     async def test_delete_memory_timeout(self):
         """Test timeout handling (AC #7)."""
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -197,7 +197,7 @@ class TestDeleteMemoryToolHandler:
         mock_response.status_code = 200
         mock_response.json.return_value = {"deleted": True}
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -215,7 +215,7 @@ class TestDeleteMemoryToolHandler:
     @pytest.mark.asyncio
     async def test_delete_memory_unexpected_exception(self):
         """Test handling of unexpected exceptions."""
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -240,14 +240,14 @@ class TestDeleteMemoryToolHandler:
         mock_response.status_code = 200
         mock_response.json.return_value = {"deleted": True}
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
             mock_client.delete = AsyncMock(return_value=mock_response)
             mock_client_class.return_value = mock_client
 
-            with patch('mcp_server.tools.logger') as mock_logger:
+            with patch('mcp_server.tools.memory.logger') as mock_logger:
                 await delete_memory_tool_handler(
                     user_id="user123",
                     memory_id="mem_abc123",
@@ -269,14 +269,14 @@ class TestDeleteMemoryToolHandler:
         mock_response = Mock()
         mock_response.status_code = 500
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
             mock_client.delete = AsyncMock(return_value=mock_response)
             mock_client_class.return_value = mock_client
 
-            with patch('mcp_server.tools.logger') as mock_logger:
+            with patch('mcp_server.tools.memory.logger') as mock_logger:
                 await delete_memory_tool_handler(
                     user_id="user123",
                     memory_id="mem_abc123",
@@ -299,7 +299,7 @@ class TestDeleteMemoryToolHandler:
         mock_response.status_code = 200
         mock_response.json.return_value = {"deleted": True}
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -323,12 +323,12 @@ class TestDeleteMemoryToolHandler:
         mock_response.status_code = 200
         mock_response.json.return_value = {"deleted": True}
 
-        with patch('mcp_server.tools.get_config') as mock_get_config:
+        with patch('mcp_server.tools.memory.get_config') as mock_get_config:
             mock_get_config.return_value = {
                 "AGENTIC_MEMORIES_URL": "http://custom-host:9999"
             }
 
-            with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+            with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
                 mock_client = AsyncMock()
                 mock_client.__aenter__.return_value = mock_client
                 mock_client.__aexit__.return_value = None
@@ -351,10 +351,10 @@ class TestDeleteMemoryToolHandler:
         mock_response.status_code = 200
         mock_response.json.return_value = {"deleted": True}
 
-        with patch('mcp_server.tools.get_config') as mock_get_config:
+        with patch('mcp_server.tools.memory.get_config') as mock_get_config:
             mock_get_config.side_effect = Exception("Config error")
 
-            with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+            with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
                 mock_client = AsyncMock()
                 mock_client.__aenter__.return_value = mock_client
                 mock_client.__aexit__.return_value = None

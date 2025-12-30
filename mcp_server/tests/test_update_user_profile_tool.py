@@ -55,7 +55,7 @@ class TestUpdateUserProfileToolHandler:
     @pytest.mark.asyncio
     async def test_success_path(self, mock_profile_response, mock_httpx_response):
         """AC #1: PUT to Profile API succeeds."""
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.profile.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -79,7 +79,7 @@ class TestUpdateUserProfileToolHandler:
     @pytest.mark.asyncio
     async def test_success_with_201_status(self, mock_profile_response, mock_httpx_response):
         """AC #1: PUT to Profile API succeeds with 201 status."""
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.profile.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -114,7 +114,7 @@ class TestUpdateUserProfileToolHandler:
     async def test_all_valid_categories(self, mock_profile_response, mock_httpx_response):
         """AC #2: All valid categories are accepted."""
         for category in ALLOWED_PROFILE_CATEGORIES:
-            with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+            with patch('mcp_server.tools.profile.httpx.AsyncClient') as mock_client_class:
                 mock_client = AsyncMock()
                 mock_client.__aenter__.return_value = mock_client
                 mock_client.__aexit__.return_value = None
@@ -143,7 +143,7 @@ class TestUpdateUserProfileToolHandler:
     ])
     async def test_all_value_types(self, value_type, test_value, mock_httpx_response):
         """AC #3: All value types (string, number, boolean, array) supported."""
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.profile.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -168,7 +168,7 @@ class TestUpdateUserProfileToolHandler:
     @pytest.mark.asyncio
     async def test_source_llm_explicit_in_request(self, mock_httpx_response):
         """AC #4: source='llm_explicit' is set in all requests."""
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.profile.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -195,7 +195,7 @@ class TestUpdateUserProfileToolHandler:
     @pytest.mark.asyncio
     async def test_404_not_found(self, mock_httpx_response):
         """AC #5: Handle 404 (Not Found) with clear error message."""
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.profile.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -221,7 +221,7 @@ class TestUpdateUserProfileToolHandler:
             "message": "Field name contains invalid characters"
         })
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.profile.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -251,7 +251,7 @@ class TestUpdateUserProfileToolHandler:
                 return mock_httpx_response(503, {})
             return mock_httpx_response(200, mock_profile_response)
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.profile.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -272,7 +272,7 @@ class TestUpdateUserProfileToolHandler:
     @pytest.mark.asyncio
     async def test_retry_exhausted_returns_error(self, mock_httpx_response):
         """AC #7: After max retries, return error."""
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.profile.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -294,7 +294,7 @@ class TestUpdateUserProfileToolHandler:
     @pytest.mark.asyncio
     async def test_timeout_handling(self):
         """AC #7: Timeout errors trigger retry."""
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.profile.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -325,7 +325,7 @@ class TestUpdateUserProfileToolHandler:
                 raise httpx.TimeoutException("Connection timed out")
             return mock_httpx_response(200, mock_profile_response)
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.profile.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -346,7 +346,7 @@ class TestUpdateUserProfileToolHandler:
     @pytest.mark.asyncio
     async def test_reason_included_in_payload(self, mock_profile_response, mock_httpx_response):
         """Optional reason parameter is included in request."""
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.profile.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -368,7 +368,7 @@ class TestUpdateUserProfileToolHandler:
     @pytest.mark.asyncio
     async def test_reason_not_included_when_not_provided(self, mock_profile_response, mock_httpx_response):
         """Reason parameter is not included when not provided."""
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.profile.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -390,7 +390,7 @@ class TestUpdateUserProfileToolHandler:
     @pytest.mark.asyncio
     async def test_correct_endpoint_url(self, mock_profile_response, mock_httpx_response):
         """Verify correct endpoint URL is called."""
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.profile.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -411,7 +411,7 @@ class TestUpdateUserProfileToolHandler:
     @pytest.mark.asyncio
     async def test_10s_timeout_configured(self, mock_profile_response, mock_httpx_response):
         """Verify 10 second timeout is configured."""
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.profile.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -430,12 +430,12 @@ class TestUpdateUserProfileToolHandler:
     @pytest.mark.asyncio
     async def test_uses_config_url(self, mock_profile_response, mock_httpx_response):
         """Test that agentic-memories URL is read from config."""
-        with patch('mcp_server.tools.get_config') as mock_get_config:
+        with patch('mcp_server.tools.profile.get_config') as mock_get_config:
             mock_get_config.return_value = {
                 "AGENTIC_MEMORIES_URL": "http://custom-host:9999"
             }
 
-            with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+            with patch('mcp_server.tools.profile.httpx.AsyncClient') as mock_client_class:
                 mock_client = AsyncMock()
                 mock_client.__aenter__.return_value = mock_client
                 mock_client.__aexit__.return_value = None
@@ -456,10 +456,10 @@ class TestUpdateUserProfileToolHandler:
     @pytest.mark.asyncio
     async def test_config_failure_uses_default_url(self, mock_profile_response, mock_httpx_response):
         """Test that default URL is used when config fails."""
-        with patch('mcp_server.tools.get_config') as mock_get_config:
+        with patch('mcp_server.tools.profile.get_config') as mock_get_config:
             mock_get_config.side_effect = Exception("Config error")
 
-            with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+            with patch('mcp_server.tools.profile.httpx.AsyncClient') as mock_client_class:
                 mock_client = AsyncMock()
                 mock_client.__aenter__.return_value = mock_client
                 mock_client.__aexit__.return_value = None
@@ -480,7 +480,7 @@ class TestUpdateUserProfileToolHandler:
     @pytest.mark.asyncio
     async def test_unexpected_exception_handling(self):
         """Test handling of unexpected exceptions."""
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.profile.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -501,7 +501,7 @@ class TestUpdateUserProfileToolHandler:
     @pytest.mark.asyncio
     async def test_other_http_status_codes(self, mock_httpx_response):
         """Test handling of other HTTP status codes (e.g., 403)."""
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.profile.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None

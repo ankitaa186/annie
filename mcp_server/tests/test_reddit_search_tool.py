@@ -192,7 +192,7 @@ class TestParameterValidation:
     @pytest.mark.asyncio
     async def test_empty_query_returns_error(self):
         """Test that empty query returns validation error."""
-        with patch('mcp_server.tools.get_config', return_value={}):
+        with patch('mcp_server.tools.reddit_search.get_config', return_value={}):
             result = await reddit_search_tool_handler(query="")
             assert result["status"] == "error"
             assert result["error_code"] == "VALIDATION_ERROR"
@@ -201,7 +201,7 @@ class TestParameterValidation:
     @pytest.mark.asyncio
     async def test_whitespace_query_returns_error(self):
         """Test that whitespace-only query returns validation error."""
-        with patch('mcp_server.tools.get_config', return_value={}):
+        with patch('mcp_server.tools.reddit_search.get_config', return_value={}):
             result = await reddit_search_tool_handler(query="   ")
             assert result["status"] == "error"
             assert result["error_code"] == "VALIDATION_ERROR"
@@ -209,7 +209,7 @@ class TestParameterValidation:
     @pytest.mark.asyncio
     async def test_invalid_sort_returns_error(self):
         """Test that invalid sort option returns validation error."""
-        with patch('mcp_server.tools.get_config', return_value={}):
+        with patch('mcp_server.tools.reddit_search.get_config', return_value={}):
             result = await reddit_search_tool_handler(query="test", sort="invalid")
             assert result["status"] == "error"
             assert result["error_code"] == "VALIDATION_ERROR"
@@ -218,7 +218,7 @@ class TestParameterValidation:
     @pytest.mark.asyncio
     async def test_invalid_time_filter_returns_error(self):
         """Test that invalid time_filter returns validation error."""
-        with patch('mcp_server.tools.get_config', return_value={}):
+        with patch('mcp_server.tools.reddit_search.get_config', return_value={}):
             result = await reddit_search_tool_handler(query="test", time_filter="invalid")
             assert result["status"] == "error"
             assert result["error_code"] == "VALIDATION_ERROR"
@@ -227,8 +227,8 @@ class TestParameterValidation:
     @pytest.mark.asyncio
     async def test_limit_clamped_to_minimum(self):
         """Test that limit below minimum is clamped to 1."""
-        with patch('mcp_server.tools.get_config', return_value={}):
-            with patch('mcp_server.tools._reddit_json_search', new_callable=AsyncMock) as mock_search:
+        with patch('mcp_server.tools.reddit_search.get_config', return_value={}):
+            with patch('mcp_server.tools.reddit_search._reddit_json_search', new_callable=AsyncMock) as mock_search:
                 mock_search.return_value = {"status": "success", "results": [], "query": "test", "subreddit": "all"}
                 await reddit_search_tool_handler(query="test", limit=0)
                 # Verify limit was clamped to 1
@@ -238,8 +238,8 @@ class TestParameterValidation:
     @pytest.mark.asyncio
     async def test_limit_clamped_to_maximum(self):
         """Test that limit above maximum is clamped to 25."""
-        with patch('mcp_server.tools.get_config', return_value={}):
-            with patch('mcp_server.tools._reddit_json_search', new_callable=AsyncMock) as mock_search:
+        with patch('mcp_server.tools.reddit_search.get_config', return_value={}):
+            with patch('mcp_server.tools.reddit_search._reddit_json_search', new_callable=AsyncMock) as mock_search:
                 mock_search.return_value = {"status": "success", "results": [], "query": "test", "subreddit": "all"}
                 await reddit_search_tool_handler(query="test", limit=100)
                 # Verify limit was clamped to 25
@@ -457,7 +457,7 @@ class TestJSONAPIFallback:
         mock_response.status_code = 200
         mock_response.json.return_value = mock_json_api_response
 
-        with patch('httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.reddit_search.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -493,7 +493,7 @@ class TestJSONAPIFallback:
         mock_response.status_code = 200
         mock_response.json.return_value = mock_json_api_response
 
-        with patch('httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.reddit_search.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -522,7 +522,7 @@ class TestJSONAPIFallback:
         mock_response.status_code = 200
         mock_response.json.return_value = mock_json_api_response
 
-        with patch('httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.reddit_search.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -554,7 +554,7 @@ class TestJSONAPIFallback:
         mock_success.status_code = 200
         mock_success.json.return_value = {"data": {"children": []}}
 
-        with patch('httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.reddit_search.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -581,7 +581,7 @@ class TestJSONAPIFallback:
         mock_rate_limited = Mock()
         mock_rate_limited.status_code = 429
 
-        with patch('httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.reddit_search.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -608,7 +608,7 @@ class TestJSONAPIFallback:
         mock_response = Mock()
         mock_response.status_code = 403
 
-        with patch('httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.reddit_search.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -633,7 +633,7 @@ class TestJSONAPIFallback:
         mock_response = Mock()
         mock_response.status_code = 404
 
-        with patch('httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.reddit_search.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -655,7 +655,7 @@ class TestJSONAPIFallback:
     @pytest.mark.asyncio
     async def test_json_api_timeout(self):
         """Test JSON API handles timeout."""
-        with patch('httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.reddit_search.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -712,7 +712,7 @@ class TestJSONAPIFallback:
         mock_response.status_code = 200
         mock_response.json.return_value = response_with_deleted
 
-        with patch('httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.reddit_search.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -747,8 +747,8 @@ class TestFallbackLogic:
         mock_response.status_code = 200
         mock_response.json.return_value = mock_json_api_response
 
-        with patch('mcp_server.tools.get_config', return_value={}):
-            with patch('httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.reddit_search.get_config', return_value={}):
+            with patch('mcp_server.tools.reddit_search.httpx.AsyncClient') as mock_client_class:
                 mock_client = AsyncMock()
                 mock_client.__aenter__.return_value = mock_client
                 mock_client.__aexit__.return_value = None
@@ -767,16 +767,16 @@ class TestFallbackLogic:
         mock_response.status_code = 200
         mock_response.json.return_value = mock_json_api_response
 
-        with patch('mcp_server.tools.get_config', return_value=mock_config_with_reddit):
+        with patch('mcp_server.tools.reddit_search.get_config', return_value=mock_config_with_reddit):
             # Make PRAW fail
-            with patch('mcp_server.tools._praw_search_sync', return_value={
+            with patch('mcp_server.tools.reddit_search._praw_search_sync', return_value={
                 "status": "error",
                 "provider": "praw",
                 "query": "test",
                 "error_message": "OAuth failed",
                 "error_code": "API_ERROR"
             }):
-                with patch('httpx.AsyncClient') as mock_client_class:
+                with patch('mcp_server.tools.reddit_search.httpx.AsyncClient') as mock_client_class:
                     mock_client = AsyncMock()
                     mock_client.__aenter__.return_value = mock_client
                     mock_client.__aexit__.return_value = None
@@ -791,15 +791,15 @@ class TestFallbackLogic:
     @pytest.mark.asyncio
     async def test_praw_success_no_fallback(self, mock_config_with_reddit):
         """Test no fallback when PRAW succeeds."""
-        with patch('mcp_server.tools.get_config', return_value=mock_config_with_reddit):
-            with patch('mcp_server.tools._praw_search_sync', return_value={
+        with patch('mcp_server.tools.reddit_search.get_config', return_value=mock_config_with_reddit):
+            with patch('mcp_server.tools.reddit_search._praw_search_sync', return_value={
                 "status": "success",
                 "provider": "praw",
                 "query": "test",
                 "subreddit": "all",
                 "results": [{"type": "post", "title": "Test"}]
             }):
-                with patch('mcp_server.tools._reddit_json_search', new_callable=AsyncMock) as mock_json:
+                with patch('mcp_server.tools.reddit_search._reddit_json_search', new_callable=AsyncMock) as mock_json:
                     result = await reddit_search_tool_handler(query="test")
 
                     assert result["status"] == "success"
@@ -881,8 +881,8 @@ class TestSortAndTimeFilter:
         mock_response.status_code = 200
         mock_response.json.return_value = mock_json_api_response
 
-        with patch('mcp_server.tools.get_config', return_value={}):
-            with patch('httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.reddit_search.get_config', return_value={}):
+            with patch('mcp_server.tools.reddit_search.httpx.AsyncClient') as mock_client_class:
                 mock_client = AsyncMock()
                 mock_client.__aenter__.return_value = mock_client
                 mock_client.__aexit__.return_value = None
@@ -904,8 +904,8 @@ class TestSortAndTimeFilter:
         mock_response.status_code = 200
         mock_response.json.return_value = mock_json_api_response
 
-        with patch('mcp_server.tools.get_config', return_value={}):
-            with patch('httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.reddit_search.get_config', return_value={}):
+            with patch('mcp_server.tools.reddit_search.httpx.AsyncClient') as mock_client_class:
                 mock_client = AsyncMock()
                 mock_client.__aenter__.return_value = mock_client
                 mock_client.__aexit__.return_value = None

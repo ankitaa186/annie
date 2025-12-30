@@ -47,7 +47,7 @@ class TestTavilySearch:
         mock_response.json.return_value = mock_tavily_response
         mock_response.raise_for_status = Mock()
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.web_search.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -76,7 +76,7 @@ class TestTavilySearch:
         mock_response = Mock()
         mock_response.status_code = 429
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.web_search.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -102,7 +102,7 @@ class TestTavilySearch:
         mock_response = Mock()
         mock_response.status_code = 503
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.web_search.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -125,7 +125,7 @@ class TestTavilySearch:
     @pytest.mark.asyncio
     async def test_tavily_search_timeout(self):
         """Test timeout handling."""
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.web_search.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -153,7 +153,7 @@ class TestTavilySearch:
         mock_response.json.return_value = {"results": []}
         mock_response.raise_for_status = Mock()
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.web_search.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -245,14 +245,14 @@ class TestWebSearchToolHandler:
         mock_response.json.return_value = mock_tavily_response
         mock_response.raise_for_status = Mock()
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.web_search.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
             mock_client.post = AsyncMock(return_value=mock_response)
             mock_client_class.return_value = mock_client
 
-            with patch('mcp_server.tools.get_config') as mock_config:
+            with patch('mcp_server.tools.web_search.get_config') as mock_config:
                 mock_config.return_value = {"TAVILY_API_KEY": "test-key"}
 
                 result = await web_search_tool_handler(query="test query")
@@ -266,14 +266,14 @@ class TestWebSearchToolHandler:
     async def test_fallback_to_duckduckgo_on_tavily_failure(self):
         """Test DuckDuckGo fallback when Tavily fails."""
         # Mock Tavily to raise an exception
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.web_search.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
             mock_client.post = AsyncMock(side_effect=Exception("Tavily unavailable"))
             mock_client_class.return_value = mock_client
 
-            with patch('mcp_server.tools.get_config') as mock_config:
+            with patch('mcp_server.tools.web_search.get_config') as mock_config:
                 mock_config.return_value = {"TAVILY_API_KEY": "test-key"}
 
                 with patch('duckduckgo_search.DDGS') as mock_ddgs_class:
@@ -294,14 +294,14 @@ class TestWebSearchToolHandler:
         mock_response = Mock()
         mock_response.status_code = 429
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.web_search.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
             mock_client.post = AsyncMock(return_value=mock_response)
             mock_client_class.return_value = mock_client
 
-            with patch('mcp_server.tools.get_config') as mock_config:
+            with patch('mcp_server.tools.web_search.get_config') as mock_config:
                 mock_config.return_value = {"TAVILY_API_KEY": "test-key"}
 
                 with patch('duckduckgo_search.DDGS') as mock_ddgs_class:
@@ -316,14 +316,14 @@ class TestWebSearchToolHandler:
     @pytest.mark.asyncio
     async def test_timeout_triggers_fallback(self):
         """Test timeout triggers DuckDuckGo fallback."""
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.web_search.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
             mock_client.post = AsyncMock(side_effect=httpx.TimeoutException("Timeout"))
             mock_client_class.return_value = mock_client
 
-            with patch('mcp_server.tools.get_config') as mock_config:
+            with patch('mcp_server.tools.web_search.get_config') as mock_config:
                 mock_config.return_value = {"TAVILY_API_KEY": "test-key"}
 
                 with patch('duckduckgo_search.DDGS') as mock_ddgs_class:
@@ -341,14 +341,14 @@ class TestWebSearchToolHandler:
         mock_response = Mock()
         mock_response.status_code = 500
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.web_search.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
             mock_client.post = AsyncMock(return_value=mock_response)
             mock_client_class.return_value = mock_client
 
-            with patch('mcp_server.tools.get_config') as mock_config:
+            with patch('mcp_server.tools.web_search.get_config') as mock_config:
                 mock_config.return_value = {"TAVILY_API_KEY": "test-key"}
 
                 with patch('duckduckgo_search.DDGS') as mock_ddgs_class:
@@ -368,14 +368,14 @@ class TestWebSearchToolHandler:
         mock_response.json.return_value = mock_tavily_response
         mock_response.raise_for_status = Mock()
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.web_search.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
             mock_client.post = AsyncMock(return_value=mock_response)
             mock_client_class.return_value = mock_client
 
-            with patch('mcp_server.tools.get_config') as mock_config:
+            with patch('mcp_server.tools.web_search.get_config') as mock_config:
                 mock_config.return_value = {"TAVILY_API_KEY": "test-key"}
 
                 await web_search_tool_handler(
@@ -395,14 +395,14 @@ class TestWebSearchToolHandler:
         mock_response.json.return_value = mock_tavily_response
         mock_response.raise_for_status = Mock()
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.web_search.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
             mock_client.post = AsyncMock(return_value=mock_response)
             mock_client_class.return_value = mock_client
 
-            with patch('mcp_server.tools.get_config') as mock_config:
+            with patch('mcp_server.tools.web_search.get_config') as mock_config:
                 mock_config.return_value = {"TAVILY_API_KEY": "test-key"}
 
                 await web_search_tool_handler(
@@ -422,14 +422,14 @@ class TestWebSearchToolHandler:
         mock_response.json.return_value = mock_tavily_response
         mock_response.raise_for_status = Mock()
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.web_search.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
             mock_client.post = AsyncMock(return_value=mock_response)
             mock_client_class.return_value = mock_client
 
-            with patch('mcp_server.tools.get_config') as mock_config:
+            with patch('mcp_server.tools.web_search.get_config') as mock_config:
                 mock_config.return_value = {"TAVILY_API_KEY": "test-key"}
 
                 await web_search_tool_handler(
@@ -451,14 +451,14 @@ class TestWebSearchToolHandler:
         mock_response.json.return_value = mock_tavily_response
         mock_response.raise_for_status = Mock()
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.web_search.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
             mock_client.post = AsyncMock(return_value=mock_response)
             mock_client_class.return_value = mock_client
 
-            with patch('mcp_server.tools.get_config') as mock_config:
+            with patch('mcp_server.tools.web_search.get_config') as mock_config:
                 mock_config.return_value = {"TAVILY_API_KEY": "test-key"}
 
                 await web_search_tool_handler(
@@ -478,14 +478,14 @@ class TestWebSearchToolHandler:
         mock_response.json.return_value = mock_tavily_response
         mock_response.raise_for_status = Mock()
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.web_search.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
             mock_client.post = AsyncMock(return_value=mock_response)
             mock_client_class.return_value = mock_client
 
-            with patch('mcp_server.tools.get_config') as mock_config:
+            with patch('mcp_server.tools.web_search.get_config') as mock_config:
                 mock_config.return_value = {"TAVILY_API_KEY": "test-key"}
 
                 await web_search_tool_handler(
@@ -505,14 +505,14 @@ class TestWebSearchToolHandler:
         mock_response.json.return_value = mock_tavily_response
         mock_response.raise_for_status = Mock()
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.web_search.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
             mock_client.post = AsyncMock(return_value=mock_response)
             mock_client_class.return_value = mock_client
 
-            with patch('mcp_server.tools.get_config') as mock_config:
+            with patch('mcp_server.tools.web_search.get_config') as mock_config:
                 mock_config.return_value = {"TAVILY_API_KEY": "test-key"}
 
                 await web_search_tool_handler(query="test")
@@ -524,7 +524,7 @@ class TestWebSearchToolHandler:
     @pytest.mark.asyncio
     async def test_no_api_key_uses_duckduckgo(self):
         """Test missing API key goes directly to DuckDuckGo."""
-        with patch('mcp_server.tools.get_config') as mock_config:
+        with patch('mcp_server.tools.web_search.get_config') as mock_config:
             mock_config.return_value = {}  # No API key
 
             with patch('duckduckgo_search.DDGS') as mock_ddgs_class:
@@ -539,7 +539,7 @@ class TestWebSearchToolHandler:
     @pytest.mark.asyncio
     async def test_empty_api_key_uses_duckduckgo(self):
         """Test empty string API key goes directly to DuckDuckGo."""
-        with patch('mcp_server.tools.get_config') as mock_config:
+        with patch('mcp_server.tools.web_search.get_config') as mock_config:
             mock_config.return_value = {"TAVILY_API_KEY": ""}  # Empty key
 
             with patch('duckduckgo_search.DDGS') as mock_ddgs_class:
@@ -559,14 +559,14 @@ class TestWebSearchToolHandler:
         mock_response.json.return_value = mock_tavily_response
         mock_response.raise_for_status = Mock()
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.web_search.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
             mock_client.post = AsyncMock(return_value=mock_response)
             mock_client_class.return_value = mock_client
 
-            with patch('mcp_server.tools.get_config') as mock_config:
+            with patch('mcp_server.tools.web_search.get_config') as mock_config:
                 mock_config.return_value = {"TAVILY_API_KEY": "test-key"}
 
                 await web_search_tool_handler(

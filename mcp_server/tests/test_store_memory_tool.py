@@ -39,7 +39,7 @@ class TestStoreMemoryToolHandler:
             }
         }
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -87,7 +87,7 @@ class TestStoreMemoryToolHandler:
             "storage": {"chromadb": True, "episodic": False, "emotional": False, "procedural": False}
         }
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -130,7 +130,7 @@ class TestStoreMemoryToolHandler:
             "storage": {"chromadb": True}
         }
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -160,7 +160,7 @@ class TestStoreMemoryToolHandler:
             "storage": {"chromadb": True}
         }
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -198,7 +198,7 @@ class TestStoreMemoryToolHandler:
             }
         }
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -240,7 +240,7 @@ class TestStoreMemoryToolHandler:
             }
         }
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -282,7 +282,7 @@ class TestStoreMemoryToolHandler:
             }
         }
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -323,7 +323,7 @@ class TestStoreMemoryToolHandler:
             }
         }
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -399,7 +399,7 @@ class TestStoreMemoryToolHandler:
             "storage": {"chromadb": True}
         }
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -434,7 +434,7 @@ class TestStoreMemoryToolHandler:
     @pytest.mark.asyncio
     async def test_store_memory_timeout_10s(self):
         """Test that timeout is set to 10s (AC #2)."""
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client_class.return_value.__aenter__ = AsyncMock()
             mock_client_class.return_value.__aexit__ = AsyncMock()
 
@@ -464,14 +464,14 @@ class TestStoreMemoryToolHandler:
     @pytest.mark.asyncio
     async def test_store_memory_timeout_error_message(self):
         """Test timeout error message includes timeout duration (AC #2)."""
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
             mock_client.post = AsyncMock(side_effect=httpx.TimeoutException("Timeout"))
             mock_client_class.return_value = mock_client
 
-            with patch('mcp_server.tools.asyncio.sleep', new_callable=AsyncMock):
+            with patch('mcp_server.tools.memory.asyncio.sleep', new_callable=AsyncMock):
                 result = await store_memory_tool_handler(
                     user_id="user123",
                     content="Test memory"
@@ -492,7 +492,7 @@ class TestStoreMemoryToolHandler:
             "error_code": "VALIDATION_ERROR"
         }
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -520,7 +520,7 @@ class TestStoreMemoryToolHandler:
             "error_code": "INTERNAL_ERROR"
         }
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -556,7 +556,7 @@ class TestStoreMemoryToolHandler:
             "storage": {"chromadb": True}
         }
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -567,7 +567,7 @@ class TestStoreMemoryToolHandler:
             ])
             mock_client_class.return_value = mock_client
 
-            with patch('mcp_server.tools.asyncio.sleep', new_callable=AsyncMock):
+            with patch('mcp_server.tools.memory.asyncio.sleep', new_callable=AsyncMock):
                 result = await store_memory_tool_handler(
                     user_id="user123",
                     content="Test memory"
@@ -596,7 +596,7 @@ class TestStoreMemoryToolHandler:
             "storage": {"chromadb": True}
         }
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -606,7 +606,7 @@ class TestStoreMemoryToolHandler:
             ])
             mock_client_class.return_value = mock_client
 
-            with patch('mcp_server.tools.asyncio.sleep', new_callable=AsyncMock):
+            with patch('mcp_server.tools.memory.asyncio.sleep', new_callable=AsyncMock):
                 result = await store_memory_tool_handler(
                     user_id="user123",
                     content="Test memory"
@@ -632,7 +632,7 @@ class TestStoreMemoryToolHandler:
             "storage": {"chromadb": True}
         }
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -643,7 +643,7 @@ class TestStoreMemoryToolHandler:
             ])
             mock_client_class.return_value = mock_client
 
-            with patch('mcp_server.tools.asyncio.sleep', new_callable=AsyncMock):
+            with patch('mcp_server.tools.memory.asyncio.sleep', new_callable=AsyncMock):
                 result = await store_memory_tool_handler(
                     user_id="user123",
                     content="Test memory"
@@ -660,7 +660,7 @@ class TestStoreMemoryToolHandler:
         mock_response.json.return_value = {"message": "Invalid request"}
         mock_response.text = "Invalid request"
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -686,7 +686,7 @@ class TestStoreMemoryToolHandler:
             "storage": {"chromadb": True}
         }
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -697,7 +697,7 @@ class TestStoreMemoryToolHandler:
             ])
             mock_client_class.return_value = mock_client
 
-            with patch('mcp_server.tools.asyncio.sleep', new_callable=AsyncMock):
+            with patch('mcp_server.tools.memory.asyncio.sleep', new_callable=AsyncMock):
                 result = await store_memory_tool_handler(
                     user_id="user123",
                     content="Test memory"
@@ -709,14 +709,14 @@ class TestStoreMemoryToolHandler:
     @pytest.mark.asyncio
     async def test_store_memory_fails_after_max_retries(self):
         """Test failure after max retries exceeded."""
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
             mock_client.post = AsyncMock(side_effect=httpx.ConnectError("Connection refused"))
             mock_client_class.return_value = mock_client
 
-            with patch('mcp_server.tools.asyncio.sleep', new_callable=AsyncMock):
+            with patch('mcp_server.tools.memory.asyncio.sleep', new_callable=AsyncMock):
                 result = await store_memory_tool_handler(
                     user_id="user123",
                     content="Test memory"
@@ -730,7 +730,7 @@ class TestStoreMemoryToolHandler:
     @pytest.mark.asyncio
     async def test_store_memory_handles_unexpected_errors(self):
         """Test handling of unexpected errors."""
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -757,10 +757,10 @@ class TestStoreMemoryToolHandler:
             "storage": {"chromadb": True}
         }
 
-        with patch('mcp_server.tools.get_config') as mock_config:
+        with patch('mcp_server.tools.memory.get_config') as mock_config:
             mock_config.return_value = {"AGENTIC_MEMORIES_URL": "http://custom:9000"}
 
-            with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+            with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
                 mock_client = AsyncMock()
                 mock_client.__aenter__.return_value = mock_client
                 mock_client.__aexit__.return_value = None
@@ -788,7 +788,7 @@ class TestStoreMemoryToolHandler:
             "storage": {"chromadb": True}
         }
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -810,7 +810,7 @@ class TestStoreMemoryToolHandler:
         mock_response.status_code = 200
         mock_response.json.return_value = {"status": "success", "memory_id": "mem_test", "storage": {}}
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -829,7 +829,7 @@ class TestStoreMemoryToolHandler:
         mock_response.status_code = 200
         mock_response.json.return_value = {"status": "success", "memory_id": "mem_test", "storage": {}}
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -848,7 +848,7 @@ class TestStoreMemoryToolHandler:
         mock_response.status_code = 200
         mock_response.json.return_value = {"status": "success", "memory_id": "mem_test", "storage": {}}
 
-        with patch('mcp_server.tools.httpx.AsyncClient') as mock_client_class:
+        with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None

@@ -296,13 +296,13 @@ class TestJinaReaderFetch:
     @pytest.mark.asyncio
     async def test_jina_success(self, mock_jina_response):
         """Test successful Jina Reader fetch."""
-        with patch("mcp_server.tools.httpx.AsyncClient") as mock_client_class:
+        with patch("mcp_server.tools.web_crawl.httpx.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_client.get.return_value = mock_jina_response
             mock_client_class.return_value.__aenter__.return_value = mock_client
             mock_client_class.return_value.__aexit__.return_value = None
 
-            with patch("mcp_server.tools.get_config") as mock_config:
+            with patch("mcp_server.tools.web_crawl.get_config") as mock_config:
                 mock_config.return_value = {}
 
                 result = await _jina_reader_fetch(
@@ -323,13 +323,13 @@ class TestJinaReaderFetch:
         mock_response.status_code = 200
         mock_response.text = "A" * 20000
 
-        with patch("mcp_server.tools.httpx.AsyncClient") as mock_client_class:
+        with patch("mcp_server.tools.web_crawl.httpx.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_client.get.return_value = mock_response
             mock_client_class.return_value.__aenter__.return_value = mock_client
             mock_client_class.return_value.__aexit__.return_value = None
 
-            with patch("mcp_server.tools.get_config") as mock_config:
+            with patch("mcp_server.tools.web_crawl.get_config") as mock_config:
                 mock_config.return_value = {}
 
                 result = await _jina_reader_fetch(
@@ -344,13 +344,13 @@ class TestJinaReaderFetch:
     @pytest.mark.asyncio
     async def test_jina_http_error(self, mock_jina_error_response):
         """Test Jina Reader HTTP error handling."""
-        with patch("mcp_server.tools.httpx.AsyncClient") as mock_client_class:
+        with patch("mcp_server.tools.web_crawl.httpx.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_client.get.return_value = mock_jina_error_response
             mock_client_class.return_value.__aenter__.return_value = mock_client
             mock_client_class.return_value.__aexit__.return_value = None
 
-            with patch("mcp_server.tools.get_config") as mock_config:
+            with patch("mcp_server.tools.web_crawl.get_config") as mock_config:
                 mock_config.return_value = {}
 
                 result = await _jina_reader_fetch(
@@ -367,13 +367,13 @@ class TestJinaReaderFetch:
         """Test Jina Reader timeout handling."""
         import httpx
 
-        with patch("mcp_server.tools.httpx.AsyncClient") as mock_client_class:
+        with patch("mcp_server.tools.web_crawl.httpx.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_client.get.side_effect = httpx.TimeoutException("timeout")
             mock_client_class.return_value.__aenter__.return_value = mock_client
             mock_client_class.return_value.__aexit__.return_value = None
 
-            with patch("mcp_server.tools.get_config") as mock_config:
+            with patch("mcp_server.tools.web_crawl.get_config") as mock_config:
                 mock_config.return_value = {}
 
                 result = await _jina_reader_fetch(
@@ -388,13 +388,13 @@ class TestJinaReaderFetch:
     @pytest.mark.asyncio
     async def test_jina_with_api_key(self, mock_jina_response):
         """Test Jina Reader with API key."""
-        with patch("mcp_server.tools.httpx.AsyncClient") as mock_client_class:
+        with patch("mcp_server.tools.web_crawl.httpx.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_client.get.return_value = mock_jina_response
             mock_client_class.return_value.__aenter__.return_value = mock_client
             mock_client_class.return_value.__aexit__.return_value = None
 
-            with patch("mcp_server.tools.get_config") as mock_config:
+            with patch("mcp_server.tools.web_crawl.get_config") as mock_config:
                 mock_config.return_value = {"JINA_API_KEY": "test-key-123"}
 
                 result = await _jina_reader_fetch(
@@ -417,10 +417,10 @@ class TestWebCrawlFallback:
     @pytest.mark.asyncio
     async def test_fallback_to_jina_on_crawl4ai_failure(self, mock_jina_response):
         """Test fallback to Jina when crawl4ai fails."""
-        with patch("mcp_server.tools._crawl4ai_fetch") as mock_crawl4ai:
+        with patch("mcp_server.tools.web_crawl._crawl4ai_fetch") as mock_crawl4ai:
             mock_crawl4ai.side_effect = Exception("crawl4ai failed")
 
-            with patch("mcp_server.tools._jina_reader_fetch") as mock_jina:
+            with patch("mcp_server.tools.web_crawl._jina_reader_fetch") as mock_jina:
                 mock_jina.return_value = {
                     "status": "success",
                     "provider": "jina",
@@ -443,7 +443,7 @@ class TestWebCrawlFallback:
     @pytest.mark.asyncio
     async def test_fallback_to_jina_on_crawl4ai_error_result(self):
         """Test fallback when crawl4ai returns error status."""
-        with patch("mcp_server.tools._crawl4ai_fetch") as mock_crawl4ai:
+        with patch("mcp_server.tools.web_crawl._crawl4ai_fetch") as mock_crawl4ai:
             mock_crawl4ai.return_value = {
                 "status": "error",
                 "provider": "crawl4ai",
@@ -451,7 +451,7 @@ class TestWebCrawlFallback:
                 "error_message": "Page blocked"
             }
 
-            with patch("mcp_server.tools._jina_reader_fetch") as mock_jina:
+            with patch("mcp_server.tools.web_crawl._jina_reader_fetch") as mock_jina:
                 mock_jina.return_value = {
                     "status": "success",
                     "provider": "jina",
@@ -473,10 +473,10 @@ class TestWebCrawlFallback:
     @pytest.mark.asyncio
     async def test_both_providers_fail(self):
         """Test error when both providers fail."""
-        with patch("mcp_server.tools._crawl4ai_fetch") as mock_crawl4ai:
+        with patch("mcp_server.tools.web_crawl._crawl4ai_fetch") as mock_crawl4ai:
             mock_crawl4ai.side_effect = Exception("crawl4ai failed")
 
-            with patch("mcp_server.tools._jina_reader_fetch") as mock_jina:
+            with patch("mcp_server.tools.web_crawl._jina_reader_fetch") as mock_jina:
                 mock_jina.side_effect = Exception("jina failed")
 
                 result = await web_crawl_tool_handler(
@@ -524,7 +524,7 @@ class TestWebCrawlFallback:
     @pytest.mark.asyncio
     async def test_success_with_crawl4ai(self, mock_crawl4ai_result):
         """Test successful crawl without fallback."""
-        with patch("mcp_server.tools._crawl4ai_fetch") as mock_crawl4ai:
+        with patch("mcp_server.tools.web_crawl._crawl4ai_fetch") as mock_crawl4ai:
             mock_crawl4ai.return_value = {
                 "status": "success",
                 "provider": "crawl4ai",
@@ -553,7 +553,7 @@ class TestWebCrawlParameters:
     @pytest.mark.asyncio
     async def test_default_parameters(self):
         """Test default parameter values."""
-        with patch("mcp_server.tools._crawl4ai_fetch") as mock_crawl4ai:
+        with patch("mcp_server.tools.web_crawl._crawl4ai_fetch") as mock_crawl4ai:
             mock_crawl4ai.return_value = {
                 "status": "success",
                 "provider": "crawl4ai",
@@ -576,7 +576,7 @@ class TestWebCrawlParameters:
     @pytest.mark.asyncio
     async def test_custom_max_length(self):
         """Test custom max_length parameter."""
-        with patch("mcp_server.tools._crawl4ai_fetch") as mock_crawl4ai:
+        with patch("mcp_server.tools.web_crawl._crawl4ai_fetch") as mock_crawl4ai:
             mock_crawl4ai.return_value = {
                 "status": "success",
                 "provider": "crawl4ai",
@@ -599,7 +599,7 @@ class TestWebCrawlParameters:
     @pytest.mark.asyncio
     async def test_wait_for_js_parameter(self):
         """Test wait_for_js parameter."""
-        with patch("mcp_server.tools._crawl4ai_fetch") as mock_crawl4ai:
+        with patch("mcp_server.tools.web_crawl._crawl4ai_fetch") as mock_crawl4ai:
             mock_crawl4ai.return_value = {
                 "status": "success",
                 "provider": "crawl4ai",
