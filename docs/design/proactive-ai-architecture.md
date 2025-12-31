@@ -322,7 +322,7 @@ Checks time since user's last activity.
 |-----------|------|-------------|---------|
 | `type` | string | Condition category (price/portfolio/silence) | Required |
 | `expression` | string | Human-readable condition | Required |
-| `check_interval_minutes` | integer | How often to evaluate | 5 |
+| `check_interval_minutes` | integer | How often to evaluate | 120 (price), 1440 (portfolio), 60 (silence) |
 | `cooldown_hours` | integer | Minimum hours between fires | 24 |
 | `fire_mode` | string | "once" (disable after fire) or "recurring" | "recurring" |
 

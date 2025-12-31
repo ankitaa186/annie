@@ -32,5 +32,14 @@ pandas>=2.0.0  # Required by yfinance for data handling
 # Redis async client for price caching (Epic 10 - Story 10.5)
 redis>=5.0.0
 
+# Web search tools (Epic 15 - Story 15.1)
+duckduckgo-search>=6.0.0
+
+# Web crawling (Epic 15 - Story 15.2)
+crawl4ai>=0.3.0
+
+# Reddit API wrapper with OAuth support (Epic 15 - Story 15.3)
+praw>=7.7.0
+
 # Note: Additional tool-specific dependencies will be added in Epic 4:
 # - Brave Search API client (for internet access tool)

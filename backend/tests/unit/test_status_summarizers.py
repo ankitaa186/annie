@@ -279,7 +279,7 @@ class TestMemorySummarizers:
     """Test memory tool result summarizers."""
 
     def test_store_memory_single(self):
-        """Test store_memory summarizer with single memory."""
+        """Test store_memory summarizer with single memory (legacy format)."""
         from api.status_summarizers import summarize_store_memory_result
 
         result = {
@@ -292,7 +292,7 @@ class TestMemorySummarizers:
         assert summary == "Memory saved"
 
     def test_store_memory_multiple(self):
-        """Test store_memory summarizer with multiple memories."""
+        """Test store_memory summarizer with multiple memories (legacy format)."""
         from api.status_summarizers import summarize_store_memory_result
 
         result = {
@@ -303,6 +303,45 @@ class TestMemorySummarizers:
 
         summary = summarize_store_memory_result(result)
         assert summary == "Memory saved (3 items)"
+
+    def test_store_memory_new_format_with_memory_id(self):
+        """Test store_memory summarizer with new Story 14.5 format."""
+        from api.status_summarizers import summarize_store_memory_result
+
+        result = {
+            "status": "success",
+            "memory_id": "abc123def456ghi789",
+            "message": "Memory stored successfully",
+            "storage": {
+                "chromadb": True,
+                "episodic": False,
+                "emotional": False,
+                "procedural": False
+            }
+        }
+
+        summary = summarize_store_memory_result(result)
+        # Should show truncated memory_id (first 12 chars)
+        assert summary == "Memory saved (abc123def456...)"
+
+    def test_store_memory_new_format_short_id(self):
+        """Test store_memory summarizer with short memory_id."""
+        from api.status_summarizers import summarize_store_memory_result
+
+        result = {
+            "status": "success",
+            "memory_id": "short123",
+            "message": "Memory stored successfully",
+            "storage": {
+                "chromadb": True,
+                "episodic": False,
+                "emotional": False,
+                "procedural": False
+            }
+        }
+
+        summary = summarize_store_memory_result(result)
+        assert summary == "Memory saved (short123...)"
 
     def test_retrieve_memories_multiple(self):
         """Test retrieve_memories summarizer with multiple memories found."""
@@ -354,6 +393,89 @@ class TestMemorySummarizers:
 
         summary = summarize_store_memory_result(result)
         assert summary == "Failed to store memory: Network error"
+
+
+class TestDeleteMemorySummarizer:
+    """Test delete_memory tool result summarizer (Story 14.5)."""
+
+    def test_delete_memory_success(self):
+        """Test delete_memory summarizer with successful deletion."""
+        from api.status_summarizers import summarize_delete_memory_result
+
+        result = {
+            "status": "success",
+            "deleted": True,
+            "memory_id": "xyz123",
+            "message": "Memory deleted successfully",
+            "storage": {
+                "chromadb": True,
+                "episodic": False,
+                "emotional": False,
+                "procedural": False
+            }
+        }
+
+        summary = summarize_delete_memory_result(result)
+        assert summary == "Memory deleted"
+
+    def test_delete_memory_not_found(self):
+        """Test delete_memory summarizer when memory not found."""
+        from api.status_summarizers import summarize_delete_memory_result
+
+        result = {
+            "status": "error",
+            "deleted": False,
+            "memory_id": "xyz123",
+            "message": "Memory not found"
+        }
+
+        summary = summarize_delete_memory_result(result)
+        assert summary == "Delete failed: Memory not found"
+
+    def test_delete_memory_unauthorized(self):
+        """Test delete_memory summarizer when unauthorized."""
+        from api.status_summarizers import summarize_delete_memory_result
+
+        result = {
+            "status": "error",
+            "deleted": False,
+            "memory_id": "xyz123",
+            "message": "Unauthorized"
+        }
+
+        summary = summarize_delete_memory_result(result)
+        assert summary == "Delete failed: Unauthorized"
+
+    def test_delete_memory_deleted_false(self):
+        """Test delete_memory summarizer when deleted is false but status is success."""
+        from api.status_summarizers import summarize_delete_memory_result
+
+        result = {
+            "status": "success",
+            "deleted": False,
+            "memory_id": "xyz123",
+            "message": "No matching memory found"
+        }
+
+        summary = summarize_delete_memory_result(result)
+        assert summary == "Delete failed: No matching memory found"
+
+    def test_delete_memory_error_truncation(self):
+        """Test delete_memory summarizer truncates long error messages."""
+        from api.status_summarizers import summarize_delete_memory_result
+
+        long_message = "A" * 600  # Longer than 500 char limit
+        result = {
+            "status": "error",
+            "deleted": False,
+            "memory_id": "xyz123",
+            "message": long_message
+        }
+
+        summary = summarize_delete_memory_result(result)
+        # "Delete failed: " is 15 chars, so message should be truncated
+        assert len(summary) <= 500
+        assert summary.startswith("Delete failed: ")
 
 
 class TestSearchSummarizer:
@@ -487,7 +609,7 @@ class TestSummarizerRegistry:
             assert summary == "Complete"
 
     def test_all_tools_registered(self):
-        """Test that all 11 MCP tools are registered in SUMMARIZERS."""
+        """Test that all MCP tools are registered in SUMMARIZERS."""
         from api.status_summarizers import SUMMARIZERS
 
         expected_tools = [
@@ -500,6 +622,7 @@ class TestSummarizerRegistry:
             "get_stock_history",
             "get_user_profile",
             "store_memory",
+            "delete_memory",  # Story 14.5
             "retrieve_memories",
             "internet_search",
             "health_check"
@@ -507,6 +630,13 @@ class TestSummarizerRegistry:
 
         for tool in expected_tools:
             assert tool in SUMMARIZERS, f"Tool {tool} not registered in SUMMARIZERS"
+
+    def test_delete_memory_in_registry(self):
+        """Test that delete_memory summarizer is properly registered (Story 14.5)."""
+        from api.status_summarizers import SUMMARIZERS, summarize_delete_memory_result
+
+        assert "delete_memory" in SUMMARIZERS
+        assert SUMMARIZERS["delete_memory"] == summarize_delete_memory_result
 
 
 class TestEdgeCases:

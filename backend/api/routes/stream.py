@@ -148,8 +148,10 @@ async def stream_generator(
             MCPClient() as mcp_client,
             StatusContext(conversation_id, status_callback)
         ):
-            # Emit initial "thinking" status
-            emit_status("Annie is thinking...")
+            # NOTE: Initial "thinking" status is already sent by telegram_bot
+            # before connecting to SSE stream. Emitting here causes duplicate
+            # which Telegram rejects with "Message is not modified" error.
+            # emit_status("Annie is thinking...")
 
             logger.info(
                 "Starting SSE stream with tool orchestration",
@@ -615,6 +617,14 @@ async def stream_generator(
                             elif function_name == "get_user_profile":
                                 emit_status("Loading your profile...", icon="👤")
 
+                            # Drain status queue immediately so user sees status before tool executes
+                            while not status_queue.empty():
+                                try:
+                                    status_msg = status_queue.get_nowait()
+                                    yield format_status_frame(status_msg)
+                                except asyncio.QueueEmpty:
+                                    break
+
                             tool_result = await mcp_client.call_tool(function_name, arguments)
 
                             # Emit completion status for memory and profile operations
@@ -627,6 +637,14 @@ async def stream_generator(
                             elif function_name == "get_user_profile":
                                 completeness = tool_result.get("completeness", 0)
                                 emit_status(f"Profile loaded ({completeness}% complete)", icon="✅")
+
+                            # Drain status queue immediately so user sees completion status
+                            while not status_queue.empty():
+                                try:
+                                    status_msg = status_queue.get_nowait()
+                                    yield format_status_frame(status_msg)
+                                except asyncio.QueueEmpty:
+                                    break
 
                         # Add tool result to conversation
                         tool_content = json.dumps(tool_result)

@@ -25,8 +25,11 @@ from mcp_server.tools import (
     ToolRegistry,
     health_check_tool,
     store_memory_tool,
+    delete_memory_tool,
     retrieve_memories_tool,
+    compact_memories_tool,
     get_user_profile_tool,
+    update_user_profile_tool,  # Story 15.4
     get_portfolio_tool,
     add_holding_tool,
     update_holding_tool,
@@ -38,6 +41,9 @@ from mcp_server.tools import (
     list_triggers_tool,
     update_trigger_tool,
     delete_trigger_tool,
+    web_search_tool,
+    reddit_search_tool,
+    web_crawl_tool,
 )
 
 logger = get_logger(__name__)
@@ -78,8 +84,12 @@ class MCPServer:
         """Register default tools."""
         self.tool_registry.register(health_check_tool)
         self.tool_registry.register(store_memory_tool)
+        self.tool_registry.register(delete_memory_tool)
         self.tool_registry.register(retrieve_memories_tool)
+        self.tool_registry.register(compact_memories_tool)
         self.tool_registry.register(get_user_profile_tool)
+        # Profile update tool (Epic 15 - Story 15.4)
+        self.tool_registry.register(update_user_profile_tool)
         # Portfolio management tools (Epic 10)
         self.tool_registry.register(get_portfolio_tool)
         self.tool_registry.register(add_holding_tool)
@@ -94,6 +104,12 @@ class MCPServer:
         self.tool_registry.register(list_triggers_tool)
         self.tool_registry.register(update_trigger_tool)
         self.tool_registry.register(delete_trigger_tool)
+        # Web search tool (Epic 15 - Story 15.1)
+        self.tool_registry.register(web_search_tool)
+        # Reddit search tool (Epic 15 - Story 15.3) - DISABLED: Reddit OAuth not configured
+        self.tool_registry.register(reddit_search_tool)
+        # Web crawl tool (Epic 15 - Story 15.2)
+        self.tool_registry.register(web_crawl_tool)
         logger.info(f"Registered {len(self.tool_registry.tools)} tools")
 
     async def handle_request(self, request: Dict[str, Any]) -> Dict[str, Any]:

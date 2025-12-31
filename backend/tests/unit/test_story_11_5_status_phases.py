@@ -506,7 +506,8 @@ class TestIntegrationScenarios:
                         status_messages.append(data["message"])
 
             # Verify all expected statuses appear
-            assert any("thinking" in msg.lower() for msg in status_messages), "Should emit initial thinking status"
+            # NOTE: "thinking" status is emitted by telegram_bot before SSE connection,
+            # not by stream_generator (to avoid duplicates). See stream.py lines 151-154.
             assert any("Retrieving your memories" in msg for msg in status_messages), "Should emit memory retrieval start"
             assert any("Found 2 relevant memories" in msg for msg in status_messages), "Should emit memory found"
             assert any("Loading your profile" in msg for msg in status_messages), "Should emit profile loading"

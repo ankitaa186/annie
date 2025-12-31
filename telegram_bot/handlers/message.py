@@ -436,9 +436,10 @@ async def stream_response_to_telegram(
                             }
                         )
                     except Exception as e:
+                        # Include error in message since extra fields may not display
                         logger.debug(
-                            "Status edit failed",
-                            extra={"user_id": user_id, "error": str(e)}
+                            f"Status edit failed: {str(e)[:80]}",
+                            extra={"user_id": user_id, "error": str(e), "error_type": type(e).__name__}
                         )
                 continue
 
@@ -622,6 +623,25 @@ async def stream_response_to_telegram(
                         await typing_task
                     except asyncio.CancelledError:
                         pass
+
+                # Handle error frames - display error message to user
+                if chunk_type == "error":
+                    error_message = chunk_data.get("message", "An error occurred while processing your request.")
+                    error_code = chunk_data.get("code", "UNKNOWN")
+
+                    logger.warning(
+                        "Error frame received from backend",
+                        extra={
+                            "user_id": user_id,
+                            "error_code": error_code,
+                            "error_message": error_message,
+                            "event": "stream_error"
+                        }
+                    )
+
+                    # Add error message to response buffer so it gets displayed
+                    # Prefix with emoji to indicate it's an error
+                    response_buffer.append(f"⚠️ {error_message}")
 
                 logger.info(
                     f"Stream {chunk_type} frame received",
@@ -831,6 +851,33 @@ async def stream_response_to_telegram(
                     }
                 )
                 break  # Don't retry on non-rate-limit errors
+
+    # Handle error-only response (no tokens received, just error frame)
+    # In this case, edit the status message with the error
+    elif len(sent_messages) == 0 and final_text and status_message_id:
+        logger.info(
+            "Displaying error message via status message edit",
+            extra={
+                "user_id": user_id,
+                "error_text": final_text[:100],
+                "event": "error_via_status_edit"
+            }
+        )
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=status_message_id,
+                text=final_text
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to display error via status edit",
+                extra={
+                    "user_id": user_id,
+                    "error": str(e)[:100],
+                    "event": "error_status_edit_failed"
+                }
+            )
 
     # Calculate total response length
     total_length = len(final_text) if final_text else 0

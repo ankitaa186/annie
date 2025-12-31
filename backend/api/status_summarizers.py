@@ -248,7 +248,20 @@ def summarize_profile_result(result: Dict[str, Any]) -> str:
 def summarize_store_memory_result(result: Dict[str, Any]) -> str:
     """Summarize store_memory tool result.
 
-    Result shape:
+    Result shape (updated for Story 14.5):
+        {
+            "status": "success"|"error",
+            "memory_id": str,              # UUID of stored memory
+            "message": str,
+            "storage": {
+                "chromadb": bool,          # Always true on success
+                "episodic": bool,          # True if event_timestamp provided
+                "emotional": bool,         # True if emotional_state provided
+                "procedural": bool         # True if skill_name provided
+            }
+        }
+
+    Also handles legacy format:
         {
             "status": "success",
             "memories_created": 2,
@@ -262,17 +275,61 @@ def summarize_store_memory_result(result: Dict[str, Any]) -> str:
         Concise summary string
 
     Examples:
+        "Memory saved (abc123def4...)"
         "Memory saved (2 items)"
         "Memory saved"
     """
     if result.get("status") == "error":
         return result.get("message", "Failed")[:500]
 
+    # New format with memory_id (Story 14.5)
+    memory_id = result.get("memory_id")
+    if memory_id:
+        # Show truncated memory_id (first 12 chars)
+        truncated_id = memory_id[:12] if len(memory_id) > 12 else memory_id
+        return f"Memory saved ({truncated_id}...)"
+
+    # Legacy format with memories_created
     memories_created = result.get("memories_created", 0)
     if memories_created > 1:
         return f"Memory saved ({memories_created} items)"
     else:
         return "Memory saved"
+
+
+def summarize_delete_memory_result(result: Dict[str, Any]) -> str:
+    """Summarize delete_memory tool result (Story 14.5).
+
+    Result shape:
+        {
+            "status": "success"|"error",
+            "deleted": bool,
+            "memory_id": str,
+            "message": str,
+            "storage": {
+                "chromadb": bool,
+                "episodic": bool,
+                "emotional": bool,
+                "procedural": bool
+            }
+        }
+
+    Args:
+        result: Tool result dictionary
+
+    Returns:
+        Concise summary string
+
+    Examples:
+        "Memory deleted"
+        "Delete failed: Memory not found"
+        "Delete failed: Unauthorized"
+    """
+    if result.get("status") == "error" or not result.get("deleted", False):
+        message = result.get("message", "Failed")
+        return f"Delete failed: {message}"[:500]
+
+    return "Memory deleted"
 
 
 def summarize_retrieve_memories_result(result: Dict[str, Any]) -> str:
@@ -364,6 +421,166 @@ def summarize_health_check_result(result: Dict[str, Any]) -> str:
         return f"Health check: {status}"
 
 
+def summarize_web_search_result(result: Dict[str, Any]) -> str:
+    """Summarize web_search tool result.
+
+    Result shape:
+        {
+            "status": "success" | "error",
+            "provider": "tavily" | "duckduckgo",
+            "results": [...],
+            "query": "...",
+            "error_message": "..."  # Only on error
+        }
+
+    Args:
+        result: Tool result dictionary
+
+    Returns:
+        Concise summary string
+
+    Examples:
+        "Found 5 results"
+        "No results found"
+        "Search failed: rate limit"
+    """
+    if result.get("status") == "error":
+        error_msg = result.get("error_message", "Failed")
+        return f"Search failed: {error_msg}"[:50]
+
+    results = result.get("results", [])
+    count = len(results)
+
+    if count == 0:
+        return "No results found"
+    elif count == 1:
+        return "Found 1 result"
+    else:
+        return f"Found {count} results"
+
+
+def summarize_update_user_profile_result(result: Dict[str, Any]) -> str:
+    """Summarize update_user_profile tool result (Story 15.4).
+
+    Result shape:
+        {
+            "status": "success"|"error",
+            "user_id": str,
+            "category": str,
+            "field_name": str,
+            "value": any,
+            "previous_value": any,
+            "confidence": 100.0,
+            "last_updated": str,
+            "error_message": str  # On error
+        }
+
+    Args:
+        result: Tool result dictionary
+
+    Returns:
+        Concise summary string
+
+    Examples:
+        "Updated preferences/communication_style"
+        "Profile update failed: Field not found"
+    """
+    if result.get("status") == "error":
+        error_msg = result.get("error_message", "Failed")
+        return f"Profile update failed: {error_msg}"[:50]
+
+    field_name = result.get("field_name", "profile")
+    category = result.get("category", "")
+
+    # Show field with category context if available
+    if category:
+        return f"Updated {category}/{field_name}"[:50]
+    return f"Updated {field_name}"[:50]
+
+
+def summarize_web_crawl_result(result: Dict[str, Any]) -> str:
+    """Summarize web_crawl tool result.
+
+    Result shape:
+        {
+            "status": "success"|"error",
+            "provider": "crawl4ai"|"jina",
+            "url": str,
+            "title": str,
+            "content": str,
+            "metadata": {...},
+            "truncated": bool,
+            "error_message": str (on error)
+        }
+
+    Args:
+        result: Tool result dictionary
+
+    Returns:
+        Concise summary string (<50 chars when possible)
+
+    Examples:
+        "Page loaded (Understanding React...)"
+        "Page loaded"
+        "Failed: Timeout"
+    """
+    if result.get("status") == "error":
+        error_msg = result.get("error_message", "Failed")
+        # Truncate long error messages
+        if len(error_msg) > 40:
+            error_msg = error_msg[:37] + "..."
+        return f"Failed: {error_msg}"
+
+    title = result.get("title", "")
+    if title:
+        # Truncate title to fit in 50 char limit
+        if len(title) > 30:
+            title = title[:27] + "..."
+        return f"Page loaded ({title})"
+
+    return "Page loaded"
+
+
+def summarize_reddit_search_result(result: Dict[str, Any]) -> str:
+    """Summarize reddit_search tool result.
+
+    Result shape:
+        {
+            "status": "success",
+            "provider": "praw" | "json_api",
+            "query": "search query",
+            "subreddit": "python" | "all",
+            "results": [...]
+        }
+
+    Args:
+        result: Tool result dictionary
+
+    Returns:
+        Concise summary string
+
+    Examples:
+        "Found 5 posts"
+        "Found 3 posts in r/python"
+        "No posts found"
+        "Reddit search failed"
+    """
+    if result.get("status") == "error":
+        error_message = result.get("error_message", "Failed")
+        return f"Reddit search failed: {error_message}"[:50]
+
+    results = result.get("results", [])
+    count = len(results)
+    subreddit = result.get("subreddit", "all")
+
+    if count == 0:
+        return "No posts found"
+    elif subreddit and subreddit != "all":
+        return f"Found {count} post{'s' if count != 1 else ''} in r/{subreddit}"
+    else:
+        return f"Found {count} post{'s' if count != 1 else ''}"
+
+
 # Registry mapping tool names to their summarizer functions
 SUMMARIZERS = {
     "get_portfolio": summarize_portfolio_result,
@@ -375,9 +592,14 @@ SUMMARIZERS = {
     "get_stock_history": summarize_stock_history_result,
     "get_user_profile": summarize_profile_result,
     "store_memory": summarize_store_memory_result,
+    "delete_memory": summarize_delete_memory_result,  # Story 14.5
     "retrieve_memories": summarize_retrieve_memories_result,
     "internet_search": summarize_internet_search_result,
     "health_check": summarize_health_check_result,
+    "update_user_profile": summarize_update_user_profile_result,  # Story 15.4
+    "web_search": summarize_web_search_result,  # Story 15.1
+    "reddit_search": summarize_reddit_search_result,  # Story 15.3
+    "web_crawl": summarize_web_crawl_result,  # Story 15.2
 }
 
 

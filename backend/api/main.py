@@ -210,11 +210,29 @@ async def check_mcp_server_health() -> str:
         return "unavailable"
 
 
-def check_redis_health() -> str:
+async def check_redis_health() -> str:
     """Check Redis health via connection test."""
-    # TODO: Implement actual Redis health check in Story 2.5
-    # For now, return "ok" as placeholder
-    return "ok"
+    try:
+        redis_host = config.get("REDIS_HOST", "redis")
+        redis_port = int(config.get("REDIS_PORT", 6379))
+
+        client = redis.asyncio.Redis(
+            host=redis_host,
+            port=redis_port,
+            decode_responses=True
+        )
+        await client.ping()
+        await client.aclose()
+        return "ok"
+    except Exception as e:
+        logger.warning(
+            "Redis health check failed",
+            extra={
+                "error": str(e),
+                "error_type": type(e).__name__
+            }
+        )
+        return "unavailable"
 
 
 def check_llm_api_health() -> str:
@@ -467,7 +485,7 @@ async def full_health_check() -> JSONResponse:
     # Check all components
     components = {
         "mcp_server": await check_mcp_server_health(),
-        "redis": check_redis_health(),
+        "redis": await check_redis_health(),
         "llm_api": check_llm_api_health(),
         "agentic_memories": await check_agentic_memories_health(),
         "proactive_worker": await check_proactive_worker_health(),

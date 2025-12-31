@@ -98,10 +98,96 @@ NO_MEMORY_CONTEXT = "No past decision history available for this user."
 
 # Tool usage instructions
 TOOL_USAGE_INSTRUCTIONS = """
-IMPORTANT: When using memory tools (store_memory, retrieve_memories), ALWAYS use the exact user_id provided in the system message.
-Never use generic IDs like 'anonymous_user' - always use the specific user_id.
+## TOOL USAGE REQUIREMENTS
+
+### Memory Tools (store_memory, retrieve_memories, delete_memory)
+- ALWAYS use the exact user_id from the system message
+- Never use generic IDs like 'anonymous_user'
+- store_memory: Only for critical, permanent information (see Memory Management section)
+- delete_memory: First retrieve the memory to get its ID, then confirm with user, then delete
+- retrieve_memories: Use liberally for context and personalization
+
+### User ID
+Current user ID for all tool calls: {user_id}
 """
 
+
+# Profile update guidance section (Story 15.4)
+PROFILE_UPDATE_GUIDANCE = """
+## PROFILE UPDATES
+
+When the user shares new information about themselves, use the update_user_profile tool:
+
+**Use when:**
+- User explicitly shares personal details: "I just moved to Seattle"
+- User corrects information: "Actually, I prefer formal communication"
+- User states new goals: "I'm now focusing on retirement planning"
+
+**Do NOT use when:**
+- Information is temporary: "I'm feeling tired today"
+- Already in profile (check first with get_user_profile)
+- Speculative: "You seem like someone who..."
+
+**Categories:**
+- basics: name, location, occupation, age
+- preferences: communication_style, topics_of_interest
+- goals: short_term, long_term, current_focus
+- interests: hobbies, favorite_topics
+- background: education, work_history
+"""
+
+
+# Memory management section (Story 14.5)
+MEMORY_MANAGEMENT_SECTION = """
+## MEMORY MANAGEMENT
+
+Annie automatically extracts and stores memories from conversations in the background.
+You do NOT need to call store_memory for routine information.
+
+### When to Use store_memory (Explicit Storage)
+
+ONLY use store_memory for CRITICAL information that:
+1. User explicitly asks you to remember ("Remember that I...", "Don't forget...")
+2. Is a permanent preference/constraint ("I'm allergic to...", "Never recommend...")
+3. Is a life-changing decision with lasting impact
+4. Would be dangerous to forget (medical conditions, safety constraints)
+
+**Good Examples:**
+- "User is severely allergic to shellfish - carries EpiPen"
+- "User's risk tolerance is conservative - never recommend high-risk investments"
+- "User's mother passed away in March 2024 - sensitive topic"
+
+**Bad Examples (background extraction handles these):**
+- Daily activities or routine conversations
+- Temporary preferences or moods
+- Information already in their profile
+- Topics just discussed (already being extracted)
+
+### When to Use delete_memory
+
+Use delete_memory when:
+1. User says something was remembered incorrectly
+2. User explicitly asks to forget something
+3. You find conflicting or duplicate memories
+4. Information is outdated and causing confusion
+
+**Deletion Workflow:**
+1. First call retrieve_memories to find the memory ID
+2. Confirm with the user which memory to delete
+3. Call delete_memory with the memory_id
+
+**Important:** Deletion cannot be undone. Always confirm with the user before deleting.
+
+### When to Use retrieve_memories
+
+Use retrieve_memories LIBERALLY when:
+1. User asks about past decisions or conversations
+2. Making recommendations that should consider history
+3. User references something from the past
+4. You need context about user preferences
+
+Retrieval is fast (<2s) and should be used proactively.
+"""
 
 # Proactive capabilities section
 PROACTIVE_CAPABILITIES_SECTION = """
@@ -697,6 +783,12 @@ def build_system_prompt(
     # Add proactive capabilities section (core capability, goes early)
     prompt_parts.append("\n\n" + PROACTIVE_CAPABILITIES_SECTION)
 
+    # Add memory management section (Story 14.5 - after proactive capabilities)
+    prompt_parts.append("\n\n" + MEMORY_MANAGEMENT_SECTION)
+
+    # Add profile update guidance section (Story 15.4 - after memory management)
+    prompt_parts.append("\n\n" + PROFILE_UPDATE_GUIDANCE)
+
     # Add user_id if provided
     if user_id:
         prompt_parts.append(f"\nCurrent user ID: {user_id}")
@@ -754,7 +846,8 @@ def build_system_prompt(
 
     # Add tool usage instructions if user_id is provided
     if include_tool_instructions and user_id:
-        prompt_parts.append("\n\n" + TOOL_USAGE_INSTRUCTIONS)
+        # Format the TOOL_USAGE_INSTRUCTIONS with user_id
+        prompt_parts.append("\n\n" + TOOL_USAGE_INSTRUCTIONS.format(user_id=user_id))
 
     return "\n".join(prompt_parts)
 
