@@ -454,13 +454,15 @@ async def fire_trigger_report(
         # Don't re-raise - allow worker to continue
 
 
-@observe(name="handle_condition_trigger", as_type="span")
 async def handle_condition_trigger(
     trigger: Dict[str, Any],
     intents_client: IntentsClient
 ) -> bool:
     """
     Evaluate condition trigger and fire if not met.
+
+    Note: @observe decorator removed to reduce Langfuse data - the nested
+    evaluate_condition span provides sufficient observability.
 
     Args:
         trigger: Condition trigger intent object

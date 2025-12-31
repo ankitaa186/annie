@@ -135,7 +135,6 @@ class PriceEvaluator(Evaluator):
     # Ticker validation pattern
     TICKER_PATTERN = re.compile(r'^[A-Z0-9\.]{1,10}$')
 
-    @observe(name="price_evaluator", as_type="span")
     async def evaluate(self, expression: str, user_id: str) -> EvaluatorResult:
         """
         Evaluate price condition.
@@ -457,7 +456,6 @@ class PortfolioEvaluator(Evaluator):
         r'(any_holding_change|any_holding_down|total_value|total_change)\s*([<>]=?)\s*([\d.]+)%?'
     )
 
-    @observe(name="portfolio_evaluator", as_type="span")
     async def evaluate(self, expression: str, user_id: str) -> EvaluatorResult:
         """
         Evaluate portfolio condition.
@@ -799,7 +797,6 @@ class SilenceEvaluator(Evaluator):
     # Expression parsing regex: "silence OPERATOR DURATION"
     EXPRESSION_PATTERN = re.compile(r'silence\s*([<>]=?)\s*(\d+)(h|d|m)')
 
-    @observe(name="silence_evaluator", as_type="span")
     async def evaluate(self, expression: str, user_id: str) -> EvaluatorResult:
         """
         Evaluate silence condition.
@@ -1042,7 +1039,6 @@ def get_evaluator(condition_type: str) -> Evaluator:
 # Convenience Function
 # ============================================================================
 
-@observe(name="evaluate_condition", as_type="span")
 async def evaluate_condition(
     condition_type: str,
     expression: str,
@@ -1052,6 +1048,9 @@ async def evaluate_condition(
     Convenience function to evaluate a condition.
 
     Automatically selects the appropriate evaluator and handles cleanup.
+
+    Note: @observe decorator removed to reduce Langfuse data volume.
+    Logging provides sufficient observability for condition evaluation.
 
     Args:
         condition_type: Type of condition ("price", "portfolio", "silence")
