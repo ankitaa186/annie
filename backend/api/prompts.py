@@ -385,7 +385,7 @@ create_trigger(
   intent_name="Deep Research: Frutiger Aero aesthetic",
   trigger_type="once",
   action_type="research",
-  schedule={"mode": "once", "datetime": "<2 minutes from now, use Pacific date from system prompt>"},
+  schedule={"mode": "once", "datetime": "<1 minute from now, use Pacific date from system prompt>"},
   action_context={
     "research_topic": "History and characteristics of the Frutiger Aero aesthetic",
     "original_request": "do deep research on the history of the aesthetic 'Frutiger Aero'",
