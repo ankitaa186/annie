@@ -111,7 +111,10 @@ async def get_user_profile_tool_handler(
                 "preferences": profile.get("preferences", {}),
                 "goals": profile.get("goals", {}),
                 "interests": profile.get("interests", {}),
-                "background": profile.get("background", {})
+                "background": profile.get("background", {}),
+                "health": profile.get("health", {}),
+                "personality": profile.get("personality", {}),
+                "values": profile.get("values", {})
             }
 
     except httpx.TimeoutException as e:
@@ -172,16 +175,17 @@ async def get_user_profile_tool_handler(
 get_user_profile_tool = {
     "name": "get_user_profile",
     "description": (
-        "Retrieve user profile with structured data automatically extracted from conversations. "
-        "Returns 21 fields across 5 categories: "
-        "(1) Basics - name, age, location, occupation, timezone; "
-        "(2) Preferences - communication style, topics of interest, language; "
-        "(3) Goals - short-term goals, long-term goals, values; "
-        "(4) Interests - hobbies, expertise areas; "
-        "(5) Background - education, work history, life events. "
-        "Includes a completeness percentage (0-100) indicating how much is known. "
-        "Use this to personalize responses, understand user context, tailor recommendations, "
-        "or reference what you know about them. Fields may be null if not yet learned. Profile extraction happens automatically during conversation storage, you can nudge the user to give you more information if the profile is incomplete."
+        "Retrieve user profile automatically extracted from past conversations. "
+        "Returns 8 categories: "
+        "(1) Basics - name, age, birthday, location, occupation, family_status, children, spouse; "
+        "(2) Preferences - communication_style, risk_tolerance, dietary_restrictions, gift_preferences; "
+        "(3) Goals - short_term, long_term, financial_goals, career_goals, bucket_list; "
+        "(4) Interests - hobbies, sports, favorite_topics, travel_destinations; "
+        "(5) Background - skills, work_history, education_history, vehicle; "
+        "(6) Health - allergies, dietary_needs, health_conditions, clothing_sizes; "
+        "(7) Personality - personality_type, strengths, fears, stress_response; "
+        "(8) Values - life_values, philanthropy, spiritual_alignment, dealbreakers. "
+        "Includes completeness percentage (0-100). Fields may be null if not yet learned."
     ),
     "inputSchema": {
         "type": "object",
@@ -201,8 +205,88 @@ get_user_profile_tool = {
 # Update User Profile Tool
 # =============================================================================
 
-# Allowed categories for profile updates
-ALLOWED_PROFILE_CATEGORIES = {"basics", "preferences", "goals", "interests", "background"}
+# Allowed categories for profile updates (must match agentic-memories extraction)
+ALLOWED_PROFILE_CATEGORIES = {
+    "basics", "preferences", "goals", "interests",
+    "background", "health", "personality", "values"
+}
+
+# Canonical field names per category (from agentic-memories profile extraction prompt)
+# Using these exact names ensures consistency with automatic extraction
+CANONICAL_FIELDS = {
+    "basics": {
+        "name", "nicknames", "age", "birthday", "location", "pronouns",
+        "occupation", "education", "family_status", "children", "spouse",
+        "pets", "siblings", "languages", "important_dates"
+    },
+    "preferences": {
+        "communication_style", "love_language", "risk_tolerance", "investing_style",
+        "dietary_restrictions", "food_preferences", "beverage_preferences",
+        "music_preferences", "movie_preferences", "book_preferences",
+        "color_preferences", "gift_ideas", "gift_preferences", "pet_peeves",
+        "travel_preferences", "sleep_schedule", "work_schedule", "brokerage_platforms"
+    },
+    "goals": {
+        "short_term", "long_term", "financial_goals", "career_goals",
+        "aspirations", "bucket_list"
+    },
+    "interests": {
+        "hobbies", "sports", "music", "books", "movies_tv", "learning_areas",
+        "favorite_topics", "activities", "travel_destinations", "collections"
+    },
+    "background": {
+        "skills", "achievements", "education_history", "work_history",
+        "current_employer", "specialization", "family_background",
+        "cultural_background", "vehicle", "investing_experience", "how_we_met"
+    },
+    "health": {
+        "allergies", "dietary_needs", "health_conditions", "medications",
+        "clothing_sizes", "sensory_preferences", "vision_correction"
+    },
+    "personality": {
+        "personality_type", "strengths", "fears", "stress_response",
+        "conflict_style", "social_battery", "nostalgia_triggers", "communication_quirks"
+    },
+    "values": {
+        "life_values", "philanthropy", "spiritual_alignment", "dealbreakers"
+    }
+}
+
+# Field name aliases - map common variants to canonical names
+# (matches agentic-memories ProfileExtractor.FIELD_NAME_ALIASES)
+FIELD_NAME_ALIASES = {
+    # Date variants
+    "birthdate": "birthday",
+    "birth_date": "birthday",
+    "dob": "birthday",
+    # Singular → plural
+    "brokerage_platform": "brokerage_platforms",
+    "hobby": "hobbies",
+    "skill": "skills",
+    "language": "languages",
+    "nickname": "nicknames",
+    # Goal duplicates
+    "retirement_goal": "long_term",
+    "retirement_goals": "long_term",
+    "targets": "long_term",
+    "plans": "short_term",
+    # Occupation variants
+    "job": "occupation",
+    "work": "occupation",
+    # Location variants
+    "city": "location",
+    "country": "location",
+    # Family consolidation
+    "spouse_occupation": "spouse",
+    "spouse_employer": "spouse",
+    "wife": "spouse",
+    "husband": "spouse",
+    "daughter_age": "children",
+    "son_age": "children",
+    # Skills consolidation
+    "programming_languages": "skills",
+    "technical_skills": "skills",
+}
 
 
 async def update_user_profile_tool_handler(
@@ -221,8 +305,9 @@ async def update_user_profile_tool_handler(
 
     Args:
         user_id: User identifier
-        category: Profile category (basics, preferences, goals, interests, background)
-        field_name: Field name within the category
+        category: Profile category (basics, preferences, goals, interests, background,
+                  health, personality, values)
+        field_name: Field name within the category (must be a canonical field name)
         value: New value (string, number, boolean, or array)
         reason: Optional reason for the update (for audit trail)
 
@@ -245,6 +330,41 @@ async def update_user_profile_tool_handler(
         return {
             "status": "error",
             "error_message": f"Invalid category '{category}'. Allowed: {', '.join(sorted(ALLOWED_PROFILE_CATEGORIES))}",
+            "error_code": "VALIDATION_ERROR"
+        }
+
+    # Apply field name alias normalization (matches agentic-memories extraction)
+    original_field_name = field_name
+    if field_name in FIELD_NAME_ALIASES:
+        field_name = FIELD_NAME_ALIASES[field_name]
+        logger.info(
+            "Normalized field name alias",
+            extra={
+                "user_id": user_id,
+                "original": original_field_name,
+                "canonical": field_name
+            }
+        )
+
+    # Validate field name against canonical fields for the category
+    canonical_fields = CANONICAL_FIELDS.get(category, set())
+    if field_name not in canonical_fields:
+        logger.warning(
+            "Non-canonical field name for profile update",
+            extra={
+                "user_id": user_id,
+                "category": category,
+                "field_name": field_name,
+                "canonical_fields": sorted(canonical_fields),
+                "error": "VALIDATION_ERROR"
+            }
+        )
+        return {
+            "status": "error",
+            "error_message": (
+                f"Invalid field '{field_name}' for category '{category}'. "
+                f"Valid fields: {', '.join(sorted(canonical_fields))}"
+            ),
             "error_code": "VALIDATION_ERROR"
         }
 
@@ -445,24 +565,22 @@ async def update_user_profile_tool_handler(
 
 update_user_profile_tool = {
     "name": "update_user_profile",
-    "description": """Update a specific field in the user's profile.
-
-Use this tool when the user:
-1. Explicitly tells you new information about themselves ("I just moved to Seattle")
-2. Corrects previously known information ("Actually, I prefer formal communication")
-3. Expresses a preference or goal change ("I'm now focusing on retirement planning")
-
-Categories and common fields:
-- basics: name, age, location, occupation, timezone
-- preferences: communication_style, topics_of_interest, response_length
-- goals: short_term, long_term, current_focus
-- interests: hobbies, favorite_topics, dislikes
-- background: education, work_history, family
-
-Do NOT use for:
-- Information already in their profile (check first with get_user_profile)
-- Temporary moods or states ("I'm feeling tired today")
-- Speculative information ("You seem like someone who...")""",
+    "description": (
+        "Update a field in the user's profile when they explicitly share persistent personal info. "
+        "USE FOR: (1) identity changes ('I moved to Seattle'); (2) corrections ('my name is spelled...'); "
+        "(3) preference/goal updates ('I'm focusing on retirement'). "
+        "DO NOT USE FOR: task instructions, temporary states, transient data (watchlists, cash), or speculation. "
+        "CATEGORIES: "
+        "(1) Basics - name, nicknames, age, birthday, location, occupation, family_status, children, spouse, pets; "
+        "(2) Preferences - communication_style, risk_tolerance, dietary_restrictions, gift_preferences, investing_style; "
+        "(3) Goals - short_term, long_term, financial_goals, career_goals, bucket_list; "
+        "(4) Interests - hobbies, sports, favorite_topics, travel_destinations, collections; "
+        "(5) Background - skills, work_history, education_history, vehicle, investing_experience; "
+        "(6) Health - allergies, dietary_needs, health_conditions, medications; "
+        "(7) Personality - personality_type, strengths, fears, stress_response; "
+        "(8) Values - life_values, philanthropy, dealbreakers. "
+        "Use arrays for lists, objects for structured data. Common aliases auto-normalize (birthdate→birthday)."
+    ),
     "inputSchema": {
         "type": "object",
         "properties": {
@@ -472,15 +590,24 @@ Do NOT use for:
             },
             "category": {
                 "type": "string",
-                "enum": ["basics", "preferences", "goals", "interests", "background"],
+                "enum": ["basics", "preferences", "goals", "interests", "background",
+                         "health", "personality", "values"],
                 "description": "Profile category to update"
             },
             "field_name": {
                 "type": "string",
-                "description": "Field name within the category (e.g., 'location', 'communication_style')"
+                "description": (
+                    "Canonical field name within the category. Must be one of the "
+                    "exact field names listed above. Common aliases (birthdate→birthday, "
+                    "job→occupation) are auto-normalized."
+                )
             },
             "value": {
-                "description": "New value (string, number, boolean, or array)"
+                "description": (
+                    "New value. Use string for simple fields, arrays for lists "
+                    "(e.g., hobbies: ['hiking', 'reading']), objects for structured data "
+                    "(e.g., spouse: {'name': 'Jane', 'occupation': 'engineer'})"
+                )
             },
             "reason": {
                 "type": "string",
