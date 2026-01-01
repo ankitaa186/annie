@@ -16,7 +16,9 @@ Redis Keys:
 """
 
 import asyncio
+import html
 import json
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -25,6 +27,84 @@ from typing import Optional
 import redis.asyncio as redis
 from telegram import Bot
 from telegram.error import RetryAfter, BadRequest, TelegramError
+
+
+def markdown_to_telegram_html(text: str) -> str:
+    """
+    Convert markdown from LLM output to Telegram-safe HTML.
+
+    Handles common markdown patterns:
+    - ***bold italic*** → <b><i>bold italic</i></b>
+    - **bold** or __bold__ → <b>bold</b>
+    - *italic* or _italic_ → <i>italic</i>
+    - `code` → <code>code</code>
+    - ```code blocks``` → <pre>code</pre>
+    - [link](url) → <a href="url">link</a>
+    - ### headers → <b>header</b>
+
+    Args:
+        text: Raw markdown text from LLM
+
+    Returns:
+        HTML-formatted text safe for Telegram
+    """
+    if not text:
+        return text
+
+    # First, escape HTML special characters to prevent injection
+    # But we need to do this carefully to not break our own tags
+    text = html.escape(text)
+
+    # Code blocks (``` ... ```) - must be done before inline code
+    # Handle multi-line code blocks
+    text = re.sub(
+        r'```(?:\w+)?\n?(.*?)```',
+        r'<pre>\1</pre>',
+        text,
+        flags=re.DOTALL
+    )
+
+    # Inline code (`code`)
+    text = re.sub(r'`([^`]+)`', r'<code>\1</code>', text)
+
+    # Bold+Italic combined: ***text*** → <b><i>text</i></b>
+    # Must be done BEFORE separate bold/italic to avoid conflicts
+    text = re.sub(r'\*\*\*([^*]+)\*\*\*', r'<b><i>\1</i></b>', text)
+    text = re.sub(r'___([^_]+)___', r'<b><i>\1</i></b>', text)
+
+    # Bold: **text** or __text__
+    text = re.sub(r'\*\*([^*]+)\*\*', r'<b>\1</b>', text)
+    text = re.sub(r'__([^_]+)__', r'<b>\1</b>', text)
+
+    # Italic: *text* or _text_ (but not inside words like file_name)
+    # Use word boundaries to avoid matching underscores in identifiers
+    text = re.sub(r'(?<!\w)\*([^*]+)\*(?!\w)', r'<i>\1</i>', text)
+    text = re.sub(r'(?<!\w)_([^_]+)_(?!\w)', r'<i>\1</i>', text)
+
+    # Links: [text](url)
+    text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', text)
+
+    # Headers: ### Header → bold (Telegram doesn't support headers)
+    text = re.sub(r'^#{1,6}\s*(.+)$', r'<b>\1</b>', text, flags=re.MULTILINE)
+
+    # Strikethrough: ~~text~~ → <s>text</s>
+    text = re.sub(r'~~([^~]+)~~', r'<s>\1</s>', text)
+
+    # Clean up escaped characters that markdown uses
+    # (html.escape already handled &, <, > so we just need backslash escapes)
+    text = text.replace(r'\*', '*')
+    text = text.replace(r'\_', '_')
+    text = text.replace(r'\`', '`')
+    text = text.replace(r'\#', '#')
+    text = text.replace(r'\.', '.')
+    text = text.replace(r'\-', '-')
+    text = text.replace(r'\!', '!')
+    text = text.replace(r'\[', '[')
+    text = text.replace(r'\]', ']')
+    text = text.replace(r'\(', '(')
+    text = text.replace(r'\)', ')')
+
+    return text
 
 from api.config import get_config
 from api.logging import get_logger
@@ -213,6 +293,21 @@ class TelegramDelivery:
                 delivery_ms = int((time.time() - start_time) * 1000)
                 return DeliveryResult(success=False, message_id=None, error=error_msg, delivery_ms=delivery_ms)
 
+            # Convert markdown to Telegram-safe HTML
+            # LLM output uses markdown (e.g., **bold**, ###) but Telegram expects HTML
+            html_message = markdown_to_telegram_html(message)
+
+            logger.debug(
+                "Converted markdown to HTML for Telegram",
+                extra={
+                    "user_id": user_id,
+                    "trigger_id": trigger_id,
+                    "original_length": len(message),
+                    "html_length": len(html_message),
+                    "event": "markdown_to_html_conversion"
+                }
+            )
+
             # Retry loop for rate limiting
             for attempt in range(1, max_retries + 1):
                 try:
@@ -229,10 +324,10 @@ class TelegramDelivery:
                         }
                     )
 
-                    # Send message via Telegram API
+                    # Send message via Telegram API (using HTML-converted message)
                     message_obj = await self.bot.send_message(
                         chat_id=chat_id,
-                        text=message,
+                        text=html_message,
                         parse_mode=parse_mode
                     )
 

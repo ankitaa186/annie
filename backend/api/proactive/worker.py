@@ -832,7 +832,7 @@ class WorkerSettings:
 
     # Worker limits
     max_jobs = 10  # Max concurrent jobs
-    job_timeout = 600  # Job timeout in seconds (10 min - matches agent internal timeout)
+    job_timeout = 1800  # Job timeout in seconds (30 min - supports deep research tasks)
 
     # Logging
     log_level = config.get("LOG_LEVEL", "INFO")
