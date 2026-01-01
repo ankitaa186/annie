@@ -254,19 +254,19 @@ class TestGeminiToolAdapterResultFormatting:
         """Test that large results are truncated."""
         adapter = GeminiToolAdapter()
 
-        # Create result larger than 10KB (default max_size)
-        large_data = "x" * 15000
+        # Create result larger than 30KB (default max_size)
+        large_data = "x" * 35000
         tool_result = {"data": large_data}
 
         formatted = adapter.format_tool_result_for_gemini(
             "large_tool",
             tool_result,
-            max_size=10000
+            max_size=30000
         )
 
         assert formatted["name"] == "large_tool"
         assert formatted["response"]["truncated"] is True
-        assert formatted["response"]["original_size"] > 10000
+        assert formatted["response"]["original_size"] > 30000
         assert "warning" in formatted["response"]
 
     def test_format_tool_result_with_custom_max_size(self):
