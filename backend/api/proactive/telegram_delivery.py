@@ -26,7 +26,36 @@ from typing import Optional
 
 import redis.asyncio as redis
 from telegram import Bot
+from telegram.constants import ChatAction
 from telegram.error import RetryAfter, BadRequest, TelegramError
+
+
+def strip_html_tags(text: str) -> str:
+    """Remove all HTML tags from text, used as fallback when HTML parsing fails."""
+    return re.sub(r'<[^>]+>', '', text)
+
+
+def validate_html_tags(text: str) -> bool:
+    """
+    Check if HTML tags are properly balanced.
+    Returns True if all tags are balanced, False otherwise.
+    """
+    # Simple tag matching for Telegram-supported tags
+    tag_pattern = re.compile(r'<(/?)([a-z]+)(?:\s[^>]*)?>')
+    stack = []
+
+    for match in tag_pattern.finditer(text):
+        is_closing = match.group(1) == '/'
+        tag_name = match.group(2)
+
+        if is_closing:
+            if not stack or stack[-1] != tag_name:
+                return False
+            stack.pop()
+        else:
+            stack.append(tag_name)
+
+    return len(stack) == 0
 
 
 def markdown_to_telegram_html(text: str) -> str:
@@ -64,22 +93,26 @@ def markdown_to_telegram_html(text: str) -> str:
         flags=re.DOTALL
     )
 
-    # Inline code (`code`)
-    text = re.sub(r'`([^`]+)`', r'<code>\1</code>', text)
+    # Inline code (`code`) - non-greedy to avoid spanning multiple code spans
+    text = re.sub(r'`([^`]+?)`', r'<code>\1</code>', text)
 
     # Bold+Italic combined: ***text*** → <b><i>text</i></b>
     # Must be done BEFORE separate bold/italic to avoid conflicts
-    text = re.sub(r'\*\*\*([^*]+)\*\*\*', r'<b><i>\1</i></b>', text)
-    text = re.sub(r'___([^_]+)___', r'<b><i>\1</i></b>', text)
+    # Use non-greedy matching
+    text = re.sub(r'\*\*\*(.+?)\*\*\*', r'<b><i>\1</i></b>', text)
+    text = re.sub(r'___(.+?)___', r'<b><i>\1</i></b>', text)
 
-    # Bold: **text** or __text__
-    text = re.sub(r'\*\*([^*]+)\*\*', r'<b>\1</b>', text)
-    text = re.sub(r'__([^_]+)__', r'<b>\1</b>', text)
+    # Bold: **text** or __text__ - non-greedy
+    text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
+    text = re.sub(r'__(.+?)__', r'<b>\1</b>', text)
 
-    # Italic: *text* or _text_ (but not inside words like file_name)
-    # Use word boundaries to avoid matching underscores in identifiers
-    text = re.sub(r'(?<!\w)\*([^*]+)\*(?!\w)', r'<i>\1</i>', text)
-    text = re.sub(r'(?<!\w)_([^_]+)_(?!\w)', r'<i>\1</i>', text)
+    # Italic with asterisks: *text* - non-greedy, with word boundary checks
+    # Must not be preceded or followed by word chars to avoid matching mid-word
+    text = re.sub(r'(?<!\w)\*(.+?)\*(?!\w)', r'<i>\1</i>', text)
+
+    # Skip underscore italic - it's too error-prone with technical text
+    # containing variable_names, file_paths, etc.
+    # text = re.sub(r'(?<!\w)_(.+?)_(?!\w)', r'<i>\1</i>', text)
 
     # Links: [text](url)
     text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', text)
@@ -88,7 +121,7 @@ def markdown_to_telegram_html(text: str) -> str:
     text = re.sub(r'^#{1,6}\s*(.+)$', r'<b>\1</b>', text, flags=re.MULTILINE)
 
     # Strikethrough: ~~text~~ → <s>text</s>
-    text = re.sub(r'~~([^~]+)~~', r'<s>\1</s>', text)
+    text = re.sub(r'~~(.+?)~~', r'<s>\1</s>', text)
 
     # Clean up escaped characters that markdown uses
     # (html.escape already handled &, <, > so we just need backslash escapes)
@@ -104,7 +137,68 @@ def markdown_to_telegram_html(text: str) -> str:
     text = text.replace(r'\(', '(')
     text = text.replace(r'\)', ')')
 
+    # Validate that HTML tags are balanced
+    if not validate_html_tags(text):
+        # If tags are unbalanced, strip all HTML and return escaped text
+        # This is safer than sending malformed HTML to Telegram
+        return html.escape(strip_html_tags(text))
+
     return text
+
+
+# Telegram message length limit (use 4000 for safety, actual limit is 4096)
+MAX_MESSAGE_LENGTH = 4000
+
+
+def split_long_message(text: str, max_length: int = MAX_MESSAGE_LENGTH) -> list[str]:
+    """
+    Split a long message into chunks that fit within Telegram's limit.
+
+    Tries to split at natural breakpoints (double newline, single newline, space).
+
+    Args:
+        text: The message text to split
+        max_length: Maximum length per chunk (default 4000)
+
+    Returns:
+        List of message chunks
+    """
+    if len(text) <= max_length:
+        return [text]
+
+    chunks = []
+    remaining = text
+
+    while len(remaining) > max_length:
+        # Find best split point
+        split_point = max_length
+
+        # Try to split at double newline (paragraph break) first
+        for i in range(max_length - 1, max(0, max_length - 500), -1):
+            if remaining[i:i+2] == '\n\n':
+                split_point = i + 2
+                break
+        else:
+            # Try single newline
+            for i in range(max_length - 1, max(0, max_length - 300), -1):
+                if remaining[i] == '\n':
+                    split_point = i + 1
+                    break
+            else:
+                # Try space
+                for i in range(max_length - 1, max(0, max_length - 100), -1):
+                    if remaining[i] == ' ':
+                        split_point = i + 1
+                        break
+
+        chunks.append(remaining[:split_point].rstrip())
+        remaining = remaining[split_point:].lstrip()
+
+    if remaining:
+        chunks.append(remaining)
+
+    return chunks
+
 
 from api.config import get_config
 from api.logging import get_logger
@@ -324,12 +418,44 @@ class TelegramDelivery:
                         }
                     )
 
-                    # Send message via Telegram API (using HTML-converted message)
-                    message_obj = await self.bot.send_message(
+                    # Split long messages into chunks
+                    message_chunks = split_long_message(html_message)
+                    total_chunks = len(message_chunks)
+
+                    if total_chunks > 1:
+                        logger.info(
+                            "Splitting long message into chunks",
+                            extra={
+                                "user_id": user_id,
+                                "trigger_id": trigger_id,
+                                "total_chunks": total_chunks,
+                                "original_length": len(html_message),
+                                "event": "proactive_message_split"
+                            }
+                        )
+
+                    # Send typing indicator to show user we're about to send
+                    await self.bot.send_chat_action(
                         chat_id=chat_id,
-                        text=html_message,
-                        parse_mode=parse_mode
+                        action=ChatAction.TYPING
                     )
+
+                    # Send each chunk
+                    message_obj = None
+                    for chunk_idx, chunk in enumerate(message_chunks):
+                        message_obj = await self.bot.send_message(
+                            chat_id=chat_id,
+                            text=chunk,
+                            parse_mode=parse_mode
+                        )
+                        # Small delay between chunks to avoid rate limiting
+                        if chunk_idx < total_chunks - 1:
+                            await asyncio.sleep(0.5)
+                            # Show typing indicator for next chunk
+                            await self.bot.send_chat_action(
+                                chat_id=chat_id,
+                                action=ChatAction.TYPING
+                            )
 
                     delivery_ms = int((time.time() - start_time) * 1000)
 
@@ -342,11 +468,12 @@ class TelegramDelivery:
                             "message_id": message_obj.message_id,
                             "attempt": attempt,
                             "delivery_ms": delivery_ms,
+                            "total_chunks": total_chunks,
                             "event": "proactive_delivery_success"
                         }
                     )
 
-                    # Record message for feedback detection (Story 13.10)
+                    # Record last message for feedback detection (Story 13.10)
                     try:
                         await record_proactive_message(
                             self.redis_client,
@@ -414,14 +541,79 @@ class TelegramDelivery:
                         )
 
         except BadRequest as e:
-            error_msg = f"Invalid Telegram request: {str(e)}"
+            error_str = str(e)
+            # Check if it's a parsing error - retry with plain text
+            if "parse entities" in error_str.lower() or "can't find end tag" in error_str.lower():
+                logger.warning(
+                    "HTML parsing failed, retrying with plain text",
+                    extra={
+                        "user_id": user_id,
+                        "trigger_id": trigger_id,
+                        "error": error_str,
+                        "event": "proactive_delivery_html_fallback"
+                    }
+                )
+                try:
+                    # Strip all HTML and send as plain text
+                    plain_message = html.escape(strip_html_tags(message))
+                    message_chunks = split_long_message(plain_message)
+
+                    # Send typing indicator
+                    await self.bot.send_chat_action(
+                        chat_id=chat_id,
+                        action=ChatAction.TYPING
+                    )
+
+                    message_obj = None
+                    for chunk_idx, chunk in enumerate(message_chunks):
+                        message_obj = await self.bot.send_message(
+                            chat_id=chat_id,
+                            text=chunk,
+                            parse_mode=None  # No parsing, plain text
+                        )
+                        if chunk_idx < len(message_chunks) - 1:
+                            await asyncio.sleep(0.5)
+
+                    delivery_ms = int((time.time() - start_time) * 1000)
+                    logger.info(
+                        "Proactive message delivered as plain text (fallback)",
+                        extra={
+                            "user_id": user_id,
+                            "trigger_id": trigger_id,
+                            "message_id": message_obj.message_id,
+                            "delivery_ms": delivery_ms,
+                            "event": "proactive_delivery_success_plaintext"
+                        }
+                    )
+
+                    # Record for feedback tracking
+                    try:
+                        await record_proactive_message(
+                            self.redis_client, user_id, trigger_id, str(message_obj.message_id)
+                        )
+                    except Exception:
+                        pass  # Don't fail on recording error
+
+                    return DeliveryResult(
+                        success=True,
+                        message_id=str(message_obj.message_id),
+                        error=None,
+                        delivery_ms=delivery_ms
+                    )
+                except Exception as fallback_error:
+                    error_msg = f"Plain text fallback also failed: {str(fallback_error)}"
+                    delivery_ms = int((time.time() - start_time) * 1000)
+                    logger.error(error_msg, extra={"user_id": user_id, "trigger_id": trigger_id})
+                    return DeliveryResult(success=False, message_id=None, error=error_msg, delivery_ms=delivery_ms)
+
+            error_msg = f"Invalid Telegram request: {error_str}"
             delivery_ms = int((time.time() - start_time) * 1000)
             logger.error(
                 error_msg,
                 extra={
                     "user_id": user_id,
                     "trigger_id": trigger_id,
-                    "error": str(e),
+                    "error": error_str,
                     "error_type": "BadRequest",
                     "delivery_ms": delivery_ms,
                     "event": "proactive_delivery_failed_bad_request"

@@ -284,7 +284,7 @@ class LLMClient:
         Fallback chains:
         - grok-4 → chatgpt-5
         - chatgpt-5 → grok-4
-        - gemini-3-pro-preview → gemini-3-flash-preview → grok-4
+        - gemini-3-pro-preview → chatgpt-5 (GPT-5.2) → gemini-3-flash-preview → grok-4
         - gemini-3-flash-preview → grok-4
         - gemini-2.5-pro → grok-4
 
@@ -299,8 +299,10 @@ class LLMClient:
         elif failed_provider == "chatgpt-5" and self.providers_available["grok-4"]:
             return "grok-4"
         elif failed_provider == "gemini-3-pro-preview":
-            # Gemini 3 Pro → Gemini 3 Flash → Grok-4
-            if self.providers_available["gemini-3-flash-preview"]:
+            # Gemini 3 Pro → ChatGPT (GPT-5.2) → Gemini 3 Flash → Grok-4
+            if self.providers_available["chatgpt-5"]:
+                return "chatgpt-5"
+            elif self.providers_available["gemini-3-flash-preview"]:
                 return "gemini-3-flash-preview"
             elif self.providers_available["grok-4"]:
                 return "grok-4"

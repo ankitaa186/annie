@@ -8,7 +8,9 @@ or conditions.
 
 import json
 import time
+from datetime import datetime
 from typing import Any, Dict, Optional
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -27,7 +29,7 @@ async def create_trigger_tool_handler(
     user_id: str,
     intent_name: str,
     trigger_type: str,
-    action_context: dict,
+    action_context: dict = None,
     schedule: dict = None,
     condition: dict = None,
     enabled: bool = True,
@@ -53,6 +55,13 @@ async def create_trigger_tool_handler(
         dict: Created trigger with ID and next_check time
     """
     start_time = time.time()
+
+    # Validate action_context (required parameter)
+    if not action_context:
+        return {
+            "status": "error",
+            "message": "Missing required parameter 'action_context'. You must provide a comprehensive briefing object for the wake-up LLM that includes: research_topic/briefing_request, user_preferences, delivery_instructions, and any relevant context."
+        }
 
     # Get agentic-memories URL from config
     try:
@@ -112,9 +121,29 @@ async def create_trigger_tool_handler(
         schedule_mode = schedule.get("mode", "cron")
         if schedule_mode == "once":
             api_trigger_type = "once"
+            # Get the datetime and timezone
+            dt_str = schedule.get("datetime")
+            tz_str = schedule.get("timezone", default_timezone)
+
+            # If datetime doesn't have timezone offset, add it
+            # This ensures the API interprets the time correctly
+            if dt_str and "+" not in dt_str and "-" not in dt_str[-6:]:
+                try:
+                    # Parse the naive datetime and localize it
+                    naive_dt = datetime.fromisoformat(dt_str.replace("Z", ""))
+                    tz = ZoneInfo(tz_str)
+                    localized_dt = naive_dt.replace(tzinfo=tz)
+                    dt_str = localized_dt.isoformat()
+                    logger.debug(
+                        f"Added timezone offset to datetime: {schedule.get('datetime')} -> {dt_str}",
+                        extra={"original": schedule.get("datetime"), "localized": dt_str, "timezone": tz_str}
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to localize datetime: {e}")
+
             api_schedule = {
-                "trigger_at": schedule.get("datetime"),  # API expects "trigger_at" not "datetime"
-                "timezone": schedule.get("timezone", default_timezone)
+                "trigger_at": dt_str,
+                "timezone": tz_str
             }
         elif schedule_mode == "cron":
             api_trigger_type = "cron"
@@ -376,11 +405,11 @@ CRITICAL RULES:
                     },
                     "datetime": {
                         "type": "string",
-                        "description": "ISO datetime for one-time (e.g., '2025-12-31T09:00:00')"
+                        "description": "ISO datetime for one-time triggers. IMPORTANT: Use the CURRENT DATE from system prompt (Pacific time). Format: 'YYYY-MM-DDTHH:MM:SS'. Example: if system shows '2025-12-31T19:30' Pacific and you want '2 min from now', use '2025-12-31T19:32:00' (NOT Jan 1st)"
                     },
                     "timezone": {
                         "type": "string",
-                        "description": "IANA timezone (e.g., 'America/Los_Angeles')"
+                        "description": "IANA timezone. Default: 'America/Los_Angeles' (PST/PDT) - omit unless user specifies different timezone"
                     }
                 }
             },

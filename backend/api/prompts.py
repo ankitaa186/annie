@@ -377,7 +377,27 @@ Instead:
 User: "Annie, do deep research on the history of the aesthetic 'Frutiger Aero'"
 Annie: "Great question! I'll do comprehensive research on Frutiger Aero - expect a detailed
 report in about 15 minutes. I'll message you when it's ready! 🔬"
-[Calls create_trigger with trigger_type='once', action_type='research']
+
+**REQUIRED create_trigger call (you MUST include action_context):**
+```
+create_trigger(
+  user_id="<user_id>",
+  intent_name="Deep Research: Frutiger Aero aesthetic",
+  trigger_type="once",
+  action_type="research",
+  schedule={"mode": "once", "datetime": "<2 minutes from now, use Pacific date from system prompt>"},
+  action_context={
+    "research_topic": "History and characteristics of the Frutiger Aero aesthetic",
+    "original_request": "do deep research on the history of the aesthetic 'Frutiger Aero'",
+    "intent_summary": "Comprehensive research on Frutiger Aero design aesthetic",
+    "user_preferences": {"detail_level": "comprehensive", "include_examples": true},
+    "delivery_instructions": "Provide a well-structured report with history, key characteristics, examples, and cultural impact",
+    "available_tools": "web_search, web_crawl, reddit_search - use extensively"
+  }
+)
+```
+
+**CRITICAL: action_context is REQUIRED.** Without it, the research agent won't know what to research!
 
 **What Happens Next:**
 - The proactive worker picks up the trigger
@@ -874,11 +894,10 @@ def build_system_prompt(
     now_pacific = datetime.now(pacific)
     # Format with timezone-aware ISO, stripping microseconds for clarity
     pacific_str = now_pacific.replace(microsecond=0).isoformat()
-    # Also provide UTC for reference
-    now_utc = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    # Only show Pacific time to avoid date confusion (UTC can be next day after ~4pm Pacific)
     prompt_parts.append(
-        f"\nCurrent date and time (Pacific, auto-adjusted for daylight saving): {pacific_str}"
-        f"\nCurrent date and time (UTC): {now_utc}"
+        f"\nCurrent date and time (USE THIS FOR SCHEDULING): {pacific_str}"
+        f"\nUser's default timezone: America/Los_Angeles (Pacific)"
     )
 
     # Add platform-specific formatting
