@@ -585,7 +585,7 @@ PRIMARY (Use First):
   THIS IS YOUR MAIN DATA SOURCE
 
 SECONDARY (Use If Needed):
-- analyze_stock(ticker)
+- get_stock_data(ticker)
   Deep analysis of single stock - only if major move needs explanation
 
 - retrieve_memories(user_id, query)
@@ -772,7 +772,7 @@ PRIMARY TOOL (Always Use):
 └─────────────────────────────────────────────────────────────────────┘
 
 SECONDARY TOOLS (Use Only If Needed):
-- analyze_stock(ticker): If a major mover needs brief explanation
+- get_stock_data(ticker): If a major mover needs brief explanation
 - retrieve_memories(user_id, query): If referencing past user statements
 
 AVOID FOR THIS TRIGGER:
@@ -2253,7 +2253,7 @@ class WakeUpResult(BaseModel):
         },
         "execution_instructions": "1. Fetch portfolio with weekly performance\n2. Calculate aggregate tech performance\n3. Fetch S&P 500 weekly performance\n4. Compare and compose message",
         "message_guidance": "TONE: Casual, celebratory if outperformed, reassuring if underperformed\nExamples: 'Week in review: Your tech holdings crushed it at +4.2% vs S&P's +1.1%. NVDA did the heavy lifting.'",
-        "available_tools": "get_portfolio, analyze_stock (for S&P comparison)",
+        "available_tools": "get_portfolio, get_stock_data (for S&P comparison)",
         "edge_cases": "Short week (holiday): Mention it. Significant underperformance: Reassure, don't alarm."
     }
 }

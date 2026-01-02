@@ -138,7 +138,7 @@ def test_parse_agent_response_with_preamble_text():
 {
     "skip": false,
     "message": "📉 Market update: NVDA down 5%",
-    "tools_called": ["get_portfolio", "analyze_stock"],
+    "tools_called": ["get_portfolio", "get_stock_data"],
     "reasoning": "Found significant price movement"
 }'''
     result = parse_agent_response(response, [])
@@ -146,7 +146,7 @@ def test_parse_agent_response_with_preamble_text():
     assert result.skip is False
     assert result.message == "📉 Market update: NVDA down 5%"
     assert "get_portfolio" in result.tools_called
-    assert "analyze_stock" in result.tools_called
+    assert "get_stock_data" in result.tools_called
     assert result.reasoning == "Found significant price movement"
 
 

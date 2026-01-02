@@ -62,8 +62,8 @@ from .stock_analysis import (
     calculate_rsi,
     format_market_cap,
     determine_trend,
-    analyze_stock_tool,
-    analyze_stock_tool_handler,
+    get_stock_data_tool,
+    get_stock_data_tool_handler,
     get_stock_history_tool,
     get_stock_history_tool_handler,
 )
@@ -148,8 +148,8 @@ __all__ = [
     "calculate_rsi",
     "format_market_cap",
     "determine_trend",
-    "analyze_stock_tool",
-    "analyze_stock_tool_handler",
+    "get_stock_data_tool",
+    "get_stock_data_tool_handler",
     "get_stock_history_tool",
     "get_stock_history_tool_handler",
 

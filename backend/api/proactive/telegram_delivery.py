@@ -58,6 +58,87 @@ def validate_html_tags(text: str) -> bool:
     return len(stack) == 0
 
 
+def convert_markdown_table_to_text(text: str) -> str:
+    """
+    Convert markdown tables to readable text format.
+
+    Markdown tables like:
+        | Col1 | Col2 | Col3 |
+        |------|------|------|
+        | A    | B    | C    |
+
+    Are converted to:
+        Col1: A
+        Col2: B
+        Col3: C
+        ───────────
+
+    Args:
+        text: Text potentially containing markdown tables
+
+    Returns:
+        Text with tables converted to readable format
+    """
+    lines = text.split('\n')
+    result = []
+    i = 0
+
+    while i < len(lines):
+        line = lines[i]
+
+        # Check if this line looks like a table row (starts with |)
+        if line.strip().startswith('|') and '|' in line[1:]:
+            # Found potential table start - collect all table lines
+            table_lines = []
+
+            while i < len(lines) and lines[i].strip().startswith('|'):
+                table_lines.append(lines[i])
+                i += 1
+
+            # Need at least header + separator + 1 data row
+            if len(table_lines) >= 3:
+                # Parse header row
+                header_line = table_lines[0]
+                headers = [h.strip() for h in header_line.strip('|').split('|')]
+                headers = [h for h in headers if h]  # Remove empty strings
+
+                # Check if second line is separator (contains dashes)
+                separator_line = table_lines[1].strip()
+                if re.match(r'^[\|\s\-:]+$', separator_line):
+                    # Valid table - convert data rows
+                    data_rows = table_lines[2:]
+
+                    for row_line in data_rows:
+                        cells = [c.strip() for c in row_line.strip('|').split('|')]
+                        cells = [c for c in cells if c or len(cells) > len(headers)]
+
+                        # Build readable format: Header: Value
+                        for j, header in enumerate(headers):
+                            if j < len(cells):
+                                value = cells[j].strip()
+                                if value:  # Only add non-empty values
+                                    result.append(f"  {header}: {value}")
+
+                        # Add separator between rows
+                        result.append("  ───────────")
+
+                    # Remove trailing separator
+                    if result and result[-1] == "  ───────────":
+                        result.pop()
+                    result.append("")  # Blank line after table
+                else:
+                    # Not a valid table (no separator), keep original lines
+                    result.extend(table_lines)
+            else:
+                # Not enough lines for a table, keep original
+                result.extend(table_lines)
+        else:
+            result.append(line)
+            i += 1
+
+    return '\n'.join(result)
+
+
 def markdown_to_telegram_html(text: str) -> str:
     """
     Convert markdown from LLM output to Telegram-safe HTML.
@@ -70,6 +151,7 @@ def markdown_to_telegram_html(text: str) -> str:
     - ```code blocks``` → <pre>code</pre>
     - [link](url) → <a href="url">link</a>
     - ### headers → <b>header</b>
+    - | tables | → readable key-value format
 
     Args:
         text: Raw markdown text from LLM
@@ -79,6 +161,9 @@ def markdown_to_telegram_html(text: str) -> str:
     """
     if not text:
         return text
+
+    # Convert markdown tables to readable text BEFORE escaping HTML
+    text = convert_markdown_table_to_text(text)
 
     # First, escape HTML special characters to prevent injection
     # But we need to do this carefully to not break our own tags

@@ -164,7 +164,7 @@ Annie: "🔄 Annie is thinking..."
 Annie: "🔍 Retrieving your memories..."
 Annie: "📊 Calling get_portfolio..."
 Annie: "✅ Portfolio loaded: 3 holdings"
-Annie: "📈 Calling analyze_stock for AAPL..."
+Annie: "📈 Calling get_stock_data for AAPL..."
 Annie: "✅ AAPL analysis complete: $175.50 (+2.3%)"
 Annie: "🧠 Composing response..."
 [Message cleared, actual response streams in]
@@ -189,8 +189,8 @@ Annie: "You have 3 holdings worth $15,420..."
 
 [Auto-picks up pending]
 Annie: "🔄 Annie is thinking..."
-Annie: "📈 Calling analyze_stock for AAPL..."
-Annie: "📈 Calling analyze_stock for GOOGL..."
+Annie: "📈 Calling get_stock_data for AAPL..."
+Annie: "📈 Calling get_stock_data for GOOGL..."
 [Response streams]
 ```
 
@@ -336,7 +336,7 @@ Annie: "📈 Calling analyze_stock for GOOGL..."
 - Emit: "✅ {tool_name} complete: {brief_result}"
 - Brief result examples:
   - get_portfolio: "3 holdings, $15,420 value"
-  - analyze_stock: "AAPL $175.50 (+2.3%)"
+  - get_stock_data: "AAPL $175.50 (+2.3%)"
   - internet_search: "Found 5 results"
   - get_user_profile: "Profile loaded (67% complete)"
 
@@ -347,7 +347,7 @@ Annie: "📈 Calling analyze_stock for GOOGL..."
 **AC #4: All Tools Instrumented**
 - get_portfolio
 - add_holding / update_holding / remove_holding
-- analyze_stock / get_stock_history
+- get_stock_data / get_stock_history
 - get_user_profile
 - store_memory / retrieve_memories
 - internet_search (if using MCP, not Grok Live Search)

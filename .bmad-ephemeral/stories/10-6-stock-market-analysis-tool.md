@@ -12,13 +12,13 @@ So that **I can make informed investment decisions**.
 
 ## Acceptance Criteria
 
-**AC #1:** Given `analyze_stock` MCP tool, when called with ticker, then tool fetches real-time price data via Yahoo Finance and returns structured analysis including current_price, change_1d, change_1d_pct, 52_week_high, 52_week_low, market_cap, pe_ratio, volume, avg_volume
+**AC #1:** Given `get_stock_data` MCP tool, when called with ticker, then tool fetches real-time price data via Yahoo Finance and returns structured analysis including current_price, change_1d, change_1d_pct, 52_week_high, 52_week_low, market_cap, pe_ratio, volume, avg_volume
 
 **AC #2:** Given stock analysis, when technical data requested, then tool returns RSI (Relative Strength Index), moving averages (50-day, 200-day), trend direction (bullish/bearish/neutral), and volume analysis (above/below average)
 
 **AC #3:** Given `get_stock_history` tool, when called with ticker and period, then returns historical prices for 1d, 5d, 1mo, 3mo, 6mo, 1y, 5y including open, high, low, close, volume per period
 
-**AC #4:** Given user asks "How is Apple doing?", then Annie calls `analyze_stock` with ticker "AAPL" and responds with clear market analysis
+**AC #4:** Given user asks "How is Apple doing?", then Annie calls `get_stock_data` with ticker "AAPL" and responds with clear market analysis
 
 **AC #5:** Given invalid ticker or API failure, then tool returns clear error message and Annie responds: "I couldn't find data for that ticker. Please check the symbol and try again."
 
@@ -28,8 +28,8 @@ So that **I can make informed investment decisions**.
   - [x] Add `yfinance>=0.2.48` to `mcp_server/requirements.txt`
   - [x] Rebuild Docker container
 
-- [x] **Task 2: Create analyze_stock MCP tool** (AC: #1, #2, #4, #5)
-  - [x] Create `analyze_stock_tool_handler()` in `mcp_server/tools.py`
+- [x] **Task 2: Create get_stock_data MCP tool** (AC: #1, #2, #4, #5)
+  - [x] Create `get_stock_data_tool_handler()` in `mcp_server/tools.py`
   - [x] Fetch real-time data via `yfinance.Ticker(ticker).info`
   - [x] Calculate technical indicators (RSI, moving averages)
   - [x] Return structured analysis object
@@ -43,7 +43,7 @@ So that **I can make informed investment decisions**.
   - [x] Add error handling for invalid tickers/periods
 
 - [x] **Task 4: Register tools in MCP server** (AC: #1, #3)
-  - [x] Register `analyze_stock_tool` in `mcp_server/server.py`
+  - [x] Register `get_stock_data_tool` in `mcp_server/server.py`
   - [x] Register `get_stock_history_tool` in `mcp_server/server.py`
 
 - [ ] **Task 5: Testing** (AC: #1, #2, #3, #4, #5)

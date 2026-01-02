@@ -401,7 +401,7 @@ Given price fetch fails for some tickers, then:
 *Moved from Epic 4 Story 4.2*
 
 **Implementation Summary:**
-- `analyze_stock` tool: `mcp_server/tools.py:1787`
+- `get_stock_data` tool: `mcp_server/tools.py:1787`
 - `get_stock_history` tool: `mcp_server/tools.py:2006`
 - Both registered in `mcp_server/server.py:83-84`
 
@@ -409,7 +409,7 @@ Given price fetch fails for some tickers, then:
 
 | AC | Description | Status |
 |----|-------------|--------|
-| AC #1 | analyze_stock with price, change, 52-week range, P/E, market cap, volume | ✅ |
+| AC #1 | get_stock_data with price, change, 52-week range, P/E, market cap, volume | ✅ |
 | AC #2 | Technical indicators (RSI, 50/200 MA, trend, volume analysis) | ✅ |
 | AC #3 | get_stock_history with multiple period options | ✅ |
 | AC #4 | LLM integration via tool registration | ✅ |

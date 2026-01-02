@@ -559,7 +559,7 @@ This document provides granular, actionable tasks for V1.0 implementation. Each 
 **Goal**: Implement market analysis function
 
 **Sub-tasks**:
-- [ ] Implement `analyze_stock` function
+- [ ] Implement `get_stock_data` function
 - [ ] Add technical indicators calculation
 - [ ] Add trend analysis
 - [ ] Add volume analysis

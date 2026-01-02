@@ -400,8 +400,8 @@ class LLMClient:
                     )
                     yield {
                         "type": "error",
-                        "message": "I'm experiencing technical difficulties. Please try again in a moment.",
-                        "code": "RATE_LIMIT_ERROR"
+                        "message": "I'm experiencing high demand right now. Please try again in a few minutes.",
+                        "code": "RATE_LIMIT_NO_FALLBACK"
                     }
                     return
 
@@ -439,7 +439,7 @@ class LLMClient:
                 )
                 yield {
                     "type": "error",
-                    "message": "I'm experiencing technical difficulties. Please try again later.",
+                    "message": "I'm experiencing high demand right now. Please try again in a few minutes.",
                     "code": "PROVIDER_IN_BACKOFF"
                 }
             return
@@ -477,8 +477,27 @@ class LLMClient:
                 }
             )
 
-        except (ProviderError, RateLimitError) as e:
-            # Both providers failed
+        except RateLimitError as e:
+            # Both providers hit rate limits
+            logger.error(
+                "All providers rate limited during streaming",
+                extra={
+                    "primary_provider": provider_name,
+                    "fallback_provider": fallback_name,
+                    "error": str(e),
+                    "retry_after": getattr(e, 'retry_after', None)
+                }
+            )
+
+            # Yield user-friendly rate limit message
+            yield {
+                "type": "error",
+                "message": "I'm experiencing high demand right now. Please try again in a few minutes.",
+                "code": "ALL_PROVIDERS_RATE_LIMITED"
+            }
+
+        except ProviderError as e:
+            # Both providers failed (non-rate-limit error)
             logger.error(
                 "All providers failed during streaming",
                 extra={

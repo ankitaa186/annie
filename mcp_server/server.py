@@ -35,7 +35,7 @@ from mcp_server.tools import (
     update_holding_tool,
     remove_holding_tool,
     clear_portfolio_tool,
-    analyze_stock_tool,
+    get_stock_data_tool,
     get_stock_history_tool,
     create_trigger_tool,
     list_triggers_tool,
@@ -97,7 +97,7 @@ class MCPServer:
         self.tool_registry.register(remove_holding_tool)
         self.tool_registry.register(clear_portfolio_tool)
         # Stock market analysis tools (Epic 10 - Story 10.6)
-        self.tool_registry.register(analyze_stock_tool)
+        self.tool_registry.register(get_stock_data_tool)
         self.tool_registry.register(get_stock_history_tool)
         # Proactive AI: Trigger management tools (Epic 13 - Story 13.2)
         self.tool_registry.register(create_trigger_tool)

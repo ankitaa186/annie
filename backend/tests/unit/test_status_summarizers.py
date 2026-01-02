@@ -146,9 +146,9 @@ class TestPortfolioSummarizers:
 class TestStockSummarizers:
     """Test stock analysis tool result summarizers."""
 
-    def test_analyze_stock_positive_change(self):
-        """Test analyze_stock summarizer with positive price change."""
-        from api.status_summarizers import summarize_analyze_stock_result
+    def test_get_stock_data_positive_change(self):
+        """Test get_stock_data summarizer with positive price change."""
+        from api.status_summarizers import summarize_get_stock_data_result
 
         result = {
             "status": "success",
@@ -158,12 +158,12 @@ class TestStockSummarizers:
             "name": "Apple Inc."
         }
 
-        summary = summarize_analyze_stock_result(result)
+        summary = summarize_get_stock_data_result(result)
         assert summary == "AAPL $175.50 (+2.3%)"
 
-    def test_analyze_stock_negative_change(self):
-        """Test analyze_stock summarizer with negative price change."""
-        from api.status_summarizers import summarize_analyze_stock_result
+    def test_get_stock_data_negative_change(self):
+        """Test get_stock_data summarizer with negative price change."""
+        from api.status_summarizers import summarize_get_stock_data_result
 
         result = {
             "status": "success",
@@ -173,12 +173,12 @@ class TestStockSummarizers:
             "name": "Alphabet Inc."
         }
 
-        summary = summarize_analyze_stock_result(result)
+        summary = summarize_get_stock_data_result(result)
         assert summary == "GOOGL $142.25 (-1.5%)"
 
-    def test_analyze_stock_zero_change(self):
-        """Test analyze_stock summarizer with zero price change."""
-        from api.status_summarizers import summarize_analyze_stock_result
+    def test_get_stock_data_zero_change(self):
+        """Test get_stock_data summarizer with zero price change."""
+        from api.status_summarizers import summarize_get_stock_data_result
 
         result = {
             "status": "success",
@@ -188,7 +188,7 @@ class TestStockSummarizers:
             "name": "Microsoft Corporation"
         }
 
-        summary = summarize_analyze_stock_result(result)
+        summary = summarize_get_stock_data_result(result)
         assert summary == "MSFT $380.00 (+0.0%)"
 
     def test_get_stock_history(self):
@@ -205,16 +205,16 @@ class TestStockSummarizers:
         summary = summarize_stock_history_result(result)
         assert summary == "History loaded: 1mo (22 days)"
 
-    def test_analyze_stock_error(self):
-        """Test analyze_stock summarizer with error result."""
-        from api.status_summarizers import summarize_analyze_stock_result
+    def test_get_stock_data_error(self):
+        """Test get_stock_data summarizer with error result."""
+        from api.status_summarizers import summarize_get_stock_data_result
 
         result = {
             "status": "error",
             "message": "Invalid ticker format: 'xyz'. Ticker must be uppercase."
         }
 
-        summary = summarize_analyze_stock_result(result)
+        summary = summarize_get_stock_data_result(result)
         # Messages under 500 chars are not truncated
         assert summary == "Invalid ticker format: 'xyz'. Ticker must be uppercase."
         assert len(summary) <= 500
@@ -560,7 +560,7 @@ class TestSummarizerRegistry:
             "change_1d_pct": 2.3
         }
 
-        summary = summarize_tool_result("analyze_stock", result)
+        summary = summarize_tool_result("get_stock_data", result)
         assert summary == "AAPL $175.50 (+2.3%)"
 
     def test_summarize_tool_result_unknown_tool_success(self):
@@ -605,7 +605,7 @@ class TestSummarizerRegistry:
             mock_summarizers.get.return_value = failing_summarizer
 
             # Should fall back to generic "Complete"
-            summary = summarize_tool_result("analyze_stock", result)
+            summary = summarize_tool_result("get_stock_data", result)
             assert summary == "Complete"
 
     def test_all_tools_registered(self):
@@ -618,7 +618,7 @@ class TestSummarizerRegistry:
             "update_holding",
             "remove_holding",
             "clear_portfolio",
-            "analyze_stock",
+            "get_stock_data",
             "get_stock_history",
             "get_user_profile",
             "store_memory",
@@ -657,7 +657,7 @@ class TestEdgeCases:
 
     def test_null_values_handled(self):
         """Test that summarizers handle null values in result."""
-        from api.status_summarizers import summarize_analyze_stock_result
+        from api.status_summarizers import summarize_get_stock_data_result
 
         result = {
             "status": "success",
@@ -667,7 +667,7 @@ class TestEdgeCases:
         }
 
         # Should handle None values without crashing
-        summary = summarize_analyze_stock_result(result)
+        summary = summarize_get_stock_data_result(result)
         assert "???" in summary  # Ticker defaults to ???
 
     def test_error_message_truncation(self):
@@ -714,7 +714,7 @@ class TestEdgeCases:
         """Test that summaries are concise (<50 chars when possible)."""
         from api.status_summarizers import (
             summarize_portfolio_result,
-            summarize_analyze_stock_result,
+            summarize_get_stock_data_result,
             summarize_profile_result
         )
 
@@ -732,7 +732,7 @@ class TestEdgeCases:
             "current_price": 175.50,
             "change_1d_pct": 2.3
         }
-        assert len(summarize_analyze_stock_result(stock_result)) < 50
+        assert len(summarize_get_stock_data_result(stock_result)) < 50
 
         profile_result = {
             "status": "success",
