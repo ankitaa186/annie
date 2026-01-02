@@ -109,7 +109,7 @@ def test_parse_agent_response_skip_true():
 
     assert result.skip is True
     assert result.skip_reason == "Market closed"
-    assert result.message is None
+    assert result.message == ""  # Empty string when no message in JSON
 
 
 def test_parse_agent_response_plain_text():
