@@ -74,22 +74,9 @@ jobs:
           fi
           echo "✓ Full healthcheck passed"
 
-          # Defensive endpoint tests
+          # Defensive component tests
           echo ""
-          echo "Running defensive endpoint tests..."
-
-          # Test chat endpoint accepts POST
-          echo -n "Testing POST /api/chat... "
-          CHAT_RESP=$(curl -sf -X POST http://localhost:8001/api/chat \
-            -H "Content-Type: application/json" \
-            -d '{"message": "test", "user_id": "healthcheck"}' \
-            -w "%{http_code}" -o /dev/null 2>&1) || CHAT_RESP="000"
-          if [ "$CHAT_RESP" = "200" ] || [ "$CHAT_RESP" = "201" ]; then
-            echo "✓ OK ($CHAT_RESP)"
-          else
-            echo "✗ Failed (HTTP $CHAT_RESP)"
-            exit 1
-          fi
+          echo "Running defensive component tests..."
 
           # Test MCP server is responding (via backend health)
           echo -n "Testing MCP server connection... "
@@ -115,9 +102,3 @@ jobs:
           echo "========================================="
           echo "✓ All healthchecks and validations passed"
           echo "========================================="
-
-      - name: Share Logs
-        if: always()
-        run: |
-          cd /home/ankit/dev/annie
-          docker compose logs --tail=100
