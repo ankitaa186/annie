@@ -184,7 +184,7 @@ Target Architecture (3 Containers):
 **MCP Server** (11 tools):
 - FastAPI with JSON-RPC 2.0
 - HTTP transport between containers
-- Tools: health_check, store_memory, retrieve_memories, get_user_profile, get_portfolio, add_holding, update_holding, remove_holding, clear_portfolio, analyze_stock, get_stock_history
+- Tools: health_check, store_memory, retrieve_memories, get_user_profile, get_portfolio, add_holding, update_holding, remove_holding, clear_portfolio, get_stock_data, get_stock_history
 
 **Observability**:
 - Langfuse for LLM tracing

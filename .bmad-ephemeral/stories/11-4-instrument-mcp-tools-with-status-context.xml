@@ -29,7 +29,7 @@
         Tool Result Status: Emit "✅ {tool_name} complete: {brief_result}" after completion.
         Brief result examples:
         - get_portfolio: "3 holdings, $15,420 value"
-        - analyze_stock: "AAPL $175.50 (+2.3%)"
+        - get_stock_data: "AAPL $175.50 (+2.3%)"
         - internet_search: "Found 5 results"
         - get_user_profile: "Profile loaded (67% complete)"
         Result summary must be concise (&lt;50 chars) and informative.
@@ -43,7 +43,7 @@
         All MCP Tools Instrumented: All tools must emit status updates:
         - get_portfolio (with optional include_prices)
         - add_holding, update_holding, remove_holding, clear_portfolio
-        - analyze_stock, get_stock_history
+        - get_stock_data, get_stock_history
         - get_user_profile
         - store_memory, retrieve_memories
         - internet_search (if MCP-based, not Grok Live Search)
@@ -194,7 +194,7 @@
           <summary-format>"Portfolio cleared ({holdings_removed} removed)"</summary-format>
         </tool>
 
-        <tool name="analyze_stock">
+        <tool name="get_stock_data">
           <result-structure>
             {
               "status": "success",
@@ -424,7 +424,7 @@ def summarize_portfolio_result(result: Dict[str, Any]) -> str:
         return f"{holdings_count} holdings"
 
 def summarize_stock_result(result: Dict[str, Any]) -> str:
-    """Summarize analyze_stock result."""
+    """Summarize get_stock_data result."""
     if result.get("status") == "error":
         return result.get("message", "Failed")[:50]
 
@@ -446,7 +446,7 @@ def summarize_profile_result(result: Dict[str, Any]) -> str:
 
 SUMMARIZERS = {
     "get_portfolio": summarize_portfolio_result,
-    "analyze_stock": summarize_stock_result,
+    "get_stock_data": summarize_stock_result,
     "get_user_profile": summarize_profile_result,
     # ... (map all tools)
 }

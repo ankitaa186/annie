@@ -163,11 +163,11 @@ await redis.setex(cache_key, 900, json.dumps(price))  # 15 min TTL
 
 **From Story 10.6 (Status: done)**
 
-- **yfinance Integration**: Already implemented in `mcp_server/tools.py:1787` (analyze_stock_tool_handler)
+- **yfinance Integration**: Already implemented in `mcp_server/tools.py:1787` (get_stock_data_tool_handler)
 - **Batch Download**: Use `yf.download(tickers, period="1d")` for efficient multi-ticker fetch
 - **Price Caching**: Deferred from 10.6 to this story - implement Redis caching for 5-minute TTL
 
-[Source: analyze_stock_tool_handler in mcp_server/tools.py]
+[Source: get_stock_data_tool_handler in mcp_server/tools.py]
 
 ### Files to Modify
 

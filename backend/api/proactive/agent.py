@@ -276,6 +276,96 @@ async def gather_dynamic_state(user_id: str, timezone: str = "America/Los_Angele
 # Prompt Construction
 # ============================================================================
 
+def is_research_trigger(trigger_data: Dict[str, Any]) -> bool:
+    """
+    Detect if this trigger is for deep research based on action_type or intent_name.
+
+    Args:
+        trigger_data: Trigger document to check
+
+    Returns:
+        bool: True if this is a research-type trigger
+    """
+    action_type = trigger_data.get("action_type", "").lower()
+    intent_name = trigger_data.get("intent_name", "").lower()
+
+    research_indicators = ["research", "deep dive", "investigate", "analyze", "comprehensive"]
+
+    # Check action_type
+    if action_type == "research":
+        return True
+
+    # Check intent_name for research keywords
+    for indicator in research_indicators:
+        if indicator in intent_name:
+            return True
+
+    return False
+
+
+# Research protocol for deep research triggers
+RESEARCH_PROTOCOL = """
+## RESEARCH PROTOCOL (MANDATORY)
+
+This is a DEEP RESEARCH trigger. You must perform exhaustive research before responding.
+Do NOT answer immediately. Follow this protocol:
+
+### 1. PLAN
+Output a text plan of what you need to find. Break down the research question into
+specific search queries. Think about:
+- What are the key aspects to investigate?
+- What perspectives or sources would be valuable?
+- What facts need to be verified?
+
+### 2. EXECUTE
+Use `web_search` and `web_crawl` extensively. You typically need **5-10 distinct searches**
+to properly cover a topic. For each search:
+- Use different angles/keywords to get diverse results
+- Follow up on promising results with `web_crawl` to read full content
+- Use `reddit_search` for community opinions and real user experiences
+
+### 3. CRITIQUE
+After each round of tool outputs, self-critique:
+- "Do I have enough comprehensive data?"
+- "Are there gaps in my research?"
+- "Have I considered multiple perspectives?"
+- "Are my sources credible and recent?"
+
+If the answer to any of these is "no", LOOP back to EXECUTE with refined searches.
+
+### 4. FINALIZE
+Only when you have comprehensive, well-researched information:
+- Synthesize findings into a cohesive report
+- Include key insights, not just facts
+- Cite your sources
+- Highlight any caveats or limitations
+- Output the final JSON response
+
+### Response Format
+
+Your response should include your thinking process, then the final JSON:
+
+[Your research plan, tool calls, critiques, and synthesis thinking here...]
+
+```json
+{
+    "skip": false,
+    "skip_reason": null,
+    "message": "Your comprehensive research report here...",
+    "tools_called": ["web_search", "web_crawl", "reddit_search", ...],
+    "reasoning": "Summary of your research process and key findings"
+}
+```
+
+### Important Guidelines
+- Take your time - deep research is expected to take 5-15 minutes
+- Quality over speed - be thorough
+- Multiple searches are expected and encouraged
+- Synthesize information, don't just list search results
+- Provide actionable insights, not just data dumps
+"""
+
+
 def build_agent_prompt(
     trigger_data: Dict[str, Any],
     dynamic_state: DynamicState,
@@ -291,6 +381,7 @@ def build_agent_prompt(
     - Available tools list
     - Response format specification
     - Tone adjustment guidance based on recent context
+    - Research protocol (for research-type triggers)
 
     Args:
         trigger_data: Trigger document with action_context
@@ -436,6 +527,19 @@ def build_agent_prompt(
         tone_guidance,
     ]
 
+    # Inject research protocol for research-type triggers
+    if is_research_trigger(trigger_data):
+        prompt_parts.append("")
+        prompt_parts.append(RESEARCH_PROTOCOL)
+        logger.info(
+            "Research protocol injected into agent prompt",
+            extra={
+                "trigger_id": trigger_data.get("id"),
+                "intent_name": trigger_data.get("intent_name"),
+                "action_type": trigger_data.get("action_type")
+            }
+        )
+
     return "\n".join(prompt_parts)
 
 
@@ -474,6 +578,7 @@ def parse_agent_response(response_content: str, tools_called: List[str]) -> Wake
             )
 
         # Try to parse as JSON directly first
+        preamble_content = None
         try:
             data = json.loads(clean_content)
         except json.JSONDecodeError:
@@ -483,11 +588,14 @@ def parse_agent_response(response_content: str, tools_called: List[str]) -> Wake
 
             if json_start != -1 and json_end != -1 and json_end > json_start:
                 json_str = clean_content[json_start:json_end + 1]
+                # Save the preamble content in case it contains the actual report
+                preamble_content = clean_content[:json_start].strip()
                 logger.debug(
                     "Extracted JSON from mixed content",
                     extra={
                         "preamble_length": json_start,
-                        "json_length": len(json_str)
+                        "json_length": len(json_str),
+                        "preamble_has_content": bool(preamble_content)
                     }
                 )
                 data = json.loads(json_str)
@@ -495,10 +603,30 @@ def parse_agent_response(response_content: str, tools_called: List[str]) -> Wake
                 # No JSON found - re-raise to trigger fallback
                 raise
 
+        # Get the message from JSON
+        json_message = data.get("message", "")
+
+        # If the preamble contains substantial formatted content (like a report with headers),
+        # and is longer than the JSON message, use the preamble as the actual message.
+        # This handles cases where the LLM outputs the full report first, then a summary JSON.
+        final_message = json_message
+        if preamble_content and len(preamble_content) > len(json_message or ""):
+            # Check if preamble looks like formatted content (has markdown headers or formatting)
+            if any(marker in preamble_content for marker in ["###", "**", "##", "- ", "* "]):
+                logger.info(
+                    "Using preamble as message (longer and formatted)",
+                    extra={
+                        "preamble_length": len(preamble_content),
+                        "json_message_length": len(json_message or ""),
+                        "has_markdown": True
+                    }
+                )
+                final_message = preamble_content
+
         return WakeUpResult(
             skip=data.get("skip", False),
             skip_reason=data.get("skip_reason"),
-            message=data.get("message"),
+            message=final_message,
             tools_called=data.get("tools_called", tools_called),
             reasoning=data.get("reasoning", "No reasoning provided")
         )
@@ -708,21 +836,21 @@ async def execute_wake_up_agent(
                     return response_content
 
             try:
-                # Execute with 10 minute timeout
+                # Execute with 30 minute timeout (supports deep research tasks)
                 response_content = await asyncio.wait_for(
                     _execute_with_tools(),
-                    timeout=600  # 10 minutes
+                    timeout=1800  # 30 minutes
                 )
             except asyncio.TimeoutError:
-                logger.error("Agent execution timed out after 10 minutes")
+                logger.error("Agent execution timed out after 30 minutes")
                 duration_ms = int((time.time() - start_time) * 1000)
 
                 result = WakeUpResult(
                     skip=True,
-                    skip_reason="Agent execution timeout (10 minutes)",
+                    skip_reason="Agent execution timeout (30 minutes)",
                     message=None,
                     tools_called=tools_called,
-                    reasoning="Execution exceeded 10 minute timeout"
+                    reasoning="Execution exceeded 30 minute timeout"
                 )
 
                 if LANGFUSE_AVAILABLE:

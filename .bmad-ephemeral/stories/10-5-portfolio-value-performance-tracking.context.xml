@@ -119,7 +119,7 @@
       <file>
         <path>mcp_server/tools.py</path>
         <kind>helper-functions</kind>
-        <symbol>analyze_stock_tool_handler</symbol>
+        <symbol>get_stock_data_tool_handler</symbol>
         <lines>1787-1980</lines>
         <reason>Reference implementation for yfinance integration pattern - reuse approach for batch fetching</reason>
       </file>

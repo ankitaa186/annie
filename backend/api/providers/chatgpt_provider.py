@@ -52,7 +52,7 @@ class ChatGPTProvider(BaseProvider):
 
     # ChatGPT-5 API configuration
     BASE_URL = "https://api.openai.com/v1"
-    MODEL_NAME = "gpt-4"
+    MODEL_NAME = "gpt-5.2"  # Latest flagship model (Dec 2025) - 400k context, 128k output
 
     def __init__(self):
         """
@@ -124,22 +124,88 @@ class ChatGPTProvider(BaseProvider):
         self,
         messages: List[Dict[str, Any]],
         tools: Optional[List[Dict[str, Any]]] = None,
+        mcp_client: Optional[Any] = None,
         **kwargs
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
-        Stream chat completion from ChatGPT-5.
+        Stream chat completion from ChatGPT-5 with tool calling support.
 
         Args:
             messages: List of message dictionaries
             tools: Optional list of tools in OpenAI format
+            mcp_client: Optional MCP client for executing tool calls
             **kwargs: Additional parameters (unused, for interface compatibility)
 
         Yields:
-            Stream event dictionaries
+            Stream event dictionaries:
+            - {"type": "token", "content": "..."}
+            - {"type": "tool_call_started", "tool": "name", "arguments": {...}}
+            - {"type": "tool_call_completed", "tool": "name", "result_summary": "..."}
+            - {"type": "tool_call_failed", "tool": "name", "error": "..."}
+            - {"type": "done", "tokens_used": {...}}
 
         Raises:
             ProviderError: If provider call fails
             RateLimitError: If rate limit is hit
+        """
+        # Track conversation for multi-turn tool calling
+        conversation_messages = list(messages)
+        max_tool_iterations = 10
+        iteration = 0
+
+        while iteration < max_tool_iterations:
+            iteration += 1
+
+            async for event in self._stream_single_completion(
+                conversation_messages, tools, mcp_client
+            ):
+                if event.get("type") == "tool_calls_pending":
+                    # Tool calls need to be executed, then continue loop
+                    tool_calls = event.get("tool_calls", [])
+                    tool_results = event.get("tool_results", [])
+
+                    # Add assistant message with tool calls
+                    conversation_messages.append({
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": tool_calls
+                    })
+
+                    # Add tool results
+                    for result in tool_results:
+                        conversation_messages.append({
+                            "role": "tool",
+                            "tool_call_id": result["tool_call_id"],
+                            "content": result["content"]
+                        })
+
+                    # Continue to next iteration for follow-up response
+                    break
+                elif event.get("type") == "done":
+                    # Final completion, exit loop
+                    yield event
+                    return
+                else:
+                    # Pass through other events (tokens, tool_call_started, etc.)
+                    yield event
+            else:
+                # Loop completed without break (no pending tool calls)
+                return
+
+        # Max iterations reached
+        logger.warning(
+            "ChatGPT-5 max tool iterations reached",
+            extra={"provider": "chatgpt-5", "max_iterations": max_tool_iterations}
+        )
+
+    async def _stream_single_completion(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        mcp_client: Optional[Any] = None,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        Stream a single completion (may result in tool calls or final response).
         """
         start_time = time.time()
 
@@ -153,7 +219,8 @@ class ChatGPTProvider(BaseProvider):
             payload = {
                 "model": self.MODEL_NAME,
                 "messages": messages,
-                "stream": True
+                "stream": True,
+                "stream_options": {"include_usage": True}  # Get usage in stream
             }
 
             # Add tools if provided
@@ -216,6 +283,10 @@ class ChatGPTProvider(BaseProvider):
                 token_count = 0
                 accumulated_content = []
 
+                # Track streaming tool calls (OpenAI sends them in chunks)
+                streaming_tool_calls: Dict[int, Dict[str, Any]] = {}
+                final_usage = {}
+
                 # Get current trace for Langfuse
                 trace = get_current_trace()
 
@@ -237,11 +308,17 @@ class ChatGPTProvider(BaseProvider):
                             # Parse JSON chunk
                             chunk = json.loads(data_str)
 
+                            # Check for usage in final chunk (with stream_options)
+                            if "usage" in chunk and chunk["usage"]:
+                                final_usage = chunk["usage"]
+
                             # Extract token from chunk
                             if "choices" in chunk and len(chunk["choices"]) > 0:
                                 delta = chunk["choices"][0].get("delta", {})
                                 content = delta.get("content")
+                                tool_calls_delta = delta.get("tool_calls")
 
+                                # Handle content tokens
                                 if content:
                                     # Track first token latency
                                     if first_token:
@@ -265,13 +342,37 @@ class ChatGPTProvider(BaseProvider):
                                         "content": content
                                     }
 
+                                # Handle streaming tool calls
+                                if tool_calls_delta:
+                                    for tc in tool_calls_delta:
+                                        idx = tc.get("index", 0)
+                                        if idx not in streaming_tool_calls:
+                                            # New tool call
+                                            streaming_tool_calls[idx] = {
+                                                "id": tc.get("id", ""),
+                                                "type": "function",
+                                                "function": {
+                                                    "name": tc.get("function", {}).get("name", ""),
+                                                    "arguments": ""
+                                                }
+                                            }
+                                        else:
+                                            # Append to existing tool call
+                                            if tc.get("id"):
+                                                streaming_tool_calls[idx]["id"] = tc["id"]
+                                            if tc.get("function", {}).get("name"):
+                                                streaming_tool_calls[idx]["function"]["name"] = tc["function"]["name"]
+
+                                        # Accumulate arguments
+                                        if tc.get("function", {}).get("arguments"):
+                                            streaming_tool_calls[idx]["function"]["arguments"] += tc["function"]["arguments"]
+
                                 # Check for finish reason (completion)
                                 finish_reason = chunk["choices"][0].get("finish_reason")
                                 if finish_reason:
-                                    # Extract token usage
-                                    usage = chunk.get("usage", {})
-
                                     duration_ms = int((time.time() - start_time) * 1000)
+                                    # Handle null usage from OpenAI (can be null in streaming)
+                                    usage = final_usage or chunk.get("usage") or {}
 
                                     logger.info(
                                         "ChatGPT-5 streaming completed",
@@ -279,9 +380,91 @@ class ChatGPTProvider(BaseProvider):
                                             "provider": "chatgpt-5",
                                             "duration_ms": duration_ms,
                                             "token_count": token_count,
-                                            "finish_reason": finish_reason
+                                            "finish_reason": finish_reason,
+                                            "tool_calls_count": len(streaming_tool_calls)
                                         }
                                     )
+
+                                    # Handle tool calls
+                                    if finish_reason == "tool_calls" and streaming_tool_calls:
+                                        # Convert streaming tool calls to list
+                                        tool_calls_list = [streaming_tool_calls[i] for i in sorted(streaming_tool_calls.keys())]
+                                        tool_results = []
+
+                                        for tc in tool_calls_list:
+                                            tool_name = tc["function"]["name"]
+                                            tool_call_id = tc["id"]
+
+                                            try:
+                                                args = json.loads(tc["function"]["arguments"]) if tc["function"]["arguments"] else {}
+                                            except json.JSONDecodeError:
+                                                args = {}
+
+                                            # Emit tool_call_started
+                                            yield {
+                                                "type": "tool_call_started",
+                                                "tool": tool_name,
+                                                "arguments": args
+                                            }
+
+                                            # Execute tool if MCP client available
+                                            if mcp_client:
+                                                try:
+                                                    result = await mcp_client.call_tool(tool_name, args)
+                                                    result_str = json.dumps(result) if isinstance(result, (dict, list)) else str(result)
+
+                                                    # Emit tool_call_completed
+                                                    yield {
+                                                        "type": "tool_call_completed",
+                                                        "tool": tool_name,
+                                                        "result_summary": result_str[:200] + "..." if len(result_str) > 200 else result_str
+                                                    }
+
+                                                    tool_results.append({
+                                                        "tool_call_id": tool_call_id,
+                                                        "content": result_str
+                                                    })
+                                                except Exception as e:
+                                                    error_msg = str(e)
+                                                    logger.error(
+                                                        "ChatGPT-5 tool execution failed",
+                                                        extra={
+                                                            "provider": "chatgpt-5",
+                                                            "tool": tool_name,
+                                                            "error": error_msg
+                                                        }
+                                                    )
+
+                                                    # Emit tool_call_failed
+                                                    yield {
+                                                        "type": "tool_call_failed",
+                                                        "tool": tool_name,
+                                                        "error": error_msg
+                                                    }
+
+                                                    tool_results.append({
+                                                        "tool_call_id": tool_call_id,
+                                                        "content": f"Error: {error_msg}"
+                                                    })
+                                            else:
+                                                # No MCP client, return error
+                                                yield {
+                                                    "type": "tool_call_failed",
+                                                    "tool": tool_name,
+                                                    "error": "MCP client not available"
+                                                }
+                                                tool_results.append({
+                                                    "tool_call_id": tool_call_id,
+                                                    "content": "Error: Tool execution not available"
+                                                })
+
+                                        # Yield pending tool calls for conversation continuation
+                                        yield {
+                                            "type": "tool_calls_pending",
+                                            "tool_calls": tool_calls_list,
+                                            "tool_results": tool_results
+                                        }
+                                        return
 
                                     # Track LLM generation in Langfuse (fire-and-forget)
                                     if trace:
@@ -306,7 +489,6 @@ class ChatGPTProvider(BaseProvider):
                                             truncated_completion = self._truncate_text(full_completion, 1000)
 
                                             # Create Langfuse generation and end it with usage including costs
-                                            # ModelUsage TypedDict: input, output, total, input_cost, output_cost, total_cost
                                             generation = trace.generation(
                                                 name="llm_call_chatgpt-5_streaming",
                                                 input=truncated_prompt,
@@ -408,3 +590,9 @@ class ChatGPTProvider(BaseProvider):
                 }
             )
             raise ProviderError("chatgpt-5", f"Unexpected streaming error: {type(e).__name__}", e)
+
+    def _truncate_text(self, text: str, max_length: int) -> str:
+        """Truncate text to max_length, adding ellipsis if truncated."""
+        if len(text) <= max_length:
+            return text
+        return text[:max_length - 3] + "..."

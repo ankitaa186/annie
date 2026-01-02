@@ -19,7 +19,7 @@ so that I understand how Annie is gathering information.
    - Emit status after tool completion: "✅ {tool_name} complete: {brief_result}"
    - Brief result examples:
      - get_portfolio: "3 holdings, $15,420 value"
-     - analyze_stock: "AAPL $175.50 (+2.3%)"
+     - get_stock_data: "AAPL $175.50 (+2.3%)"
      - internet_search: "Found 5 results"
      - get_user_profile: "Profile loaded (67% complete)"
    - Result summary is concise (<50 chars) and informative
@@ -35,7 +35,7 @@ so that I understand how Annie is gathering information.
    - update_holding
    - remove_holding
    - clear_portfolio
-   - analyze_stock
+   - get_stock_data
    - get_stock_history
    - get_user_profile
    - store_memory
@@ -66,7 +66,7 @@ so that I understand how Annie is gathering information.
   - [x] clear_portfolio: "Clearing portfolio..." → "Portfolio cleared"
 
 - [x] Task 4: Instrument stock analysis tools (AC: #4)
-  - [x] analyze_stock: "Analyzing {ticker}..." → "{ticker} ${price} ({change}%)"
+  - [x] get_stock_data: "Analyzing {ticker}..." → "{ticker} ${price} ({change}%)"
   - [x] get_stock_history: "Fetching {ticker} history..." → "History loaded: {period}"
 
 - [x] Task 5: Instrument memory/profile tools (AC: #4)
@@ -150,7 +150,7 @@ def summarize_memory(result: dict, operation: str) -> str:
 
 SUMMARIZERS = {
     "get_portfolio": summarize_portfolio,
-    "analyze_stock": summarize_stock,
+    "get_stock_data": summarize_stock,
     "internet_search": summarize_search,
     "get_user_profile": summarize_profile,
     # ... etc
@@ -220,7 +220,7 @@ Successfully implemented Story 11.4 by instrumenting all MCP tools with real-tim
 - ✅ **AC #1: Tool Call Start Status** - Emits "🔧 Calling {tool_name}..." before tool execution (line 288)
 - ✅ **AC #2: Tool Result Status** - Emits "✅ {tool_name} complete: {brief_result}" after success (lines 375-376)
 - ✅ **AC #3: Tool Error Status** - Emits "⚠️ {tool_name} failed: {brief_error}" on failure (lines 332, 350, 413, 429, 457)
-- ✅ **AC #4: All MCP Tools Instrumented** - All 11 tools (get_portfolio, add_holding, update_holding, remove_holding, clear_portfolio, analyze_stock, get_stock_history, get_user_profile, store_memory, retrieve_memories, internet_search) have summarizers registered
+- ✅ **AC #4: All MCP Tools Instrumented** - All 11 tools (get_portfolio, add_holding, update_holding, remove_holding, clear_portfolio, get_stock_data, get_stock_history, get_user_profile, store_memory, retrieve_memories, internet_search) have summarizers registered
 
 **Testing:**
 

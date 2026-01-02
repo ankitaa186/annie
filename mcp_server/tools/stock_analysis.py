@@ -9,6 +9,7 @@ Provides tools for analyzing individual stocks including:
 """
 
 import time
+from datetime import datetime
 from typing import Any, Dict, Optional
 
 import pandas as pd
@@ -107,22 +108,28 @@ def determine_trend(ma_50: Optional[float], ma_200: Optional[float], current_pri
 # =============================================================================
 
 
-async def analyze_stock_tool_handler(
+async def get_stock_data_tool_handler(
     ticker: str,
-    include_technicals: bool = True
+    include_technicals: bool = True,
+    options_expiration: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Analyze a stock and return comprehensive market data.
 
-    Fetches real-time price data, fundamentals, and optionally technical indicators
-    via Yahoo Finance.
+    Fetches real-time price data, fundamentals, optionally technical indicators,
+    and optionally options chain data via Yahoo Finance.
 
     Args:
         ticker: Stock ticker symbol (e.g., 'AAPL', 'GOOGL')
         include_technicals: Whether to include RSI, moving averages, trend analysis
+        options_expiration: Options chain to fetch (default: None = no options)
+            - None: Don't fetch options data
+            - "nearest": Fetch the nearest available expiration
+            - "YYYY-MM-DD": Fetch specific expiration (e.g., "2026-02-20")
 
     Returns:
-        dict: Comprehensive stock analysis including price, fundamentals, and technicals
+        dict: Comprehensive stock analysis including price, fundamentals, technicals,
+              and optionally options chain data
     """
     start_time = time.time()
 
@@ -130,7 +137,7 @@ async def analyze_stock_tool_handler(
     normalized_ticker = normalize_ticker(ticker)
     if normalized_ticker is None:
         logger.warning(
-            "Invalid ticker format for analyze_stock",
+            "Invalid ticker format for get_stock_data",
             extra={"ticker": ticker}
         )
         return {
@@ -271,6 +278,111 @@ async def analyze_stock_tool_handler(
                 result["ma_200"] = None
                 result["trend"] = "unknown"
 
+        # Add options chain data if requested
+        if options_expiration is not None:
+            try:
+                # Get available expiration dates
+                available_expirations = list(stock.options) if stock.options else []
+
+                if not available_expirations:
+                    result["options"] = {
+                        "status": "unavailable",
+                        "message": f"No options available for {normalized_ticker}",
+                        "available_expirations": []
+                    }
+                else:
+                    # Determine which expiration to fetch
+                    target_expiration = None
+
+                    if options_expiration.lower() == "nearest":
+                        target_expiration = available_expirations[0]
+                    elif options_expiration in available_expirations:
+                        target_expiration = options_expiration
+                    else:
+                        # Try to find closest match
+                        result["options"] = {
+                            "status": "invalid_expiration",
+                            "message": f"Expiration '{options_expiration}' not available",
+                            "available_expirations": available_expirations
+                        }
+                        target_expiration = None
+
+                    if target_expiration:
+                        # Fetch the options chain
+                        chain = stock.option_chain(target_expiration)
+
+                        # Calculate days to expiry
+                        exp_date = datetime.strptime(target_expiration, "%Y-%m-%d")
+                        days_to_expiry = (exp_date - datetime.now()).days
+
+                        # Process calls - get key fields, limit to reasonable strikes
+                        calls_df = chain.calls
+                        current = result.get("current_price", 0) or 0
+
+                        # Filter to strikes within 30% of current price for relevance
+                        if current > 0:
+                            strike_min = current * 0.7
+                            strike_max = current * 1.3
+                            calls_df = calls_df[(calls_df["strike"] >= strike_min) & (calls_df["strike"] <= strike_max)]
+                            puts_df = chain.puts[(chain.puts["strike"] >= strike_min) & (chain.puts["strike"] <= strike_max)]
+                        else:
+                            puts_df = chain.puts
+
+                        # Convert to list of dicts with key fields
+                        def format_options(df):
+                            options_list = []
+                            for _, row in df.iterrows():
+                                opt = {
+                                    "strike": float(row["strike"]),
+                                    "bid": float(row["bid"]) if pd.notna(row["bid"]) else 0,
+                                    "ask": float(row["ask"]) if pd.notna(row["ask"]) else 0,
+                                    "last": float(row["lastPrice"]) if pd.notna(row["lastPrice"]) else 0,
+                                    "volume": int(row["volume"]) if pd.notna(row["volume"]) else 0,
+                                    "openInterest": int(row["openInterest"]) if pd.notna(row["openInterest"]) else 0,
+                                    "impliedVolatility": round(float(row["impliedVolatility"]) * 100, 1) if pd.notna(row["impliedVolatility"]) else None,
+                                    "inTheMoney": bool(row["inTheMoney"]) if pd.notna(row["inTheMoney"]) else False
+                                }
+                                # Calculate bid-ask spread
+                                if opt["bid"] > 0 and opt["ask"] > 0:
+                                    opt["spread"] = round(opt["ask"] - opt["bid"], 2)
+                                    opt["spreadPct"] = round((opt["spread"] / opt["ask"]) * 100, 1)
+                                options_list.append(opt)
+                            return options_list
+
+                        result["options"] = {
+                            "status": "success",
+                            "expiration": target_expiration,
+                            "days_to_expiry": days_to_expiry,
+                            "calls": format_options(calls_df),
+                            "puts": format_options(puts_df),
+                            "available_expirations": available_expirations
+                        }
+
+                        logger.info(
+                            "Options chain fetched successfully",
+                            extra={
+                                "ticker": normalized_ticker,
+                                "expiration": target_expiration,
+                                "calls_count": len(result["options"]["calls"]),
+                                "puts_count": len(result["options"]["puts"])
+                            }
+                        )
+
+            except Exception as e:
+                logger.warning(
+                    "Failed to fetch options chain",
+                    extra={
+                        "ticker": normalized_ticker,
+                        "options_expiration": options_expiration,
+                        "error": str(e)
+                    }
+                )
+                result["options"] = {
+                    "status": "error",
+                    "message": f"Failed to fetch options: {str(e)}",
+                    "available_expirations": []
+                }
+
         duration_ms = int((time.time() - start_time) * 1000)
 
         logger.info(
@@ -304,9 +416,9 @@ async def analyze_stock_tool_handler(
 
 
 # Analyze stock tool definition
-analyze_stock_tool = {
-    "name": "analyze_stock",
-    "description": "Analyze a stock and get comprehensive market data including current price, daily change, 52-week range, P/E ratio, market cap, volume, and technical indicators (RSI, moving averages, trend). Use this tool when the user asks about a specific stock, wants price information, or asks 'how is [stock] doing?'",
+get_stock_data_tool = {
+    "name": "get_stock_data",
+    "description": """Analyze a stock and get comprehensive market data including current price, daily change, 52-week range, P/E ratio, market cap, volume, technical indicators (RSI, moving averages, trend), and optionally options chain data.""",
     "inputSchema": {
         "type": "object",
         "properties": {
@@ -318,11 +430,15 @@ analyze_stock_tool = {
                 "type": "boolean",
                 "description": "Whether to include technical indicators (RSI, moving averages, trend). Default: true",
                 "default": True
+            },
+            "options_expiration": {
+                "type": "string",
+                "description": "Options chain expiration to fetch. Use 'nearest' for closest expiration, or a specific date like '2026-02-20'. Omit to skip options data."
             }
         },
         "required": ["ticker"]
     },
-    "handler": analyze_stock_tool_handler
+    "handler": get_stock_data_tool_handler
 }
 
 

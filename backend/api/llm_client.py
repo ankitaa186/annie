@@ -8,6 +8,7 @@ This module now acts as a thin facade/factory, delegating all operations
 to provider-specific implementations (GrokProvider, ChatGPTProvider, etc.).
 """
 
+import time
 from typing import Any, AsyncGenerator, Dict, List, Optional
 from api.config import get_config
 from api.logging import get_logger
@@ -21,6 +22,122 @@ from api.providers import (
 )
 
 logger = get_logger(__name__)
+
+
+# Backoff configuration for rate-limited providers
+# When a provider hits 429, we back off for this duration before trying it again
+PROVIDER_BACKOFF_SECONDS = 2 * 60 * 60  # 2 hours
+
+# Redis key prefix for backoff state
+BACKOFF_REDIS_KEY_PREFIX = "provider_backoff:"
+
+
+def _get_redis_client():
+    """Get Redis client for backoff state persistence."""
+    import redis
+    config = get_config()
+    redis_host = config.get("REDIS_HOST", "redis")
+    redis_port = int(config.get("REDIS_PORT", 6379))
+    return redis.Redis(host=redis_host, port=redis_port, decode_responses=True)
+
+
+def _is_provider_in_backoff(provider_name: str) -> bool:
+    """
+    Check if a provider is currently in backoff period.
+    Uses Redis for cross-worker persistence.
+
+    Args:
+        provider_name: Name of the provider to check
+
+    Returns:
+        True if provider is in backoff, False otherwise
+    """
+    try:
+        redis_client = _get_redis_client()
+        key = f"{BACKOFF_REDIS_KEY_PREFIX}{provider_name}"
+        backoff_until_str = redis_client.get(key)
+
+        if not backoff_until_str:
+            return False
+
+        backoff_until = float(backoff_until_str)
+        if time.time() < backoff_until:
+            return True
+
+        # Backoff expired, Redis TTL will clean it up
+        return False
+
+    except Exception as e:
+        logger.warning(
+            "Failed to check provider backoff from Redis, assuming not in backoff",
+            extra={"provider": provider_name, "error": str(e)}
+        )
+        return False
+
+
+def _set_provider_backoff(provider_name: str, duration_seconds: int = PROVIDER_BACKOFF_SECONDS):
+    """
+    Set a provider into backoff mode.
+    Uses Redis for cross-worker persistence.
+
+    Args:
+        provider_name: Name of the provider to back off
+        duration_seconds: How long to back off (default: 2 hours)
+    """
+    try:
+        redis_client = _get_redis_client()
+        key = f"{BACKOFF_REDIS_KEY_PREFIX}{provider_name}"
+        backoff_until = time.time() + duration_seconds
+
+        # Set with TTL so it auto-expires
+        redis_client.setex(key, duration_seconds, str(backoff_until))
+
+        logger.warning(
+            "Provider entered backoff mode (persisted to Redis)",
+            extra={
+                "provider": provider_name,
+                "backoff_duration_hours": duration_seconds / 3600,
+                "backoff_until_timestamp": backoff_until,
+                "event": "provider_backoff_started"
+            }
+        )
+
+    except Exception as e:
+        logger.error(
+            "Failed to set provider backoff in Redis",
+            extra={"provider": provider_name, "error": str(e)}
+        )
+
+
+def _get_backoff_remaining(provider_name: str) -> Optional[float]:
+    """
+    Get remaining backoff time for a provider.
+    Uses Redis for cross-worker persistence.
+
+    Args:
+        provider_name: Name of the provider
+
+    Returns:
+        Remaining seconds in backoff, or None if not in backoff
+    """
+    try:
+        redis_client = _get_redis_client()
+        key = f"{BACKOFF_REDIS_KEY_PREFIX}{provider_name}"
+        backoff_until_str = redis_client.get(key)
+
+        if not backoff_until_str:
+            return None
+
+        backoff_until = float(backoff_until_str)
+        remaining = backoff_until - time.time()
+        return max(0, remaining) if remaining > 0 else None
+
+    except Exception as e:
+        logger.warning(
+            "Failed to get provider backoff remaining from Redis",
+            extra={"provider": provider_name, "error": str(e)}
+        )
+        return None
 
 
 # Re-export exception types for backward compatibility
@@ -167,7 +284,7 @@ class LLMClient:
         Fallback chains:
         - grok-4 → chatgpt-5
         - chatgpt-5 → grok-4
-        - gemini-3-pro-preview → gemini-3-flash-preview → grok-4
+        - gemini-3-pro-preview → chatgpt-5 (GPT-5.2) → gemini-3-flash-preview → grok-4
         - gemini-3-flash-preview → grok-4
         - gemini-2.5-pro → grok-4
 
@@ -182,8 +299,10 @@ class LLMClient:
         elif failed_provider == "chatgpt-5" and self.providers_available["grok-4"]:
             return "grok-4"
         elif failed_provider == "gemini-3-pro-preview":
-            # Gemini 3 Pro → Gemini 3 Flash → Grok-4
-            if self.providers_available["gemini-3-flash-preview"]:
+            # Gemini 3 Pro → ChatGPT (GPT-5.2) → Gemini 3 Flash → Grok-4
+            if self.providers_available["chatgpt-5"]:
+                return "chatgpt-5"
+            elif self.providers_available["gemini-3-flash-preview"]:
                 return "gemini-3-flash-preview"
             elif self.providers_available["grok-4"]:
                 return "grok-4"
@@ -224,6 +343,21 @@ class LLMClient:
         provider_name = self.primary_provider_name
         fallback_name = self._get_fallback_provider(provider_name)
 
+        # Check if primary provider is in backoff (e.g., after hitting 429)
+        skip_primary = False
+        if _is_provider_in_backoff(provider_name):
+            remaining = _get_backoff_remaining(provider_name)
+            logger.info(
+                "Primary provider in backoff, skipping to fallback",
+                extra={
+                    "provider": provider_name,
+                    "backoff_remaining_minutes": round(remaining / 60, 1) if remaining else 0,
+                    "fallback_provider": fallback_name,
+                    "event": "provider_backoff_skip"
+                }
+            )
+            skip_primary = True
+
         logger.info(
             "Starting streaming chat completion",
             extra={
@@ -231,63 +365,84 @@ class LLMClient:
                 "fallback_provider": fallback_name,
                 "message_count": len(messages),
                 "tools_provided": len(tools) if tools else 0,
-                "mcp_client_provided": mcp_client is not None
+                "mcp_client_provided": mcp_client is not None,
+                "primary_in_backoff": skip_primary
             }
         )
 
-        # Try primary provider
-        try:
-            async for event in self.provider.stream_chat_completion(messages, tools, mcp_client=mcp_client):
-                yield event
-            return  # Successfully completed streaming
+        # Try primary provider (unless in backoff)
+        if not skip_primary:
+            try:
+                async for event in self.provider.stream_chat_completion(messages, tools, mcp_client=mcp_client):
+                    yield event
+                return  # Successfully completed streaming
 
-        except RateLimitError as e:
-            # Log rate limit and try fallback
-            logger.warning(
-                "Rate limit on primary provider during streaming, attempting fallback",
-                extra={
-                    "failed_provider": provider_name,
-                    "fallback_provider": fallback_name,
-                    "retry_after": e.retry_after
-                }
-            )
+            except RateLimitError as e:
+                # Set backoff for this provider
+                _set_provider_backoff(provider_name)
 
-            # If no fallback, yield error event
-            if not fallback_name:
+                # Log rate limit and try fallback
+                logger.warning(
+                    "Rate limit on primary provider during streaming, attempting fallback",
+                    extra={
+                        "failed_provider": provider_name,
+                        "fallback_provider": fallback_name,
+                        "retry_after": e.retry_after,
+                        "backoff_hours": PROVIDER_BACKOFF_SECONDS / 3600
+                    }
+                )
+
+                # If no fallback, yield error event
+                if not fallback_name:
+                    logger.error(
+                        "No fallback provider available for streaming rate limit",
+                        extra={"failed_provider": provider_name}
+                    )
+                    yield {
+                        "type": "error",
+                        "message": "I'm experiencing high demand right now. Please try again in a few minutes.",
+                        "code": "RATE_LIMIT_NO_FALLBACK"
+                    }
+                    return
+
+            except ProviderError as e:
+                # Log provider failure and try fallback
+                logger.warning(
+                    "Primary provider failed during streaming, attempting fallback",
+                    extra={
+                        "failed_provider": provider_name,
+                        "fallback_provider": fallback_name,
+                        "error": e.message
+                    }
+                )
+
+                # If no fallback, yield error event
+                if not fallback_name:
+                    logger.error(
+                        "No fallback provider available for streaming",
+                        extra={"failed_provider": provider_name}
+                    )
+                    yield {
+                        "type": "error",
+                        "message": "I'm experiencing technical difficulties. Please try again in a moment.",
+                        "code": "PROVIDER_ERROR"
+                    }
+                    return
+
+        # If we skipped primary or it failed, try fallback provider
+        if not fallback_name:
+            # No fallback available and we skipped primary (in backoff)
+            if skip_primary:
                 logger.error(
-                    "No fallback provider available for streaming rate limit",
-                    extra={"failed_provider": provider_name}
+                    "Primary provider in backoff and no fallback available",
+                    extra={"provider": provider_name}
                 )
                 yield {
                     "type": "error",
-                    "message": "I'm experiencing technical difficulties. Please try again in a moment.",
-                    "code": "RATE_LIMIT_ERROR"
+                    "message": "I'm experiencing high demand right now. Please try again in a few minutes.",
+                    "code": "PROVIDER_IN_BACKOFF"
                 }
-                return
-
-        except ProviderError as e:
-            # Log provider failure and try fallback
-            logger.warning(
-                "Primary provider failed during streaming, attempting fallback",
-                extra={
-                    "failed_provider": provider_name,
-                    "fallback_provider": fallback_name,
-                    "error": e.message
-                }
-            )
-
-            # If no fallback, yield error event
-            if not fallback_name:
-                logger.error(
-                    "No fallback provider available for streaming",
-                    extra={"failed_provider": provider_name}
-                )
-                yield {
-                    "type": "error",
-                    "message": "I'm experiencing technical difficulties. Please try again in a moment.",
-                    "code": "PROVIDER_ERROR"
-                }
-                return
+            return
 
         # Try fallback provider
         try:
@@ -322,8 +477,27 @@ class LLMClient:
                 }
             )
 
-        except (ProviderError, RateLimitError) as e:
-            # Both providers failed
+        except RateLimitError as e:
+            # Both providers hit rate limits
+            logger.error(
+                "All providers rate limited during streaming",
+                extra={
+                    "primary_provider": provider_name,
+                    "fallback_provider": fallback_name,
+                    "error": str(e),
+                    "retry_after": getattr(e, 'retry_after', None)
+                }
+            )
+
+            # Yield user-friendly rate limit message
+            yield {
+                "type": "error",
+                "message": "I'm experiencing high demand right now. Please try again in a few minutes.",
+                "code": "ALL_PROVIDERS_RATE_LIMITED"
+            }
+
+        except ProviderError as e:
+            # Both providers failed (non-rate-limit error)
             logger.error(
                 "All providers failed during streaming",
                 extra={

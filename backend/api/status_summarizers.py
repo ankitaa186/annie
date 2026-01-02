@@ -159,8 +159,8 @@ def summarize_clear_portfolio_result(result: Dict[str, Any]) -> str:
     return f"Portfolio cleared ({holdings_removed} removed)"
 
 
-def summarize_analyze_stock_result(result: Dict[str, Any]) -> str:
-    """Summarize analyze_stock tool result.
+def summarize_get_stock_data_result(result: Dict[str, Any]) -> str:
+    """Summarize get_stock_data tool result.
 
     Result shape:
         {
@@ -588,7 +588,7 @@ SUMMARIZERS = {
     "update_holding": summarize_update_holding_result,
     "remove_holding": summarize_remove_holding_result,
     "clear_portfolio": summarize_clear_portfolio_result,
-    "analyze_stock": summarize_analyze_stock_result,
+    "get_stock_data": summarize_get_stock_data_result,
     "get_stock_history": summarize_stock_history_result,
     "get_user_profile": summarize_profile_result,
     "store_memory": summarize_store_memory_result,
@@ -620,7 +620,7 @@ def summarize_tool_result(tool_name: str, result: Dict[str, Any]) -> str:
 
     Examples:
         summarize_tool_result("get_portfolio", {...}) -> "3 holdings, $15,420 value"
-        summarize_tool_result("analyze_stock", {...}) -> "AAPL $175.50 (+2.3%)"
+        summarize_tool_result("get_stock_data", {...}) -> "AAPL $175.50 (+2.3%)"
         summarize_tool_result("unknown_tool", {...}) -> "Complete"
     """
     # Look up tool-specific summarizer

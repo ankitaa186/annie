@@ -684,7 +684,7 @@ This document provides the complete epic and story breakdown for annie, decompos
 
 **Acceptance Criteria:**
 
-**AC #1:** Given a user asks about a stock ("Analyze AAPL"), when Annie needs market analysis, then it calls the `analyze_stock` tool with stock symbol
+**AC #1:** Given a user asks about a stock ("Analyze AAPL"), when Annie needs market analysis, then it calls the `get_stock_data` tool with stock symbol
 
 **AC #2:** Given a stock symbol, when the tool executes, then it retrieves real-time price and historical data from stock API (Alpha Vantage/Polygon.io/Finnhub) within 3 seconds (p95)
 

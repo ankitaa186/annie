@@ -3,6 +3,8 @@ Integration tests for end-to-end streaming flow.
 
 Tests complete flow from POST /api/chat to GET /api/stream with
 real-like interactions between components.
+
+IMPORTANT: These tests require running Redis service.
 """
 
 import json
@@ -13,6 +15,33 @@ from fastapi.testclient import TestClient
 
 from api.main import app
 from api.routes.stream import active_streams
+
+
+def check_redis_available() -> bool:
+    """Check if Redis is available for e2e tests."""
+    try:
+        import socket
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(1)
+        result = sock.connect_ex(('redis', 6379))
+        sock.close()
+        if result == 0:
+            return True
+        # Try localhost as fallback
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(1)
+        result = sock.connect_ex(('localhost', 6379))
+        sock.close()
+        return result == 0
+    except Exception:
+        return False
+
+
+REDIS_AVAILABLE = check_redis_available()
+pytestmark = pytest.mark.skipif(
+    not REDIS_AVAILABLE,
+    reason="Redis service not available for e2e tests"
+)
 
 
 @pytest.fixture

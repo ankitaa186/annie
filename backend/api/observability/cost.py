@@ -5,9 +5,9 @@ Pricing as of December 2025:
 - Grok-4: Free until November 21, 2025 (promotional period)
           After: TBD (will be updated)
           Live Search: $0.025 per source (currently free during promo)
-- ChatGPT-5 (GPT-4):
-          Input: $0.03 per 1K tokens
-          Output: $0.06 per 1K tokens
+- ChatGPT-5 (GPT-5.2):
+          Input: $1.75 per 1M tokens
+          Output: $14.00 per 1M tokens
 - Gemini 3 Pro Preview:
           Input: $2.00 per 1M tokens
           Output: $12.00 per 1M tokens
@@ -54,7 +54,7 @@ def calculate_grok_cost(prompt_tokens: int, completion_tokens: int, sources_used
 
 def calculate_chatgpt_cost(prompt_tokens: int, completion_tokens: int) -> dict:
     """
-    Calculate cost for ChatGPT-5 (GPT-4) API usage.
+    Calculate cost for ChatGPT-5 (GPT-5.2) API usage.
 
     Args:
         prompt_tokens: Number of input tokens
@@ -63,12 +63,14 @@ def calculate_chatgpt_cost(prompt_tokens: int, completion_tokens: int) -> dict:
     Returns:
         Dictionary with input_cost, output_cost, total_cost in USD
     """
-    # ChatGPT-5 (GPT-4) pricing as of November 2025
-    # Input: $0.03 per 1K tokens
-    # Output: $0.06 per 1K tokens
+    # GPT-5.2 pricing as of December 2025
+    # Input: $1.75 per 1M tokens
+    # Output: $14.00 per 1M tokens
+    INPUT_COST = 1.75    # $1.75 per 1M tokens
+    OUTPUT_COST = 14.00  # $14.00 per 1M tokens
 
-    input_cost = (prompt_tokens / 1000) * 0.03
-    output_cost = (completion_tokens / 1000) * 0.06
+    input_cost = (prompt_tokens / 1_000_000) * INPUT_COST
+    output_cost = (completion_tokens / 1_000_000) * OUTPUT_COST
 
     return {
         "input_cost": round(input_cost, 6),

@@ -19,7 +19,9 @@ import httpx
 from mcp_server.tools import (
     update_user_profile_tool_handler,
     update_user_profile_tool,
-    ALLOWED_PROFILE_CATEGORIES
+    ALLOWED_PROFILE_CATEGORIES,
+    CANONICAL_FIELDS,
+    FIELD_NAME_ALIASES
 )
 
 
@@ -113,6 +115,17 @@ class TestUpdateUserProfileToolHandler:
     @pytest.mark.asyncio
     async def test_all_valid_categories(self, mock_profile_response, mock_httpx_response):
         """AC #2: All valid categories are accepted."""
+        # Map each category to a valid canonical field name
+        category_field_map = {
+            "basics": "name",
+            "preferences": "communication_style",
+            "goals": "short_term",
+            "interests": "hobbies",
+            "background": "skills",
+            "health": "allergies",
+            "personality": "personality_type",
+            "values": "life_values",
+        }
         for category in ALLOWED_PROFILE_CATEGORIES:
             with patch('mcp_server.tools.profile.httpx.AsyncClient') as mock_client_class:
                 mock_client = AsyncMock()
@@ -125,7 +138,7 @@ class TestUpdateUserProfileToolHandler:
                 result = await update_user_profile_tool_handler(
                     user_id="user123",
                     category=category,
-                    field_name="test_field",
+                    field_name=category_field_map[category],
                     value="test_value"
                 )
 
@@ -159,7 +172,7 @@ class TestUpdateUserProfileToolHandler:
             result = await update_user_profile_tool_handler(
                 user_id="user123",
                 category="preferences",
-                field_name="test_field",
+                field_name="communication_style",
                 value=test_value
             )
 
@@ -174,7 +187,7 @@ class TestUpdateUserProfileToolHandler:
             mock_client.__aexit__.return_value = None
             mock_client.put = AsyncMock(return_value=mock_httpx_response(200, {
                 "user_id": "user123",
-                "value": "test",
+                "value": "formal",
                 "confidence": 100.0,
                 "last_updated": "2025-12-30T12:00:00Z"
             }))
@@ -183,8 +196,8 @@ class TestUpdateUserProfileToolHandler:
             await update_user_profile_tool_handler(
                 user_id="user123",
                 category="preferences",
-                field_name="test",
-                value="test"
+                field_name="communication_style",
+                value="formal"
             )
 
             # Verify PUT was called with source="llm_explicit"
@@ -205,20 +218,20 @@ class TestUpdateUserProfileToolHandler:
             result = await update_user_profile_tool_handler(
                 user_id="user123",
                 category="preferences",
-                field_name="nonexistent",
-                value="test"
+                field_name="communication_style",
+                value="formal"
             )
 
             assert result["status"] == "error"
             assert result["error_code"] == "NOT_FOUND"
             assert "not found" in result["error_message"].lower()
-            assert "preferences/nonexistent" in result["error_message"]
+            assert "preferences/communication_style" in result["error_message"]
 
     @pytest.mark.asyncio
     async def test_400_validation_error(self, mock_httpx_response):
         """AC #6: Handle 400 (Invalid Request) with validation error."""
         mock_response = mock_httpx_response(400, {
-            "message": "Field name contains invalid characters"
+            "message": "Value format is invalid"
         })
 
         with patch('mcp_server.tools.profile.httpx.AsyncClient') as mock_client_class:
@@ -231,13 +244,13 @@ class TestUpdateUserProfileToolHandler:
             result = await update_user_profile_tool_handler(
                 user_id="user123",
                 category="preferences",
-                field_name="invalid!field",
-                value="test"
+                field_name="communication_style",
+                value="invalid_value_that_api_rejects"
             )
 
             assert result["status"] == "error"
             assert result["error_code"] == "VALIDATION_ERROR"
-            assert "invalid characters" in result["error_message"].lower()
+            assert "invalid" in result["error_message"].lower()
 
     @pytest.mark.asyncio
     async def test_retry_on_500(self, mock_profile_response, mock_httpx_response):
@@ -262,8 +275,8 @@ class TestUpdateUserProfileToolHandler:
                 result = await update_user_profile_tool_handler(
                     user_id="user123",
                     category="preferences",
-                    field_name="test",
-                    value="test"
+                    field_name="communication_style",
+                    value="formal"
                 )
 
             assert result["status"] == "success"
@@ -283,8 +296,8 @@ class TestUpdateUserProfileToolHandler:
                 result = await update_user_profile_tool_handler(
                     user_id="user123",
                     category="preferences",
-                    field_name="test",
-                    value="test"
+                    field_name="communication_style",
+                    value="formal"
                 )
 
             assert result["status"] == "error"
@@ -305,8 +318,8 @@ class TestUpdateUserProfileToolHandler:
                 result = await update_user_profile_tool_handler(
                     user_id="user123",
                     category="preferences",
-                    field_name="test",
-                    value="test"
+                    field_name="communication_style",
+                    value="formal"
                 )
 
             assert result["status"] == "error"
@@ -336,8 +349,8 @@ class TestUpdateUserProfileToolHandler:
                 result = await update_user_profile_tool_handler(
                     user_id="user123",
                     category="preferences",
-                    field_name="test",
-                    value="test"
+                    field_name="communication_style",
+                    value="formal"
                 )
 
             assert result["status"] == "success"
@@ -421,8 +434,8 @@ class TestUpdateUserProfileToolHandler:
             await update_user_profile_tool_handler(
                 user_id="user123",
                 category="preferences",
-                field_name="test",
-                value="test"
+                field_name="communication_style",
+                value="formal"
             )
 
             mock_client_class.assert_called_once_with(timeout=10.0)
@@ -445,12 +458,12 @@ class TestUpdateUserProfileToolHandler:
                 await update_user_profile_tool_handler(
                     user_id="user123",
                     category="preferences",
-                    field_name="test",
-                    value="test"
+                    field_name="communication_style",
+                    value="formal"
                 )
 
                 call_args = mock_client.put.call_args
-                url = call_args[0][0]
+                url = call_args.args[0] if call_args.args else call_args.kwargs.get("url")
                 assert "http://custom-host:9999" in url
 
     @pytest.mark.asyncio
@@ -469,12 +482,12 @@ class TestUpdateUserProfileToolHandler:
                 await update_user_profile_tool_handler(
                     user_id="user123",
                     category="preferences",
-                    field_name="test",
-                    value="test"
+                    field_name="communication_style",
+                    value="formal"
                 )
 
                 call_args = mock_client.put.call_args
-                url = call_args[0][0]
+                url = call_args.args[0] if call_args.args else call_args.kwargs.get("url")
                 assert "host.docker.internal:8080" in url
 
     @pytest.mark.asyncio
@@ -490,8 +503,8 @@ class TestUpdateUserProfileToolHandler:
             result = await update_user_profile_tool_handler(
                 user_id="user123",
                 category="preferences",
-                field_name="test",
-                value="test"
+                field_name="communication_style",
+                value="formal"
             )
 
             assert result["status"] == "error"
@@ -511,8 +524,8 @@ class TestUpdateUserProfileToolHandler:
             result = await update_user_profile_tool_handler(
                 user_id="user123",
                 category="preferences",
-                field_name="test",
-                value="test"
+                field_name="communication_style",
+                value="formal"
             )
 
             assert result["status"] == "error"
@@ -618,10 +631,133 @@ class TestAllowedProfileCategories:
     """Test ALLOWED_PROFILE_CATEGORIES constant."""
 
     def test_has_expected_categories(self):
-        """Test that all expected categories are present."""
-        expected = {"basics", "preferences", "goals", "interests", "background"}
+        """Test that all expected categories are present (8 total, matching agentic-memories)."""
+        expected = {
+            "basics", "preferences", "goals", "interests", "background",
+            "health", "personality", "values"
+        }
         assert ALLOWED_PROFILE_CATEGORIES == expected
 
     def test_is_set_type(self):
         """Test that it's a set for fast lookup."""
         assert isinstance(ALLOWED_PROFILE_CATEGORIES, set)
+
+
+class TestCanonicalFieldsValidation:
+    """Test CANONICAL_FIELDS validation and FIELD_NAME_ALIASES normalization."""
+
+    def test_all_categories_have_canonical_fields(self):
+        """Every allowed category has canonical field definitions."""
+        for category in ALLOWED_PROFILE_CATEGORIES:
+            assert category in CANONICAL_FIELDS
+            assert len(CANONICAL_FIELDS[category]) > 0
+
+    def test_canonical_fields_are_sets(self):
+        """Canonical fields are sets for fast lookup."""
+        for category, fields in CANONICAL_FIELDS.items():
+            assert isinstance(fields, set)
+
+    @pytest.mark.asyncio
+    async def test_non_canonical_field_rejected(self):
+        """Non-canonical field names are rejected with helpful error."""
+        result = await update_user_profile_tool_handler(
+            user_id="user123",
+            category="basics",
+            field_name="invalid_field_xyz",
+            value="test"
+        )
+
+        assert result["status"] == "error"
+        assert result["error_code"] == "VALIDATION_ERROR"
+        assert "Invalid field" in result["error_message"]
+        # Should list valid fields
+        assert "name" in result["error_message"]
+
+    @pytest.mark.asyncio
+    async def test_alias_normalized_to_canonical(self, mock_profile_response, mock_httpx_response):
+        """Field name aliases are normalized to canonical names."""
+        with patch('mcp_server.tools.profile.httpx.AsyncClient') as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = None
+            mock_client.put = AsyncMock(return_value=mock_httpx_response(200, mock_profile_response))
+            mock_client_class.return_value = mock_client
+
+            # Use 'birthdate' which should be normalized to 'birthday'
+            await update_user_profile_tool_handler(
+                user_id="user123",
+                category="basics",
+                field_name="birthdate",  # alias
+                value="1990-01-15"
+            )
+
+            # Verify the canonical name was used in the URL
+            call_args = mock_client.put.call_args
+            url = call_args[0][0]
+            assert "/birthday" in url  # normalized
+            assert "/birthdate" not in url
+
+    @pytest.mark.asyncio
+    async def test_singular_to_plural_alias(self, mock_profile_response, mock_httpx_response):
+        """Singular field names normalized to plural."""
+        with patch('mcp_server.tools.profile.httpx.AsyncClient') as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = None
+            mock_client.put = AsyncMock(return_value=mock_httpx_response(200, mock_profile_response))
+            mock_client_class.return_value = mock_client
+
+            await update_user_profile_tool_handler(
+                user_id="user123",
+                category="interests",
+                field_name="hobby",  # singular alias
+                value=["hiking", "reading"]
+            )
+
+            call_args = mock_client.put.call_args
+            url = call_args[0][0]
+            assert "/hobbies" in url  # normalized to plural
+
+    def test_field_name_aliases_map_to_canonical_fields(self):
+        """All aliases map to fields that exist in CANONICAL_FIELDS."""
+        for alias, canonical in FIELD_NAME_ALIASES.items():
+            # Find the category containing the canonical field
+            found = False
+            for category, fields in CANONICAL_FIELDS.items():
+                if canonical in fields:
+                    found = True
+                    break
+            assert found, f"Alias '{alias}' maps to '{canonical}' which is not in any category"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("category,field_name", [
+        ("basics", "name"),
+        ("basics", "location"),
+        ("basics", "occupation"),
+        ("preferences", "communication_style"),
+        ("preferences", "risk_tolerance"),
+        ("goals", "short_term"),
+        ("goals", "long_term"),
+        ("interests", "hobbies"),
+        ("background", "skills"),
+        ("health", "allergies"),
+        ("personality", "personality_type"),
+        ("values", "life_values"),
+    ])
+    async def test_canonical_fields_accepted(self, category, field_name, mock_profile_response, mock_httpx_response):
+        """Various canonical field names are accepted."""
+        with patch('mcp_server.tools.profile.httpx.AsyncClient') as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = None
+            mock_client.put = AsyncMock(return_value=mock_httpx_response(200, mock_profile_response))
+            mock_client_class.return_value = mock_client
+
+            result = await update_user_profile_tool_handler(
+                user_id="user123",
+                category=category,
+                field_name=field_name,
+                value="test_value"
+            )
+
+            assert result["status"] == "success", f"{category}/{field_name} should be valid"

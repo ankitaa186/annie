@@ -222,7 +222,7 @@ class GeminiToolAdapter:
         self,
         tool_name: str,
         tool_result: Dict[str, Any],
-        max_size: int = 10000
+        max_size: int = 30000
     ) -> Dict[str, Any]:
         """
         Format MCP tool result for Gemini function response.
@@ -232,7 +232,7 @@ class GeminiToolAdapter:
         Args:
             tool_name: Name of the tool that was executed
             tool_result: Result from MCP tool execution
-            max_size: Maximum result size in characters (default: 10KB)
+            max_size: Maximum result size in characters (default: 30KB)
 
         Returns:
             Gemini function response format:

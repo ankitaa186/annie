@@ -37,6 +37,8 @@ from .profile import (
     update_user_profile_tool,
     update_user_profile_tool_handler,
     ALLOWED_PROFILE_CATEGORIES,
+    CANONICAL_FIELDS,
+    FIELD_NAME_ALIASES,
 )
 
 # Portfolio Tools (Epic 10)
@@ -62,8 +64,8 @@ from .stock_analysis import (
     calculate_rsi,
     format_market_cap,
     determine_trend,
-    analyze_stock_tool,
-    analyze_stock_tool_handler,
+    get_stock_data_tool,
+    get_stock_data_tool_handler,
     get_stock_history_tool,
     get_stock_history_tool_handler,
 )
@@ -127,6 +129,8 @@ __all__ = [
     "update_user_profile_tool",
     "update_user_profile_tool_handler",
     "ALLOWED_PROFILE_CATEGORIES",
+    "CANONICAL_FIELDS",
+    "FIELD_NAME_ALIASES",
 
     # Portfolio
     "normalize_ticker",
@@ -148,8 +152,8 @@ __all__ = [
     "calculate_rsi",
     "format_market_cap",
     "determine_trend",
-    "analyze_stock_tool",
-    "analyze_stock_tool_handler",
+    "get_stock_data_tool",
+    "get_stock_data_tool_handler",
     "get_stock_history_tool",
     "get_stock_history_tool_handler",
 
