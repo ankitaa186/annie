@@ -9,6 +9,7 @@ Provides tools for analyzing individual stocks including:
 """
 
 import time
+from datetime import datetime
 from typing import Any, Dict, Optional
 
 import pandas as pd
@@ -311,7 +312,6 @@ async def get_stock_data_tool_handler(
                         chain = stock.option_chain(target_expiration)
 
                         # Calculate days to expiry
-                        from datetime import datetime
                         exp_date = datetime.strptime(target_expiration, "%Y-%m-%d")
                         days_to_expiry = (exp_date - datetime.now()).days
 

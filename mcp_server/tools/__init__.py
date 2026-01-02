@@ -37,6 +37,8 @@ from .profile import (
     update_user_profile_tool,
     update_user_profile_tool_handler,
     ALLOWED_PROFILE_CATEGORIES,
+    CANONICAL_FIELDS,
+    FIELD_NAME_ALIASES,
 )
 
 # Portfolio Tools (Epic 10)
@@ -127,6 +129,8 @@ __all__ = [
     "update_user_profile_tool",
     "update_user_profile_tool_handler",
     "ALLOWED_PROFILE_CATEGORIES",
+    "CANONICAL_FIELDS",
+    "FIELD_NAME_ALIASES",
 
     # Portfolio
     "normalize_ticker",

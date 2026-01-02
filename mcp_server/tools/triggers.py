@@ -127,6 +127,8 @@ async def create_trigger_tool_handler(
 
             # If datetime doesn't have timezone offset, add it
             # This ensures the API interprets the time correctly
+            # NOTE: We strip any "Z" suffix and treat all datetimes as Pacific time,
+            # since Annie's LLM is instructed to always use Pacific time for triggers.
             if dt_str and "+" not in dt_str and "-" not in dt_str[-6:]:
                 try:
                     # Parse the naive datetime and localize it

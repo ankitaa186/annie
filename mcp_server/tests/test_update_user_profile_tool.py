@@ -115,6 +115,17 @@ class TestUpdateUserProfileToolHandler:
     @pytest.mark.asyncio
     async def test_all_valid_categories(self, mock_profile_response, mock_httpx_response):
         """AC #2: All valid categories are accepted."""
+        # Map each category to a valid canonical field name
+        category_field_map = {
+            "basics": "name",
+            "preferences": "communication_style",
+            "goals": "short_term",
+            "interests": "hobbies",
+            "background": "skills",
+            "health": "allergies",
+            "personality": "personality_type",
+            "values": "life_values",
+        }
         for category in ALLOWED_PROFILE_CATEGORIES:
             with patch('mcp_server.tools.profile.httpx.AsyncClient') as mock_client_class:
                 mock_client = AsyncMock()
@@ -127,7 +138,7 @@ class TestUpdateUserProfileToolHandler:
                 result = await update_user_profile_tool_handler(
                     user_id="user123",
                     category=category,
-                    field_name="test_field",
+                    field_name=category_field_map[category],
                     value="test_value"
                 )
 
@@ -161,7 +172,7 @@ class TestUpdateUserProfileToolHandler:
             result = await update_user_profile_tool_handler(
                 user_id="user123",
                 category="preferences",
-                field_name="test_field",
+                field_name="communication_style",
                 value=test_value
             )
 
@@ -176,7 +187,7 @@ class TestUpdateUserProfileToolHandler:
             mock_client.__aexit__.return_value = None
             mock_client.put = AsyncMock(return_value=mock_httpx_response(200, {
                 "user_id": "user123",
-                "value": "test",
+                "value": "formal",
                 "confidence": 100.0,
                 "last_updated": "2025-12-30T12:00:00Z"
             }))
@@ -185,8 +196,8 @@ class TestUpdateUserProfileToolHandler:
             await update_user_profile_tool_handler(
                 user_id="user123",
                 category="preferences",
-                field_name="test",
-                value="test"
+                field_name="communication_style",
+                value="formal"
             )
 
             # Verify PUT was called with source="llm_explicit"
@@ -207,20 +218,20 @@ class TestUpdateUserProfileToolHandler:
             result = await update_user_profile_tool_handler(
                 user_id="user123",
                 category="preferences",
-                field_name="nonexistent",
-                value="test"
+                field_name="communication_style",
+                value="formal"
             )
 
             assert result["status"] == "error"
             assert result["error_code"] == "NOT_FOUND"
             assert "not found" in result["error_message"].lower()
-            assert "preferences/nonexistent" in result["error_message"]
+            assert "preferences/communication_style" in result["error_message"]
 
     @pytest.mark.asyncio
     async def test_400_validation_error(self, mock_httpx_response):
         """AC #6: Handle 400 (Invalid Request) with validation error."""
         mock_response = mock_httpx_response(400, {
-            "message": "Field name contains invalid characters"
+            "message": "Value format is invalid"
         })
 
         with patch('mcp_server.tools.profile.httpx.AsyncClient') as mock_client_class:
@@ -233,13 +244,13 @@ class TestUpdateUserProfileToolHandler:
             result = await update_user_profile_tool_handler(
                 user_id="user123",
                 category="preferences",
-                field_name="invalid!field",
-                value="test"
+                field_name="communication_style",
+                value="invalid_value_that_api_rejects"
             )
 
             assert result["status"] == "error"
             assert result["error_code"] == "VALIDATION_ERROR"
-            assert "invalid characters" in result["error_message"].lower()
+            assert "invalid" in result["error_message"].lower()
 
     @pytest.mark.asyncio
     async def test_retry_on_500(self, mock_profile_response, mock_httpx_response):
@@ -264,8 +275,8 @@ class TestUpdateUserProfileToolHandler:
                 result = await update_user_profile_tool_handler(
                     user_id="user123",
                     category="preferences",
-                    field_name="test",
-                    value="test"
+                    field_name="communication_style",
+                    value="formal"
                 )
 
             assert result["status"] == "success"
@@ -285,8 +296,8 @@ class TestUpdateUserProfileToolHandler:
                 result = await update_user_profile_tool_handler(
                     user_id="user123",
                     category="preferences",
-                    field_name="test",
-                    value="test"
+                    field_name="communication_style",
+                    value="formal"
                 )
 
             assert result["status"] == "error"
@@ -307,8 +318,8 @@ class TestUpdateUserProfileToolHandler:
                 result = await update_user_profile_tool_handler(
                     user_id="user123",
                     category="preferences",
-                    field_name="test",
-                    value="test"
+                    field_name="communication_style",
+                    value="formal"
                 )
 
             assert result["status"] == "error"
@@ -338,8 +349,8 @@ class TestUpdateUserProfileToolHandler:
                 result = await update_user_profile_tool_handler(
                     user_id="user123",
                     category="preferences",
-                    field_name="test",
-                    value="test"
+                    field_name="communication_style",
+                    value="formal"
                 )
 
             assert result["status"] == "success"
@@ -423,8 +434,8 @@ class TestUpdateUserProfileToolHandler:
             await update_user_profile_tool_handler(
                 user_id="user123",
                 category="preferences",
-                field_name="test",
-                value="test"
+                field_name="communication_style",
+                value="formal"
             )
 
             mock_client_class.assert_called_once_with(timeout=10.0)
@@ -447,12 +458,12 @@ class TestUpdateUserProfileToolHandler:
                 await update_user_profile_tool_handler(
                     user_id="user123",
                     category="preferences",
-                    field_name="test",
-                    value="test"
+                    field_name="communication_style",
+                    value="formal"
                 )
 
                 call_args = mock_client.put.call_args
-                url = call_args[0][0]
+                url = call_args.args[0] if call_args.args else call_args.kwargs.get("url")
                 assert "http://custom-host:9999" in url
 
     @pytest.mark.asyncio
@@ -471,12 +482,12 @@ class TestUpdateUserProfileToolHandler:
                 await update_user_profile_tool_handler(
                     user_id="user123",
                     category="preferences",
-                    field_name="test",
-                    value="test"
+                    field_name="communication_style",
+                    value="formal"
                 )
 
                 call_args = mock_client.put.call_args
-                url = call_args[0][0]
+                url = call_args.args[0] if call_args.args else call_args.kwargs.get("url")
                 assert "host.docker.internal:8080" in url
 
     @pytest.mark.asyncio
@@ -492,8 +503,8 @@ class TestUpdateUserProfileToolHandler:
             result = await update_user_profile_tool_handler(
                 user_id="user123",
                 category="preferences",
-                field_name="test",
-                value="test"
+                field_name="communication_style",
+                value="formal"
             )
 
             assert result["status"] == "error"
@@ -513,8 +524,8 @@ class TestUpdateUserProfileToolHandler:
             result = await update_user_profile_tool_handler(
                 user_id="user123",
                 category="preferences",
-                field_name="test",
-                value="test"
+                field_name="communication_style",
+                value="formal"
             )
 
             assert result["status"] == "error"
