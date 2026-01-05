@@ -167,6 +167,7 @@ class LLMClient:
 
     Features:
     - Automatic provider selection based on LLM_PROVIDER env var
+    - Optional provider_override for task-specific provider selection
     - Zero API changes - existing code continues to work
     - Provider-specific implementations isolated in provider classes
     - Automatic failover support (primary to fallback)
@@ -178,20 +179,25 @@ class LLMClient:
     - Facade: Provides simple interface hiding provider complexity
     """
 
-    def __init__(self):
+    def __init__(self, provider_override: Optional[str] = None):
         """
         Initialize LLM client with provider factory pattern.
 
-        The provider is selected based on LLM_PROVIDER environment variable.
-        Defaults to Grok-4 if provider is unknown or not configured.
+        The provider is selected based on:
+        1. provider_override parameter (if provided)
+        2. LLM_PROVIDER environment variable (default)
+
+        Args:
+            provider_override: Optional provider name to use instead of env config.
+                              Useful for task-specific provider selection (e.g., research tasks).
 
         Raises:
             ValueError: If no providers are configured (missing API keys)
         """
         config = get_config()
 
-        # Get provider selection from environment
-        provider_name = config.get("LLM_PROVIDER", "grok-4")
+        # Get provider selection: override > environment > default
+        provider_name = provider_override or config.get("LLM_PROVIDER", "grok-4")
 
         # Get API keys to determine which providers are available
         grok_api_key = config.get("GROK_API_KEY")

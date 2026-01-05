@@ -343,19 +343,21 @@ Only when you have comprehensive, well-researched information:
 
 ### Response Format
 
-Your response should include your thinking process, then the final JSON:
-
-[Your research plan, tool calls, critiques, and synthesis thinking here...]
+IMPORTANT: Your final response must be ONLY a JSON object. Do NOT output the report before the JSON.
+Put your COMPLETE research report inside the "message" field of the JSON.
 
 ```json
 {
     "skip": false,
     "skip_reason": null,
-    "message": "Your comprehensive research report here...",
-    "tools_called": ["web_search", "web_crawl", "reddit_search", ...],
-    "reasoning": "Summary of your research process and key findings"
+    "message": "YOUR FULL RESEARCH REPORT GOES HERE - include all findings, analysis, insights, and recommendations. Use markdown formatting (headers, bullets, bold) for readability. This should be the complete report you want the user to see.",
+    "tools_called": ["web_search", "web_crawl", "reddit_search"],
+    "reasoning": "Brief summary of your research process"
 }
 ```
+
+The "message" field should contain your entire, well-formatted research report - NOT a summary.
+Any text outside the JSON will be ignored.
 
 ### Important Guidelines
 - Take your time - deep research is expected to take 5-15 minutes
@@ -578,24 +580,21 @@ def parse_agent_response(response_content: str, tools_called: List[str]) -> Wake
             )
 
         # Try to parse as JSON directly first
-        preamble_content = None
         try:
             data = json.loads(clean_content)
         except json.JSONDecodeError:
-            # LLM may have included preamble text before JSON - try to extract JSON
+            # LLM may have included text before JSON - try to extract JSON
             json_start = clean_content.find('{')
             json_end = clean_content.rfind('}')
 
             if json_start != -1 and json_end != -1 and json_end > json_start:
                 json_str = clean_content[json_start:json_end + 1]
-                # Save the preamble content in case it contains the actual report
-                preamble_content = clean_content[:json_start].strip()
+                preamble_length = json_start
                 logger.debug(
-                    "Extracted JSON from mixed content",
+                    "Extracted JSON from mixed content (preamble ignored)",
                     extra={
-                        "preamble_length": json_start,
-                        "json_length": len(json_str),
-                        "preamble_has_content": bool(preamble_content)
+                        "preamble_length": preamble_length,
+                        "json_length": len(json_str)
                     }
                 )
                 data = json.loads(json_str)
@@ -603,30 +602,12 @@ def parse_agent_response(response_content: str, tools_called: List[str]) -> Wake
                 # No JSON found - re-raise to trigger fallback
                 raise
 
-        # Get the message from JSON
-        json_message = data.get("message", "")
-
-        # If the preamble contains substantial formatted content (like a report with headers),
-        # and is longer than the JSON message, use the preamble as the actual message.
-        # This handles cases where the LLM outputs the full report first, then a summary JSON.
-        final_message = json_message
-        if preamble_content and len(preamble_content) > len(json_message or ""):
-            # Check if preamble looks like formatted content (has markdown headers or formatting)
-            if any(marker in preamble_content for marker in ["###", "**", "##", "- ", "* "]):
-                logger.info(
-                    "Using preamble as message (longer and formatted)",
-                    extra={
-                        "preamble_length": len(preamble_content),
-                        "json_message_length": len(json_message or ""),
-                        "has_markdown": True
-                    }
-                )
-                final_message = preamble_content
-
+        # Always use the message from JSON - preamble content is ignored
+        # (Research protocol instructs LLM to put full report in JSON message field)
         return WakeUpResult(
             skip=data.get("skip", False),
             skip_reason=data.get("skip_reason"),
-            message=final_message,
+            message=data.get("message", ""),
             tools_called=data.get("tools_called", tools_called),
             reasoning=data.get("reasoning", "No reasoning provided")
         )
@@ -747,7 +728,23 @@ async def execute_wake_up_agent(
         # 4. Execute with full tool access (10 minute timeout)
         tools_called = []
 
-        async with LLMClient() as llm_client:
+        # Determine if we should use a different provider for research tasks
+        provider_override = None
+        if is_research_trigger(trigger_data):
+            config = get_config()
+            research_provider = config.get("RESEARCH_LLM_PROVIDER")
+            if research_provider:
+                provider_override = research_provider
+                logger.info(
+                    "Using research-specific LLM provider",
+                    extra={
+                        "trigger_id": trigger_data.get("id"),
+                        "research_provider": research_provider,
+                        "trigger_type": trigger_data.get("trigger_type")
+                    }
+                )
+
+        async with LLMClient(provider_override=provider_override) as llm_client:
             # Create messages list
             messages = [
                 {"role": "system", "content": prompt},
@@ -817,10 +814,10 @@ async def execute_wake_up_agent(
                                 }
                             )
                             # #endregion
-                        elif chunk_type == "tool_call":
-                            # Track tool calls
-                            tool_name = chunk.get("name")
-                            if tool_name:
+                        elif chunk_type == "tool_call_started":
+                            # Track tool calls when they start
+                            tool_name = chunk.get("tool")
+                            if tool_name and tool_name not in tools_called:
                                 tools_called.append(tool_name)
 
                     # #region agent log
