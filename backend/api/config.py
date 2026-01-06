@@ -157,6 +157,18 @@ def validate_environment() -> dict:
             f"LLM functionality will not work until configured properly."
         )
 
+    # Load research-specific LLM provider (optional, falls back to LLM_PROVIDER)
+    # This allows using a different model for deep research tasks (e.g., GPT-5.2 for 128K output)
+    research_provider = get_env_var("RESEARCH_LLM_PROVIDER")
+    if research_provider and research_provider != "REPLACE_ME":
+        valid_providers = ["grok-4", "chatgpt-5", "gemini-3-pro-preview"]
+        if research_provider in valid_providers:
+            config["RESEARCH_LLM_PROVIDER"] = research_provider
+            # Note: Don't log here - causes recursive loop with logger init
+        else:
+            # Invalid provider - just ignore it (don't log to avoid recursive loop)
+            pass
+
     # Load optional LLM keys (may be set even if not primary provider)
     grok_key = get_env_var("GROK_API_KEY")
     if grok_key and grok_key != "REPLACE_ME":

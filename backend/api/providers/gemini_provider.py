@@ -157,9 +157,20 @@ class GeminiProvider(BaseProvider):
         # Gemini SDK handles cleanup internally
         pass
 
+    def _normalize_model_name(self, model_name: str) -> str:
+        """
+        Normalize model name by removing 'models/' prefix if present.
+
+        The Gemini SDK uses full paths like 'models/gemini-3-pro-preview',
+        but the cost calculator expects just 'gemini-3-pro-preview'.
+        """
+        if model_name.startswith("models/"):
+            return model_name[7:]  # Remove 'models/' prefix
+        return model_name
+
     def get_provider_name(self) -> str:
-        """Return provider name (model identifier)."""
-        return self.model_name
+        """Return provider name (model identifier without 'models/' prefix)."""
+        return self._normalize_model_name(self.model_name)
 
     def calculate_cost(self, usage: Dict[str, int]) -> Dict[str, float]:
         """
@@ -175,7 +186,7 @@ class GeminiProvider(BaseProvider):
             Cost details dictionary
         """
         return calculate_llm_cost(
-            provider=self.model_name,
+            provider=self._normalize_model_name(self.model_name),
             prompt_tokens=usage.get("prompt_tokens", 0),
             completion_tokens=usage.get("completion_tokens", 0),
             sources_used=0,  # Gemini doesn't have live search
