@@ -779,40 +779,40 @@ async def execute_wake_up_agent(
                         chunk_count += 1
                         chunk_type = chunk.get("type")
                         # #region agent log
-                        logger.debug(
-                            "Agent received chunk",
-                            extra={
-                                "chunk_count": chunk_count,
-                                "chunk_type": chunk_type,
-                                "chunk_keys": list(chunk.keys()),
-                                "chunk_preview": str(chunk)[:200]
-                            }
-                        )
+                        # logger.debug(
+                        #     "Agent received chunk",
+                        #     extra={
+                        #         "chunk_count": chunk_count,
+                        #         "chunk_type": chunk_type,
+                        #         "chunk_keys": list(chunk.keys()),
+                        #         "chunk_preview": str(chunk)[:200]
+                        #     }
+                        # )
                         # #endregion
                         if chunk_type == "content":
                             delta = chunk.get("delta", "")
                             response_content += delta
                             # #region agent log
-                            logger.debug(
-                                "Agent content chunk",
-                                extra={
-                                    "delta_length": len(delta),
-                                    "total_length": len(response_content)
-                                }
-                            )
+                            # logger.debug(
+                            #     "Agent content chunk",
+                            #     extra={
+                            #         "delta_length": len(delta),
+                            #         "total_length": len(response_content)
+                            #     }
+                            # )
                             # #endregion
                         elif chunk_type == "token":
                             # Gemini returns "token" type with "content" field
                             token_content = chunk.get("content", "")
                             response_content += token_content
                             # #region agent log
-                            logger.debug(
-                                "Agent token chunk",
-                                extra={
-                                    "token_length": len(token_content),
-                                    "total_length": len(response_content)
-                                }
-                            )
+                            # logger.debug(
+                            #     "Agent token chunk",
+                            #     extra={
+                            #         "token_length": len(token_content),
+                            #         "total_length": len(response_content)
+                            #     }
+                            # )
                             # #endregion
                         elif chunk_type == "tool_call_started":
                             # Track tool calls when they start
