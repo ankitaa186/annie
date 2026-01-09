@@ -10,9 +10,10 @@ Provides tools for analyzing individual stocks including:
 
 import time
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
+import redis.asyncio as redis
 import yfinance as yf
 
 from mcp_server.config import get_config
@@ -20,6 +21,10 @@ from mcp_server.logging import get_logger
 from .portfolio import normalize_ticker
 
 logger = get_logger(__name__)
+
+# Cache TTL for financial data: 24 hours (86400 seconds)
+# Financial statements don't change intraday
+FINANCIALS_CACHE_TTL = 86400
 
 
 # =============================================================================
@@ -604,4 +609,432 @@ get_stock_history_tool = {
         "required": ["ticker"]
     },
     "handler": get_stock_history_tool_handler
+}
+
+
+# =============================================================================
+# Get Financials Tool (Financial Statements + Earnings)
+# =============================================================================
+
+
+def _safe_float(value, decimals: int = 2) -> Optional[float]:
+    """Safely convert value to float, handling NaN/None."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    try:
+        return round(float(value), decimals)
+    except (ValueError, TypeError):
+        return None
+
+
+def _format_large_number(value) -> Optional[str]:
+    """Format large numbers with B/M suffix for readability."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    try:
+        num = float(value)
+        if abs(num) >= 1_000_000_000_000:
+            return f"{num / 1_000_000_000_000:.2f}T"
+        elif abs(num) >= 1_000_000_000:
+            return f"{num / 1_000_000_000:.2f}B"
+        elif abs(num) >= 1_000_000:
+            return f"{num / 1_000_000:.2f}M"
+        else:
+            return f"{num:,.0f}"
+    except (ValueError, TypeError):
+        return None
+
+
+def _extract_financial_row(df: pd.DataFrame, row_names: List[str]) -> List[Optional[float]]:
+    """
+    Extract a row from financial statement DataFrame by trying multiple row names.
+    Returns list of values for each period (column).
+    """
+    if df is None or df.empty:
+        return []
+
+    for name in row_names:
+        if name in df.index:
+            row = df.loc[name]
+            return [_safe_float(v) for v in row.values]
+    return [None] * len(df.columns)
+
+
+def _get_redis_client() -> Optional[redis.Redis]:
+    """Create Redis client for caching."""
+    try:
+        config = get_config()
+        redis_host = config.get("REDIS_HOST", "redis")
+        redis_port = int(config.get("REDIS_PORT", 6379))
+        return redis.Redis(
+            host=redis_host,
+            port=redis_port,
+            decode_responses=True
+        )
+    except Exception as e:
+        logger.warning(f"Failed to create Redis client: {e}")
+        return None
+
+
+async def get_financials_tool_handler(
+    ticker: str,
+    include_statements: bool = True,
+    include_earnings: bool = True,
+    periods: str = "annual"
+) -> Dict[str, Any]:
+    """
+    Get comprehensive financial data for a stock.
+
+    Fetches financial statements (income statement, balance sheet, cash flow)
+    and earnings data from Yahoo Finance. Data is cached for 24 hours.
+
+    Args:
+        ticker: Stock ticker symbol (e.g., 'AAPL', 'GOOGL')
+        include_statements: Include income statement, balance sheet, cash flow
+        include_earnings: Include earnings dates and history
+        periods: 'annual' or 'quarterly' for financial statements
+
+    Returns:
+        dict: Comprehensive financial data including statements and earnings
+    """
+    import json
+
+    start_time = time.time()
+
+    # Normalize ticker
+    normalized_ticker = normalize_ticker(ticker)
+    if normalized_ticker is None:
+        logger.warning("Invalid ticker format for get_financials", extra={"ticker": ticker})
+        return {
+            "status": "error",
+            "message": f"Invalid ticker format: '{ticker}'. Must be 1-10 alphanumeric characters."
+        }
+
+    # Validate periods
+    if periods not in ["annual", "quarterly"]:
+        return {
+            "status": "error",
+            "message": f"Invalid periods: '{periods}'. Must be 'annual' or 'quarterly'."
+        }
+
+    logger.info(
+        "Fetching financial data",
+        extra={
+            "ticker": normalized_ticker,
+            "periods": periods,
+            "include_statements": include_statements,
+            "include_earnings": include_earnings
+        }
+    )
+
+    # Check cache first
+    cache_key = f"financials:{normalized_ticker}:{periods}"
+    redis_client = None
+    cached_data = None
+
+    try:
+        redis_client = _get_redis_client()
+        if redis_client:
+            cached_json = await redis_client.get(cache_key)
+            if cached_json:
+                cached_data = json.loads(cached_json)
+                logger.info(
+                    "Financial data cache hit",
+                    extra={"ticker": normalized_ticker, "cache_key": cache_key}
+                )
+    except Exception as e:
+        logger.warning(f"Redis cache check failed: {e}")
+
+    # Return cached data if available
+    if cached_data:
+        duration_ms = int((time.time() - start_time) * 1000)
+        cached_data["from_cache"] = True
+        cached_data["duration_ms"] = duration_ms
+        if redis_client:
+            await redis_client.close()
+        return cached_data
+
+    try:
+        # Create yfinance Ticker object
+        stock = yf.Ticker(normalized_ticker)
+        info = stock.info
+
+        # Validate ticker exists
+        if not info or not info.get("shortName"):
+            duration_ms = int((time.time() - start_time) * 1000)
+            logger.warning("Ticker not found", extra={"ticker": normalized_ticker})
+            if redis_client:
+                await redis_client.close()
+            return {
+                "status": "error",
+                "message": f"Could not find financial data for '{normalized_ticker}'.",
+                "ticker": normalized_ticker,
+                "duration_ms": duration_ms
+            }
+
+        result = {
+            "status": "success",
+            "ticker": normalized_ticker,
+            "name": info.get("shortName") or info.get("longName"),
+            "currency": info.get("currency", "USD"),
+            "sector": info.get("sector"),
+            "industry": info.get("industry"),
+            "from_cache": False
+        }
+
+        # =================================================================
+        # FINANCIAL STATEMENTS
+        # =================================================================
+        if include_statements:
+            logger.debug("Fetching financial statements", extra={"ticker": normalized_ticker})
+
+            try:
+                # Get the appropriate statements based on period
+                if periods == "annual":
+                    income_df = stock.income_stmt
+                    balance_df = stock.balance_sheet
+                    cashflow_df = stock.cashflow
+                else:
+                    income_df = stock.quarterly_income_stmt
+                    balance_df = stock.quarterly_balance_sheet
+                    cashflow_df = stock.quarterly_cashflow
+
+                # Extract period dates (columns)
+                def get_period_labels(df: pd.DataFrame) -> List[str]:
+                    if df is None or df.empty:
+                        return []
+                    return [col.strftime("%Y-%m-%d") if hasattr(col, 'strftime') else str(col)
+                            for col in df.columns]
+
+                # INCOME STATEMENT
+                income_periods = get_period_labels(income_df)
+                result["financials"] = {
+                    "income_statement": {
+                        "periods": income_periods,
+                        "total_revenue": _extract_financial_row(income_df, ["Total Revenue", "Revenue"]),
+                        "total_revenue_formatted": [_format_large_number(v) for v in _extract_financial_row(income_df, ["Total Revenue", "Revenue"])],
+                        "cost_of_revenue": _extract_financial_row(income_df, ["Cost Of Revenue", "Cost of Revenue"]),
+                        "gross_profit": _extract_financial_row(income_df, ["Gross Profit"]),
+                        "gross_profit_formatted": [_format_large_number(v) for v in _extract_financial_row(income_df, ["Gross Profit"])],
+                        "operating_income": _extract_financial_row(income_df, ["Operating Income", "EBIT"]),
+                        "operating_income_formatted": [_format_large_number(v) for v in _extract_financial_row(income_df, ["Operating Income", "EBIT"])],
+                        "net_income": _extract_financial_row(income_df, ["Net Income", "Net Income Common Stockholders"]),
+                        "net_income_formatted": [_format_large_number(v) for v in _extract_financial_row(income_df, ["Net Income", "Net Income Common Stockholders"])],
+                        "eps_basic": _extract_financial_row(income_df, ["Basic EPS"]),
+                        "eps_diluted": _extract_financial_row(income_df, ["Diluted EPS"]),
+                        "ebitda": _extract_financial_row(income_df, ["EBITDA", "Normalized EBITDA"]),
+                        "ebitda_formatted": [_format_large_number(v) for v in _extract_financial_row(income_df, ["EBITDA", "Normalized EBITDA"])]
+                    }
+                }
+
+                # BALANCE SHEET
+                balance_periods = get_period_labels(balance_df)
+                result["financials"]["balance_sheet"] = {
+                    "periods": balance_periods,
+                    "total_assets": _extract_financial_row(balance_df, ["Total Assets"]),
+                    "total_assets_formatted": [_format_large_number(v) for v in _extract_financial_row(balance_df, ["Total Assets"])],
+                    "total_liabilities": _extract_financial_row(balance_df, ["Total Liabilities Net Minority Interest", "Total Liabilities"]),
+                    "total_liabilities_formatted": [_format_large_number(v) for v in _extract_financial_row(balance_df, ["Total Liabilities Net Minority Interest", "Total Liabilities"])],
+                    "total_debt": _extract_financial_row(balance_df, ["Total Debt", "Long Term Debt"]),
+                    "total_debt_formatted": [_format_large_number(v) for v in _extract_financial_row(balance_df, ["Total Debt", "Long Term Debt"])],
+                    "cash_and_equivalents": _extract_financial_row(balance_df, ["Cash And Cash Equivalents", "Cash Cash Equivalents And Short Term Investments"]),
+                    "cash_formatted": [_format_large_number(v) for v in _extract_financial_row(balance_df, ["Cash And Cash Equivalents", "Cash Cash Equivalents And Short Term Investments"])],
+                    "shareholders_equity": _extract_financial_row(balance_df, ["Stockholders Equity", "Total Equity Gross Minority Interest"]),
+                    "shareholders_equity_formatted": [_format_large_number(v) for v in _extract_financial_row(balance_df, ["Stockholders Equity", "Total Equity Gross Minority Interest"])]
+                }
+
+                # CASH FLOW
+                cashflow_periods = get_period_labels(cashflow_df)
+                operating_cf = _extract_financial_row(cashflow_df, ["Operating Cash Flow", "Cash Flow From Continuing Operating Activities"])
+                capex = _extract_financial_row(cashflow_df, ["Capital Expenditure", "Purchase Of PPE"])
+
+                # Calculate Free Cash Flow = Operating CF - CapEx
+                free_cash_flow = []
+                for i in range(max(len(operating_cf), len(capex))):
+                    ocf = operating_cf[i] if i < len(operating_cf) else None
+                    cap = capex[i] if i < len(capex) else None
+                    if ocf is not None and cap is not None:
+                        # CapEx is usually negative, so we add it (subtracting negative = adding)
+                        fcf = ocf + cap if cap < 0 else ocf - abs(cap)
+                        free_cash_flow.append(_safe_float(fcf))
+                    else:
+                        free_cash_flow.append(None)
+
+                result["financials"]["cash_flow"] = {
+                    "periods": cashflow_periods,
+                    "operating_cash_flow": operating_cf,
+                    "operating_cash_flow_formatted": [_format_large_number(v) for v in operating_cf],
+                    "capital_expenditure": capex,
+                    "free_cash_flow": free_cash_flow,
+                    "free_cash_flow_formatted": [_format_large_number(v) for v in free_cash_flow],
+                    "dividends_paid": _extract_financial_row(cashflow_df, ["Cash Dividends Paid", "Common Stock Dividend Paid"]),
+                    "stock_repurchases": _extract_financial_row(cashflow_df, ["Repurchase Of Capital Stock", "Common Stock Payments"])
+                }
+
+                logger.info(
+                    "Financial statements extracted",
+                    extra={
+                        "ticker": normalized_ticker,
+                        "income_periods": len(income_periods),
+                        "balance_periods": len(balance_periods),
+                        "cashflow_periods": len(cashflow_periods)
+                    }
+                )
+
+            except Exception as e:
+                logger.warning(
+                    "Failed to extract financial statements",
+                    extra={"ticker": normalized_ticker, "error": str(e)}
+                )
+                result["financials"] = {"error": f"Failed to fetch statements: {str(e)}"}
+
+        # =================================================================
+        # EARNINGS DATA
+        # =================================================================
+        if include_earnings:
+            logger.debug("Fetching earnings data", extra={"ticker": normalized_ticker})
+
+            try:
+                earnings_result = {
+                    "next_earnings_date": None,
+                    "history": []
+                }
+
+                # Get earnings dates
+                try:
+                    earnings_dates = stock.earnings_dates
+                    if earnings_dates is not None and not earnings_dates.empty:
+                        # Find next earnings date (future dates)
+                        now = pd.Timestamp.now(tz='UTC')
+                        future_dates = earnings_dates[earnings_dates.index > now]
+                        if not future_dates.empty:
+                            next_date = future_dates.index[0]
+                            earnings_result["next_earnings_date"] = next_date.strftime("%Y-%m-%d")
+
+                        # Get earnings history (past dates with EPS data)
+                        past_dates = earnings_dates[earnings_dates.index <= now].head(8)
+                        for date, row in past_dates.iterrows():
+                            eps_actual = _safe_float(row.get("Reported EPS"))
+                            eps_estimate = _safe_float(row.get("EPS Estimate"))
+
+                            surprise_pct = None
+                            if eps_actual is not None and eps_estimate is not None and eps_estimate != 0:
+                                surprise_pct = _safe_float(((eps_actual - eps_estimate) / abs(eps_estimate)) * 100, 1)
+
+                            earnings_result["history"].append({
+                                "date": date.strftime("%Y-%m-%d"),
+                                "eps_actual": eps_actual,
+                                "eps_estimate": eps_estimate,
+                                "surprise_pct": surprise_pct
+                            })
+                except Exception as e:
+                    logger.warning(f"Failed to get earnings dates: {e}")
+
+                result["earnings"] = earnings_result
+
+                logger.info(
+                    "Earnings data extracted",
+                    extra={
+                        "ticker": normalized_ticker,
+                        "next_earnings": earnings_result["next_earnings_date"],
+                        "history_count": len(earnings_result["history"])
+                    }
+                )
+
+            except Exception as e:
+                logger.warning(
+                    "Failed to extract earnings data",
+                    extra={"ticker": normalized_ticker, "error": str(e)}
+                )
+                result["earnings"] = {"error": f"Failed to fetch earnings: {str(e)}"}
+
+        # =================================================================
+        # CACHE THE RESULT
+        # =================================================================
+        duration_ms = int((time.time() - start_time) * 1000)
+        result["duration_ms"] = duration_ms
+
+        try:
+            if redis_client:
+                await redis_client.setex(
+                    cache_key,
+                    FINANCIALS_CACHE_TTL,
+                    json.dumps(result)
+                )
+                logger.info(
+                    "Financial data cached",
+                    extra={"ticker": normalized_ticker, "cache_key": cache_key, "ttl": FINANCIALS_CACHE_TTL}
+                )
+        except Exception as e:
+            logger.warning(f"Failed to cache financial data: {e}")
+
+        logger.info(
+            "Financial data retrieval completed",
+            extra={
+                "ticker": normalized_ticker,
+                "duration_ms": duration_ms,
+                "include_statements": include_statements,
+                "include_earnings": include_earnings
+            }
+        )
+
+        return result
+
+    except Exception as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+        logger.error(
+            "Error fetching financial data",
+            extra={"ticker": normalized_ticker, "error": str(e), "duration_ms": duration_ms},
+            exc_info=True
+        )
+        return {
+            "status": "error",
+            "message": f"Failed to get financial data: {str(e)}",
+            "ticker": normalized_ticker,
+            "duration_ms": duration_ms
+        }
+    finally:
+        if redis_client:
+            try:
+                await redis_client.close()
+            except Exception:
+                pass
+
+
+# Get financials tool definition
+get_financials_tool = {
+    "name": "get_financials",
+    "description": (
+        "Get comprehensive financial data for a stock including financial statements "
+        "(income statement, balance sheet, cash flow) and earnings history. "
+        "Use this for fundamental analysis: revenue trends, profitability, debt levels, "
+        "cash flow generation, and earnings performance. Data is cached for 24 hours."
+    ),
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "ticker": {
+                "type": "string",
+                "description": "Stock ticker symbol (e.g., 'AAPL', 'GOOGL', 'MSFT')"
+            },
+            "include_statements": {
+                "type": "boolean",
+                "description": "Include income statement, balance sheet, and cash flow. Default: true",
+                "default": True
+            },
+            "include_earnings": {
+                "type": "boolean",
+                "description": "Include earnings dates and historical EPS data. Default: true",
+                "default": True
+            },
+            "periods": {
+                "type": "string",
+                "description": "Period type for financial statements: 'annual' or 'quarterly'. Default: annual",
+                "enum": ["annual", "quarterly"],
+                "default": "annual"
+            }
+        },
+        "required": ["ticker"]
+    },
+    "handler": get_financials_tool_handler
 }

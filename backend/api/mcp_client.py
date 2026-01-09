@@ -73,7 +73,7 @@ class MCPClient:
 
     # Default configuration
     DEFAULT_MCP_URL = "http://mcp-server:8002"
-    DEFAULT_TIMEOUT = 60.0  # 60 seconds (generous timeout for memory operations which can take 7+ seconds)
+    DEFAULT_TIMEOUT = 180.0  # 3 minutes (generous timeout for SEC filings and memory operations)
     CACHE_TTL = 300  # 5 minutes for tool schema cache
 
     def __init__(self, mcp_server_url: Optional[str] = None, timeout: Optional[float] = None):
@@ -337,8 +337,8 @@ class MCPClient:
                     }
                 )
 
-                # Emit status: Tool error
-                brief_error = error_message[:50] if len(error_message) > 50 else error_message
+                # Emit status: Tool error (show more context for debugging)
+                brief_error = error_message[:200] if len(error_message) > 200 else error_message
                 emit_status(f"{tool_name} failed: {brief_error}", icon="⚠️")
 
                 raise MCPToolError(tool_name, error_message, error_code)
@@ -377,13 +377,20 @@ class MCPClient:
                 tool_result = result
 
             duration_ms = int((time.time() - start_time) * 1000)
+
+            # Check if tool returned a business logic error (status: "error")
+            # This is different from JSON-RPC protocol errors which are caught above
+            tool_success = True
+            if isinstance(tool_result, dict) and tool_result.get("status") == "error":
+                tool_success = False
+
             logger.info(
                 "Tool execution completed",
                 extra={
                     "tool_name": tool_name,
                     "request_id": request_id,
                     "duration_ms": duration_ms,
-                    "success": True
+                    "success": tool_success
                 }
             )
 
@@ -397,9 +404,12 @@ class MCPClient:
                 }
             )
 
-            # Emit status: Tool result success
+            # Emit status based on tool result
             summary = summarize_tool_result(tool_name, tool_result)
-            emit_status(f"{tool_name} complete: {summary}", icon="✅")
+            if tool_success:
+                emit_status(f"{tool_name} complete: {summary}", icon="✅")
+            else:
+                emit_status(f"{tool_name} failed: {summary}", icon="⚠️")
 
             # Update Langfuse observation with output (decorator captures return automatically)
             if LANGFUSE_AVAILABLE:

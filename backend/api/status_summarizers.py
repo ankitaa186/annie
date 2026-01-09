@@ -364,38 +364,6 @@ def summarize_retrieve_memories_result(result: Dict[str, Any]) -> str:
         return f"Found {memory_count} memories"
 
 
-def summarize_internet_search_result(result: Dict[str, Any]) -> str:
-    """Summarize internet_search tool result (placeholder for future MCP-based search).
-
-    Result shape (expected):
-        {
-            "status": "success",
-            "results": [...]
-        }
-
-    Args:
-        result: Tool result dictionary
-
-    Returns:
-        Concise summary string
-
-    Examples:
-        "Found 5 results"
-        "No results found"
-    """
-    if result.get("status") == "error":
-        return result.get("message", "Failed")[:500]
-
-    results = result.get("results", [])
-    count = len(results)
-    if count == 0:
-        return "No results found"
-    elif count == 1:
-        return "Found 1 result"
-    else:
-        return f"Found {count} results"
-
-
 def summarize_health_check_result(result: Dict[str, Any]) -> str:
     """Summarize health_check tool result.
 
@@ -446,7 +414,7 @@ def summarize_web_search_result(result: Dict[str, Any]) -> str:
     """
     if result.get("status") == "error":
         error_msg = result.get("error_message", "Failed")
-        return f"Search failed: {error_msg}"[:50]
+        return f"Search failed: {error_msg}"[:200]
 
     results = result.get("results", [])
     count = len(results)
@@ -487,15 +455,15 @@ def summarize_update_user_profile_result(result: Dict[str, Any]) -> str:
     """
     if result.get("status") == "error":
         error_msg = result.get("error_message", "Failed")
-        return f"Profile update failed: {error_msg}"[:50]
+        return f"Profile update failed: {error_msg}"[:200]
 
     field_name = result.get("field_name", "profile")
     category = result.get("category", "")
 
     # Show field with category context if available
     if category:
-        return f"Updated {category}/{field_name}"[:50]
-    return f"Updated {field_name}"[:50]
+        return f"Updated {category}/{field_name}"
+    return f"Updated {field_name}"
 
 
 def summarize_web_crawl_result(result: Dict[str, Any]) -> str:
@@ -567,7 +535,7 @@ def summarize_reddit_search_result(result: Dict[str, Any]) -> str:
     """
     if result.get("status") == "error":
         error_message = result.get("error_message", "Failed")
-        return f"Reddit search failed: {error_message}"[:50]
+        return f"Reddit search failed: {error_message}"[:200]
 
     results = result.get("results", [])
     count = len(results)
@@ -579,6 +547,87 @@ def summarize_reddit_search_result(result: Dict[str, Any]) -> str:
         return f"Found {count} post{'s' if count != 1 else ''} in r/{subreddit}"
     else:
         return f"Found {count} post{'s' if count != 1 else ''}"
+
+
+def summarize_compact_memories_result(result: Dict[str, Any]) -> str:
+    """Summarize compact_memories tool result.
+
+    Result shape:
+        {
+            "status": "success"|"error",
+            "message": str,
+            "stats": {
+                "ttl_deleted": int,
+                "consolidated_count": int,
+                "sources_removed": int,
+                "applied_upserts": int,
+                "applied_deletes": int,
+                "duration_ms": int
+            }
+        }
+    """
+    if result.get("status") == "error":
+        return result.get("message", "Failed")[:200]
+
+    stats = result.get("stats", {})
+    consolidated = stats.get("consolidated_count", 0)
+    deleted = stats.get("ttl_deleted", 0) + stats.get("sources_removed", 0)
+
+    if consolidated > 0 and deleted > 0:
+        return f"Compacted: {consolidated} merged, {deleted} removed"
+    elif consolidated > 0:
+        return f"Compacted: {consolidated} memories merged"
+    elif deleted > 0:
+        return f"Compacted: {deleted} memories removed"
+    else:
+        return "Compaction complete (no changes)"
+
+
+def summarize_create_trigger_result(result: Dict[str, Any]) -> str:
+    """Summarize create_trigger tool result.
+
+    Result shape:
+        {
+            "status": "success"|"error",
+            "trigger": {...},
+            "message": str
+        }
+    """
+    if result.get("status") == "error":
+        return result.get("message", "Failed")[:200]
+
+    trigger = result.get("trigger", {})
+    intent_name = trigger.get("intent_name", "trigger")
+    return f"Created: {intent_name}"
+
+
+def summarize_list_triggers_result(result: Dict[str, Any]) -> str:
+    """Summarize list_triggers tool result."""
+    if result.get("status") == "error":
+        return result.get("message", "Failed")[:200]
+
+    count = result.get("trigger_count", 0)
+    if count == 0:
+        return "No triggers found"
+    return f"Found {count} trigger{'s' if count != 1 else ''}"
+
+
+def summarize_update_trigger_result(result: Dict[str, Any]) -> str:
+    """Summarize update_trigger tool result."""
+    if result.get("status") == "error":
+        return result.get("message", "Failed")[:200]
+
+    trigger = result.get("trigger", {})
+    intent_name = trigger.get("intent_name", "trigger")
+    return f"Updated: {intent_name}"
+
+
+def summarize_delete_trigger_result(result: Dict[str, Any]) -> str:
+    """Summarize delete_trigger tool result."""
+    if result.get("status") == "error":
+        return result.get("message", "Failed")[:200]
+
+    return "Trigger deleted"
 
 
 # Registry mapping tool names to their summarizer functions
@@ -594,12 +643,16 @@ SUMMARIZERS = {
     "store_memory": summarize_store_memory_result,
     "delete_memory": summarize_delete_memory_result,  # Story 14.5
     "retrieve_memories": summarize_retrieve_memories_result,
-    "internet_search": summarize_internet_search_result,
+    "compact_memories": summarize_compact_memories_result,  # Story 14.5
     "health_check": summarize_health_check_result,
     "update_user_profile": summarize_update_user_profile_result,  # Story 15.4
     "web_search": summarize_web_search_result,  # Story 15.1
     "reddit_search": summarize_reddit_search_result,  # Story 15.3
     "web_crawl": summarize_web_crawl_result,  # Story 15.2
+    "create_trigger": summarize_create_trigger_result,  # Epic 13
+    "list_triggers": summarize_list_triggers_result,  # Epic 13
+    "update_trigger": summarize_update_trigger_result,  # Epic 13
+    "delete_trigger": summarize_delete_trigger_result,  # Epic 13
 }
 
 

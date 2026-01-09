@@ -323,6 +323,8 @@ to properly cover a topic. For each search:
 - Use different angles/keywords to get diverse results
 - Follow up on promising results with `web_crawl` to read full content
 - Use `reddit_search` for community opinions and real user experiences
+- For stock/company research, use `get_financials` for financial statements, earnings, revenue data
+- For deep due diligence, use `get_sec_filings` for SEC 10-K/10-Q filings, risk factors, MD&A sections
 
 ### 3. CRITIQUE
 After each round of tool outputs, self-critique:
@@ -351,7 +353,7 @@ Put your COMPLETE research report inside the "message" field of the JSON.
     "skip": false,
     "skip_reason": null,
     "message": "YOUR FULL RESEARCH REPORT GOES HERE - include all findings, analysis, insights, and recommendations. Use markdown formatting (headers, bullets, bold) for readability. This should be the complete report you want the user to see.",
-    "tools_called": ["web_search", "web_crawl", "reddit_search"],
+    "tools_called": ["web_search", "web_crawl", "reddit_search", "get_financials", "get_sec_filings"],
     "reasoning": "Brief summary of your research process"
 }
 ```
@@ -779,40 +781,40 @@ async def execute_wake_up_agent(
                         chunk_count += 1
                         chunk_type = chunk.get("type")
                         # #region agent log
-                        logger.debug(
-                            "Agent received chunk",
-                            extra={
-                                "chunk_count": chunk_count,
-                                "chunk_type": chunk_type,
-                                "chunk_keys": list(chunk.keys()),
-                                "chunk_preview": str(chunk)[:200]
-                            }
-                        )
+                        # logger.debug(
+                        #     "Agent received chunk",
+                        #     extra={
+                        #         "chunk_count": chunk_count,
+                        #         "chunk_type": chunk_type,
+                        #         "chunk_keys": list(chunk.keys()),
+                        #         "chunk_preview": str(chunk)[:200]
+                        #     }
+                        # )
                         # #endregion
                         if chunk_type == "content":
                             delta = chunk.get("delta", "")
                             response_content += delta
                             # #region agent log
-                            logger.debug(
-                                "Agent content chunk",
-                                extra={
-                                    "delta_length": len(delta),
-                                    "total_length": len(response_content)
-                                }
-                            )
+                            # logger.debug(
+                            #     "Agent content chunk",
+                            #     extra={
+                            #         "delta_length": len(delta),
+                            #         "total_length": len(response_content)
+                            #     }
+                            # )
                             # #endregion
                         elif chunk_type == "token":
                             # Gemini returns "token" type with "content" field
                             token_content = chunk.get("content", "")
                             response_content += token_content
                             # #region agent log
-                            logger.debug(
-                                "Agent token chunk",
-                                extra={
-                                    "token_length": len(token_content),
-                                    "total_length": len(response_content)
-                                }
-                            )
+                            # logger.debug(
+                            #     "Agent token chunk",
+                            #     extra={
+                            #         "token_length": len(token_content),
+                            #         "total_length": len(response_content)
+                            #     }
+                            # )
                             # #endregion
                         elif chunk_type == "tool_call_started":
                             # Track tool calls when they start

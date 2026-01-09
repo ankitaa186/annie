@@ -69,8 +69,8 @@ class GrokProvider(BaseProvider):
             raise ValueError("GROK_API_KEY not configured")
 
         # Load timeout configuration from environment
-        self.request_timeout = float(config.get("LLM_REQUEST_TIMEOUT", "180.0"))
-        self.streaming_timeout = float(config.get("LLM_STREAMING_TIMEOUT", "180.0"))
+        self.request_timeout = float(config.get("LLM_REQUEST_TIMEOUT", "300.0"))
+        self.streaming_timeout = float(config.get("LLM_STREAMING_TIMEOUT", "300.0"))
 
         # Load Grok-4 Live Search configuration
         self.live_search_mode = config.get("GROK_LIVE_SEARCH_MODE", "auto")

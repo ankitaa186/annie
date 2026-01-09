@@ -69,8 +69,8 @@ class ChatGPTProvider(BaseProvider):
             raise ValueError("CHATGPT_API_KEY not configured")
 
         # Load timeout configuration from environment
-        self.request_timeout = float(config.get("LLM_REQUEST_TIMEOUT", "180.0"))
-        self.streaming_timeout = float(config.get("LLM_STREAMING_TIMEOUT", "180.0"))
+        self.request_timeout = float(config.get("LLM_REQUEST_TIMEOUT", "300.0"))
+        self.streaming_timeout = float(config.get("LLM_STREAMING_TIMEOUT", "300.0"))
 
         # Initialize HTTP client
         self.client = httpx.AsyncClient(timeout=self.request_timeout)
@@ -150,7 +150,7 @@ class ChatGPTProvider(BaseProvider):
         """
         # Track conversation for multi-turn tool calling
         conversation_messages = list(messages)
-        max_tool_iterations = 10
+        max_tool_iterations = 20
         iteration = 0
 
         while iteration < max_tool_iterations:

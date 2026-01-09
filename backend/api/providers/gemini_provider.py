@@ -72,7 +72,7 @@ class GeminiProvider(BaseProvider):
             self.model_name = model_override
         else:
             self.model_name = config.get("GEMINI_MODEL", self.DEFAULT_MODEL)
-        self.max_output_tokens = int(config.get("GEMINI_MAX_OUTPUT_TOKENS", "8192"))
+        self.max_output_tokens = int(config.get("GEMINI_MAX_OUTPUT_TOKENS", "16384"))
         self.temperature = float(config.get("GEMINI_TEMPERATURE", "1.0"))
         self.context_cache_ttl = int(config.get("GEMINI_CONTEXT_CACHE_TTL", "300"))
 
@@ -97,7 +97,7 @@ class GeminiProvider(BaseProvider):
         self.tool_adapter = GeminiToolAdapter()
 
         # Load max tool iterations from config (prevent infinite loops)
-        self.max_tool_iterations = int(config.get("GEMINI_MAX_TOOL_ITERATIONS", "10"))
+        self.max_tool_iterations = int(config.get("GEMINI_MAX_TOOL_ITERATIONS", "20"))
 
         logger.info(
             "Gemini 3 Pro provider initialized",

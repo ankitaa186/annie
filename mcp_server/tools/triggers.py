@@ -331,7 +331,24 @@ USE THIS WHEN USER WANTS:
 - Check-ins: "If I don't message you for 2 days, check in", "Ping me if I'm silent"
 - Scheduled updates: "Every weekday, give me a portfolio summary"
 
-CRON EXPRESSIONS (for scheduled triggers):
+CRITICAL - TRIGGER_TYPE VALUES:
+- trigger_type MUST be "scheduled" or "condition" - NO OTHER VALUES ARE VALID
+- DO NOT use trigger_type="once" or trigger_type="cron" - these will FAIL
+- For one-time triggers: use trigger_type="scheduled" with schedule.mode="once"
+- For recurring triggers: use trigger_type="scheduled" with schedule.mode="cron"
+- For price/condition alerts: use trigger_type="condition"
+
+EXAMPLES:
+1. One-time reminder in 5 minutes:
+   trigger_type: "scheduled", schedule: {mode: "once", datetime: "2026-01-06T17:20:00"}
+
+2. Daily recurring at 9am:
+   trigger_type: "scheduled", schedule: {mode: "cron", cron_expression: "0 9 * * *"}
+
+3. Price alert:
+   trigger_type: "condition", condition: {condition_type: "price", expression: "NVDA < 130"}
+
+CRON EXPRESSIONS (for schedule.mode="cron"):
 - "every morning at 9am" -> "0 9 * * *"
 - "every weekday at 8:30" -> "30 8 * * 1-5"
 - "every Friday at 5pm" -> "0 17 * * 5"
@@ -386,7 +403,7 @@ CRITICAL RULES:
             "trigger_type": {
                 "type": "string",
                 "enum": ["scheduled", "condition"],
-                "description": "Wake-up mechanism: 'scheduled' for time-based, 'condition' for event-based"
+                "description": "MUST be 'scheduled' or 'condition'. Use 'scheduled' for ALL time-based triggers (both one-time and recurring - set schedule.mode='once' or 'cron'). Use 'condition' for event-based alerts. NEVER use 'once' or 'cron' here - those go in schedule.mode."
             },
             "action_context": {
                 "type": "object",

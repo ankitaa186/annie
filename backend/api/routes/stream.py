@@ -107,7 +107,7 @@ async def stream_generator(
     """
     start_time = time.time()
     first_token_sent = False
-    max_tool_iterations = 10
+    max_tool_iterations = 20
     assistant_response_content = []  # Accumulate assistant response for storage
     chunk_count = 0  # Track number of chunks streamed
 
@@ -665,14 +665,30 @@ async def stream_generator(
                             }
                         )
 
-                        logger.info(
-                            "Tool execution successful",
-                            extra={
-                                "conversation_id": conversation_id,
-                                "tool_name": function_name,
-                                "tool_call_id": tool_call_id
-                            }
-                        )
+                        # Check if tool returned a business logic error
+                        tool_success = True
+                        if isinstance(tool_result, dict) and tool_result.get("status") == "error":
+                            tool_success = False
+
+                        if tool_success:
+                            logger.info(
+                                "Tool execution successful",
+                                extra={
+                                    "conversation_id": conversation_id,
+                                    "tool_name": function_name,
+                                    "tool_call_id": tool_call_id
+                                }
+                            )
+                        else:
+                            logger.warning(
+                                "Tool returned error",
+                                extra={
+                                    "conversation_id": conversation_id,
+                                    "tool_name": function_name,
+                                    "tool_call_id": tool_call_id,
+                                    "error_message": tool_result.get("message", "Unknown error")
+                                }
+                            )
 
                     except (MCPToolError, MCPNetworkError) as e:
                         # Tool execution failed - add error to conversation

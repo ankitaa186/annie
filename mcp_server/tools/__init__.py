@@ -68,6 +68,16 @@ from .stock_analysis import (
     get_stock_data_tool_handler,
     get_stock_history_tool,
     get_stock_history_tool_handler,
+    get_financials_tool,
+    get_financials_tool_handler,
+    FINANCIALS_CACHE_TTL,
+)
+
+# SEC Edgar Tools (10-K, 10-Q, 8-K filings)
+from .sec_edgar import (
+    get_sec_filings_tool,
+    get_sec_filings_tool_handler,
+    SEC_FILINGS_CACHE_TTL,
 )
 
 # Trigger/Proactive Tools (Epic 13)
@@ -156,6 +166,14 @@ __all__ = [
     "get_stock_data_tool_handler",
     "get_stock_history_tool",
     "get_stock_history_tool_handler",
+    "get_financials_tool",
+    "get_financials_tool_handler",
+    "FINANCIALS_CACHE_TTL",
+
+    # SEC Edgar
+    "get_sec_filings_tool",
+    "get_sec_filings_tool_handler",
+    "SEC_FILINGS_CACHE_TTL",
 
     # Triggers
     "create_trigger_tool",
