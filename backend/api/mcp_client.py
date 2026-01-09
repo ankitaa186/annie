@@ -73,7 +73,7 @@ class MCPClient:
 
     # Default configuration
     DEFAULT_MCP_URL = "http://mcp-server:8002"
-    DEFAULT_TIMEOUT = 60.0  # 60 seconds (generous timeout for memory operations which can take 7+ seconds)
+    DEFAULT_TIMEOUT = 180.0  # 3 minutes (generous timeout for SEC filings and memory operations)
     CACHE_TTL = 300  # 5 minutes for tool schema cache
 
     def __init__(self, mcp_server_url: Optional[str] = None, timeout: Optional[float] = None):

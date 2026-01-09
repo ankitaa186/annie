@@ -323,6 +323,8 @@ to properly cover a topic. For each search:
 - Use different angles/keywords to get diverse results
 - Follow up on promising results with `web_crawl` to read full content
 - Use `reddit_search` for community opinions and real user experiences
+- For stock/company research, use `get_financials` for financial statements, earnings, revenue data
+- For deep due diligence, use `get_sec_filings` for SEC 10-K/10-Q filings, risk factors, MD&A sections
 
 ### 3. CRITIQUE
 After each round of tool outputs, self-critique:
@@ -351,7 +353,7 @@ Put your COMPLETE research report inside the "message" field of the JSON.
     "skip": false,
     "skip_reason": null,
     "message": "YOUR FULL RESEARCH REPORT GOES HERE - include all findings, analysis, insights, and recommendations. Use markdown formatting (headers, bullets, bold) for readability. This should be the complete report you want the user to see.",
-    "tools_called": ["web_search", "web_crawl", "reddit_search"],
+    "tools_called": ["web_search", "web_crawl", "reddit_search", "get_financials", "get_sec_filings"],
     "reasoning": "Brief summary of your research process"
 }
 ```

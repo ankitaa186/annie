@@ -107,7 +107,7 @@ async def stream_generator(
     """
     start_time = time.time()
     first_token_sent = False
-    max_tool_iterations = 10
+    max_tool_iterations = 20
     assistant_response_content = []  # Accumulate assistant response for storage
     chunk_count = 0  # Track number of chunks streamed
 

@@ -37,6 +37,8 @@ from mcp_server.tools import (
     clear_portfolio_tool,
     get_stock_data_tool,
     get_stock_history_tool,
+    get_financials_tool,  # Financial statements + earnings
+    get_sec_filings_tool,  # SEC EDGAR filings (10-K, 10-Q, 8-K)
     create_trigger_tool,
     list_triggers_tool,
     update_trigger_tool,
@@ -99,6 +101,9 @@ class MCPServer:
         # Stock market analysis tools (Epic 10 - Story 10.6)
         self.tool_registry.register(get_stock_data_tool)
         self.tool_registry.register(get_stock_history_tool)
+        # Financial data tools (financial statements, earnings, SEC filings)
+        self.tool_registry.register(get_financials_tool)
+        self.tool_registry.register(get_sec_filings_tool)
         # Proactive AI: Trigger management tools (Epic 13 - Story 13.2)
         self.tool_registry.register(create_trigger_tool)
         self.tool_registry.register(list_triggers_tool)
