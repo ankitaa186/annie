@@ -30,7 +30,7 @@ class TestGeminiProviderConfiguration:
 
         assert provider.api_key == "test-api-key"
         assert provider.model_name == "gemini-3-pro-preview"
-        assert provider.max_output_tokens == 8192
+        assert provider.max_output_tokens == 8192  # Matches config value passed above
         assert provider.temperature == 1.0
         mock_configure.assert_called_once_with(api_key="test-api-key")
 
@@ -56,7 +56,7 @@ class TestGeminiProviderConfiguration:
         provider = GeminiProvider()
 
         assert provider.model_name == "gemini-3-pro-preview"
-        assert provider.max_output_tokens == 8192
+        assert provider.max_output_tokens == 16384  # Code default when env var not set
         assert provider.temperature == 1.0
 
     @patch('api.providers.gemini_provider.get_config')

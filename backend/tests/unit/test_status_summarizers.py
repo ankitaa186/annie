@@ -479,42 +479,42 @@ class TestDeleteMemorySummarizer:
 
 
 class TestSearchSummarizer:
-    """Test internet search tool result summarizer."""
+    """Test web search tool result summarizer."""
 
-    def test_internet_search_multiple_results(self):
-        """Test internet_search summarizer with multiple results."""
-        from api.status_summarizers import summarize_internet_search_result
+    def test_web_search_multiple_results(self):
+        """Test web_search summarizer with multiple results."""
+        from api.status_summarizers import summarize_web_search_result
 
         result = {
             "status": "success",
             "results": [{}, {}, {}, {}, {}]
         }
 
-        summary = summarize_internet_search_result(result)
+        summary = summarize_web_search_result(result)
         assert summary == "Found 5 results"
 
-    def test_internet_search_single_result(self):
-        """Test internet_search summarizer with single result."""
-        from api.status_summarizers import summarize_internet_search_result
+    def test_web_search_single_result(self):
+        """Test web_search summarizer with single result."""
+        from api.status_summarizers import summarize_web_search_result
 
         result = {
             "status": "success",
             "results": [{}]
         }
 
-        summary = summarize_internet_search_result(result)
+        summary = summarize_web_search_result(result)
         assert summary == "Found 1 result"
 
-    def test_internet_search_no_results(self):
-        """Test internet_search summarizer with no results."""
-        from api.status_summarizers import summarize_internet_search_result
+    def test_web_search_no_results(self):
+        """Test web_search summarizer with no results."""
+        from api.status_summarizers import summarize_web_search_result
 
         result = {
             "status": "success",
             "results": []
         }
 
-        summary = summarize_internet_search_result(result)
+        summary = summarize_web_search_result(result)
         assert summary == "No results found"
 
 
@@ -624,7 +624,7 @@ class TestSummarizerRegistry:
             "store_memory",
             "delete_memory",  # Story 14.5
             "retrieve_memories",
-            "internet_search",
+            "web_search",  # Story 15.1 (renamed from internet_search)
             "health_check"
         ]
 
