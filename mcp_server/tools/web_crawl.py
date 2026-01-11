@@ -106,6 +106,8 @@ async def _crawl4ai_fetch(
     # Lazy import of crawl4ai to avoid import overhead when not needed
     try:
         from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
+        from crawl4ai.content_filter_strategy import PruningContentFilter
+        from crawl4ai.markdown_generation_strategy import DefaultMarkdownGenerator
     except ImportError as e:
         logger.error(
             "crawl4ai not installed",
@@ -113,9 +115,20 @@ async def _crawl4ai_fetch(
         )
         raise Exception("crawl4ai library not available")
 
+    # Configure markdown generator with content filter for cleaner extraction
+    # PruningContentFilter removes boilerplate (nav, footer) while preserving article content
+    md_generator = DefaultMarkdownGenerator(
+        content_filter=PruningContentFilter(
+            threshold=0.48,  # Default recommended threshold
+            threshold_type="dynamic"  # Context-aware scoring
+        )
+    )
+
     browser_config = BrowserConfig(headless=True)
     run_config = CrawlerRunConfig(
-        wait_until="domcontentloaded" if not wait_for_js else "networkidle"
+        wait_until="domcontentloaded" if not wait_for_js else "networkidle",
+        excluded_tags=["nav", "footer", "header"],  # Remove navigation elements
+        markdown_generator=md_generator
     )
 
     async with AsyncWebCrawler(config=browser_config) as crawler:
@@ -129,22 +142,28 @@ async def _crawl4ai_fetch(
             error_msg = getattr(result, 'error_message', 'Unknown error')
             raise Exception(f"Crawl failed: {error_msg}")
 
-        # Check for non-HTML content based on content
-        # crawl4ai provides markdown content for HTML pages
-        content = result.markdown or ""
+        # Extract content using fit_markdown (filtered) with fallback to raw_markdown
+        # fit_markdown removes nav/footer boilerplate, raw_markdown is unfiltered
+        content = ""
+        if hasattr(result, 'markdown') and result.markdown:
+            # Try fit_markdown first (clean, filtered content)
+            if hasattr(result.markdown, 'fit_markdown') and result.markdown.fit_markdown:
+                content = result.markdown.fit_markdown
+            # Fallback to raw_markdown if fit_markdown is empty
+            elif hasattr(result.markdown, 'raw_markdown') and result.markdown.raw_markdown:
+                content = result.markdown.raw_markdown
+            # Legacy fallback for older crawl4ai versions
+            elif isinstance(result.markdown, str):
+                content = result.markdown
 
-        # If content is empty or looks like binary, it's likely non-HTML
+        # If content is empty, page may be non-HTML or require JavaScript
         if not content or content.strip() == "":
-            # Check if there's any raw HTML
-            if hasattr(result, 'html') and result.html:
-                content_type = "text/html"
-            else:
-                return {
-                    "status": "error",
-                    "provider": "crawl4ai",
-                    "url": url,
-                    "error_message": "No content extracted. Page may be empty or require JavaScript."
-                }
+            return {
+                "status": "error",
+                "provider": "crawl4ai",
+                "url": url,
+                "error_message": "No content extracted. Page may be empty or require JavaScript."
+            }
 
         truncated = False
 
@@ -172,11 +191,16 @@ async def _crawl4ai_fetch(
                 "published_date": result.metadata.get("published_date"),
             }
 
-        # Count links if available
-        links_count = 0
+        # Include full links in metadata so LLMs can discover and follow them
+        # This preserves link discovery even when nav is filtered from content
+        links = {"internal": [], "external": []}
         if hasattr(result, 'links') and result.links:
-            links_count = len(result.links.get("internal", [])) + len(result.links.get("external", []))
-        metadata["links_count"] = links_count
+            links = {
+                "internal": result.links.get("internal", []),
+                "external": result.links.get("external", [])
+            }
+        metadata["links"] = links
+        metadata["links_count"] = len(links["internal"]) + len(links["external"])
 
         return {
             "status": "success",
