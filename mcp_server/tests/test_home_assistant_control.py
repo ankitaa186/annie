@@ -88,6 +88,20 @@ class TestAllowlistValidator:
         assert validator.is_allowed("climate.thermostat") is False
         assert validator.is_allowed("cover.garage") is False
 
+    def test_partial_wildcard_matches(self):
+        """Partial wildcard like light.living* matches light.living_room."""
+        from mcp_server.tools.home_assistant import AllowlistValidator
+
+        validator = AllowlistValidator("light.living*")
+        assert validator.is_allowed("light.living_room") is True
+        assert validator.is_allowed("light.living_lamp") is True
+        assert validator.is_allowed("light.living") is True
+        # Does not match other lights
+        assert validator.is_allowed("light.bedroom") is False
+        assert validator.is_allowed("light.kitchen") is False
+        # Does not match other domains
+        assert validator.is_allowed("switch.living_room") is False
+
     def test_empty_allowlist_blocks_all(self):
         """AC #4: Empty allowlist blocks all entities."""
         from mcp_server.tools.home_assistant import AllowlistValidator

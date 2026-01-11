@@ -32,7 +32,8 @@ class AllowlistValidator:
 
     Supports:
     - Exact match: "light.living_room" matches "light.living_room"
-    - Wildcard: "light.*" matches any "light.xxx" entity
+    - Domain wildcard: "light.*" matches any "light.xxx" entity
+    - Partial wildcard: "light.living*" matches "light.living_room", "light.living_lamp"
     - Empty allowlist blocks all control
     """
 
@@ -60,17 +61,15 @@ class AllowlistValidator:
         Returns:
             True if allowed, False if blocked
         """
+        import fnmatch
+
         if not self.patterns:
             return False
 
         for pattern in self.patterns:
-            if pattern.endswith(".*"):
-                # Wildcard match: "light.*" matches "light.anything"
-                domain = pattern[:-2]  # Remove ".*"
-                if entity_id.startswith(f"{domain}."):
-                    return True
-            elif pattern == entity_id:
-                # Exact match
+            # Use fnmatch for glob-style matching (supports *, ?, [seq], [!seq])
+            # This handles: "light.*", "light.living*", "light.living_room", etc.
+            if fnmatch.fnmatch(entity_id, pattern):
                 return True
 
         return False
