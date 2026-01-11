@@ -39,6 +39,13 @@ services:
       - LANGFUSE_HOST=${LANGFUSE_HOST:-https://us.cloud.langfuse.com}
       - LANGFUSE_PROJECT_NAME=${LANGFUSE_PROJECT_NAME:-Annie}
       - LANGFUSE_ENVIRONMENT=${LANGFUSE_ENVIRONMENT:-development}
+      # Epic 16 - Home Assistant MQTT Configuration
+      - HA_MQTT_BROKER=${HA_MQTT_BROKER}
+      - HA_MQTT_PORT=${HA_MQTT_PORT:-1883}
+      - HA_MQTT_USERNAME=${HA_MQTT_USERNAME}
+      - HA_MQTT_PASSWORD=${HA_MQTT_PASSWORD}
+      - HA_MQTT_TOPICS=${HA_MQTT_TOPICS:-annie/alerts/#}
+      - HA_MQTT_ALERT_USER_ID=${HA_MQTT_ALERT_USER_ID}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -80,6 +87,11 @@ services:
       - REDDIT_CLIENT_ID=${REDDIT_CLIENT_ID}
       - REDDIT_CLIENT_SECRET=${REDDIT_CLIENT_SECRET}
       - REDDIT_USER_AGENT=${REDDIT_USER_AGENT:-annie-bot/1.0}
+      # Epic 16 - Home Assistant REST API Configuration
+      - HA_URL=${HA_URL}
+      - HA_ACCESS_TOKEN=${HA_ACCESS_TOKEN}
+      - HA_CONTROL_ALLOWLIST=${HA_CONTROL_ALLOWLIST}
+      - HA_TIMEOUT=${HA_TIMEOUT:-10}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:

@@ -420,10 +420,28 @@ def check_langfuse_health() -> Dict[str, Any]:
 async def startup_event():
     """Application startup handler."""
     import asyncio
+    from api.config import is_mqtt_configured, validate_mqtt_config, HA_MQTT_BROKER
+
     logger.info("Annie Backend API starting up...")
     logger.info(f"Environment: {config.get('ENVIRONMENT', 'unknown')}")
     logger.info(f"Log level: {config.get('LOG_LEVEL', 'INFO')}")
     logger.info(f"MCP Server URL: {config.get('MCP_SERVER_URL', 'not configured')}")
+
+    # Epic 16: Log MQTT configuration status once at startup
+    if HA_MQTT_BROKER:
+        mqtt_issues = validate_mqtt_config()
+        if mqtt_issues:
+            logger.warning(
+                f"MQTT configuration issues: {', '.join(mqtt_issues)}. "
+                "MQTT subscriber may not work correctly."
+            )
+        else:
+            logger.info("Home Assistant MQTT subscriber configured and ready.")
+    else:
+        logger.info(
+            "Home Assistant MQTT not configured (HA_MQTT_BROKER empty). "
+            "MQTT subscriber will be skipped."
+        )
 
     # Initialize Langfuse client to ensure environment variables are set for decorators
     try:

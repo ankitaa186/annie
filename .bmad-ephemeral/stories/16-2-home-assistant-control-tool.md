@@ -1,6 +1,6 @@
 # Story 16.2: Home Assistant Control Tool (Allowlist-Enforced)
 
-Status: drafted
+Status: done
 
 ## Story
 
@@ -109,59 +109,59 @@ Status: drafted
 ## Tasks / Subtasks
 
 ### Task 1: Implement AllowlistValidator Class (AC: #1, #2, #3, #4)
-- [ ] Create `AllowlistValidator` class in `mcp_server/tools/home_assistant.py`
-- [ ] Parse `HA_CONTROL_ALLOWLIST` env var (comma-separated)
-- [ ] Implement `is_allowed(entity_id: str) -> bool` method
-- [ ] Handle exact match: "light.living_room" matches "light.living_room"
-- [ ] Handle wildcard: "light.*" matches any "light.xxx"
-- [ ] Handle empty allowlist: return False for all entities
-- [ ] Implement `get_allowed_list() -> List[str]` for error messages
+- [x] Create `AllowlistValidator` class in `mcp_server/tools/home_assistant.py`
+- [x] Parse `HA_CONTROL_ALLOWLIST` env var (comma-separated)
+- [x] Implement `is_allowed(entity_id: str) -> bool` method
+- [x] Handle exact match: "light.living_room" matches "light.living_room"
+- [x] Handle wildcard: "light.*" matches any "light.xxx"
+- [x] Handle empty allowlist: return False for all entities
+- [x] Implement `get_allowed_list() -> List[str]` for error messages
 
 ### Task 2: Implement Control Methods in HomeAssistantClient (AC: #6, #7)
-- [ ] Add `call_service(domain: str, service: str, entity_id: str, data: dict) -> dict` method
+- [x] Add `call_service(domain: str, service: str, entity_id: str, data: dict) -> dict` method
   - POST `/api/services/{domain}/{service}` with Bearer auth
   - Parse response for success/failure
-- [ ] Implement `get_domain_from_entity(entity_id: str) -> str` helper
+- [x] Implement `get_domain_from_entity(entity_id: str) -> str` helper
   - Extract domain from entity_id (e.g., "light" from "light.living_room")
-- [ ] Implement `map_action_to_service(action: str, entity_id: str) -> tuple[str, str, dict]`
+- [x] Implement `map_action_to_service(action: str, entity_id: str) -> tuple[str, str, dict]`
   - Returns (domain, service_name, additional_data)
   - Handle all 7 action types
 
 ### Task 3: Create MCP Tool Handler (AC: #5, #7, #8)
-- [ ] Create `home_assistant_control` tool function
-- [ ] Define input schema with entity_id, action, parameters
-- [ ] Check allowlist BEFORE making any API call
-- [ ] If denied: return FORBIDDEN with allowed entities list
-- [ ] If allowed:
+- [x] Create `home_assistant_control` tool function
+- [x] Define input schema with entity_id, action, parameters
+- [x] Check allowlist BEFORE making any API call
+- [x] If denied: return FORBIDDEN with allowed entities list
+- [x] If allowed:
   - Get current state first (for previous_state)
   - Call the service
   - Get new state after (for new_state)
-- [ ] Format success response: status, provider, entity_id, action, parameters, previous_state, new_state
-- [ ] Add structured logging with allowed=true/false
+- [x] Format success response: status, provider, entity_id, action, parameters, previous_state, new_state
+- [x] Add structured logging with allowed=true/false
 
 ### Task 4: Write Unit Tests (AC: #9)
-- [ ] Create tests in `mcp_server/tests/test_home_assistant_control.py`
-- [ ] Test: `test_allowlist_parsing()` - comma-separated parsing
-- [ ] Test: `test_allowlist_exact_match()` - exact entity match
-- [ ] Test: `test_allowlist_wildcard_match()` - domain wildcard
-- [ ] Test: `test_allowlist_empty_blocks_all()` - empty list behavior
-- [ ] Test: `test_control_allowed_entity()` - successful control
-- [ ] Test: `test_control_forbidden_entity()` - denied with allowed list
-- [ ] Test: `test_control_turn_on()` - turn_on action mapping
-- [ ] Test: `test_control_turn_off()` - turn_off action mapping
-- [ ] Test: `test_control_toggle()` - toggle action mapping
-- [ ] Test: `test_control_set_brightness()` - brightness with parameters
-- [ ] Test: `test_control_set_temperature()` - climate control
-- [ ] Test: `test_control_set_hvac_mode()` - HVAC mode
-- [ ] Test: `test_control_set_position()` - cover position
-- [ ] Test: `test_control_returns_states()` - previous/new state
-- [ ] Test: `test_audit_logging()` - verify log fields
-- [ ] Use pytest-httpx or respx for mocking
-- [ ] Verify >90% code coverage
+- [x] Create tests in `mcp_server/tests/test_home_assistant_control.py`
+- [x] Test: `test_allowlist_parsing()` - comma-separated parsing
+- [x] Test: `test_allowlist_exact_match()` - exact entity match
+- [x] Test: `test_allowlist_wildcard_match()` - domain wildcard
+- [x] Test: `test_allowlist_empty_blocks_all()` - empty list behavior
+- [x] Test: `test_control_allowed_entity()` - successful control
+- [x] Test: `test_control_forbidden_entity()` - denied with allowed list
+- [x] Test: `test_control_turn_on()` - turn_on action mapping
+- [x] Test: `test_control_turn_off()` - turn_off action mapping
+- [x] Test: `test_control_toggle()` - toggle action mapping
+- [x] Test: `test_control_set_brightness()` - brightness with parameters
+- [x] Test: `test_control_set_temperature()` - climate control
+- [x] Test: `test_control_set_hvac_mode()` - HVAC mode
+- [x] Test: `test_control_set_position()` - cover position
+- [x] Test: `test_control_returns_states()` - previous/new state
+- [x] Test: `test_audit_logging()` - verify log fields
+- [x] Use pytest-httpx or respx for mocking
+- [x] Verify >90% code coverage
 
 ### Task 5: Tool Registration (Deferred to Story 16.5)
-- [ ] Note: Tool will be exported and registered in Story 16.5
-- [ ] Prepare tool for export in `mcp_server/tools/__init__.py`
+- [x] Note: Tool will be exported and registered in Story 16.5
+- [x] Prepare tool for export in `mcp_server/tools/__init__.py`
 
 ---
 
@@ -323,17 +323,135 @@ ACTION_MAP = {
 
 ### Context Reference
 
-<!-- Path(s) to story context XML will be added here by context workflow -->
+- .bmad-ephemeral/stories/16-2-home-assistant-control-tool.context.xml
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+Claude Opus 4.5 (claude-opus-4-5-20251101)
 
 ### Debug Log References
 
+- Used singleton pattern for AllowlistValidator with reset function for testing
+- Added asyncio.sleep(0.2) after service call to allow HA to process state changes
+
 ### Completion Notes List
 
+- Implemented AllowlistValidator class with exact match and wildcard pattern support
+- Added call_service() method to HomeAssistantClient for POST /api/services/{domain}/{service}
+- Created map_action_to_service() function handling all 7 action types
+- home_assistant_control_handler checks allowlist FIRST (security critical)
+- Returns FORBIDDEN with allowed list when entity not permitted
+- Captures previous_state and new_state for all control operations
+- Audit logging includes allowed=true/false for all control attempts
+- 37 unit tests covering all acceptance criteria
+- All 68 Home Assistant tests pass (31 query + 37 control)
+
 ### File List
+
+**Modified:**
+- `mcp_server/tools/home_assistant.py` (extended from 445 to 914 lines)
+- `mcp_server/tools/__init__.py` (added control tool exports)
+
+**Created:**
+- `mcp_server/tests/test_home_assistant_control.py` (37 tests, all passing)
+
+---
+
+## Senior Developer Review (AI)
+
+### Reviewer
+Ankit
+
+### Date
+2026-01-10
+
+### Outcome
+**APPROVE**
+
+All acceptance criteria are fully implemented with comprehensive test coverage. The security-critical allowlist enforcement is properly implemented - the check occurs BEFORE any API call to Home Assistant. Code quality is high, following established patterns from Epic 15 tools.
+
+### Summary
+
+Story 16.2 implements a complete Home Assistant control tool with mandatory allowlist enforcement. The implementation correctly extends Story 16.1's HomeAssistantClient with control capabilities. Key security requirement (allowlist check first) is properly enforced. All 37 tests pass.
+
+### Key Findings
+
+**No blocking issues found.**
+
+| Severity | Finding | Location |
+|----------|---------|----------|
+| - | No issues | - |
+
+### Acceptance Criteria Coverage
+
+| AC# | Description | Status | Evidence |
+|-----|-------------|--------|----------|
+| AC#1 | Allowlist Parsing | IMPLEMENTED | `home_assistant.py:29-51` - AllowlistValidator parses comma-separated patterns |
+| AC#2 | Exact Match Allowlist | IMPLEMENTED | `home_assistant.py:72-73` - exact match in is_allowed() |
+| AC#3 | Wildcard Allowlist Support | IMPLEMENTED | `home_assistant.py:67-71` - wildcard with ".*" suffix |
+| AC#4 | Empty Allowlist Blocks All | IMPLEMENTED | `home_assistant.py:63-64, 747-748` - returns False, FORBIDDEN error |
+| AC#5 | FORBIDDEN Error Includes Allowed | IMPLEMENTED | `home_assistant.py:744-746` - error message includes allowed list |
+| AC#6 | Action to Service Mapping | IMPLEMENTED | `home_assistant.py:519-575` - all 7 actions mapped |
+| AC#7 | Previous and New State | IMPLEMENTED | `home_assistant.py:797-801, 823-830, 855-856` |
+| AC#8 | Audit Logging for All Attempts | IMPLEMENTED | `home_assistant.py:750-760` (denied), `835-847` (allowed) |
+| AC#9 | Unit Tests >90% Coverage | IMPLEMENTED | 37 tests, all passing |
+
+**Summary: 9 of 9 acceptance criteria fully implemented**
+
+### Task Completion Validation
+
+| Task | Marked | Verified | Evidence |
+|------|--------|----------|----------|
+| Task 1: AllowlistValidator Class (7 subtasks) | [x] | VERIFIED | `home_assistant.py:29-104` |
+| Task 2: Control Methods (3 subtasks) | [x] | VERIFIED | `home_assistant.py:401-575` |
+| Task 3: MCP Tool Handler (8 subtasks) | [x] | VERIFIED | `home_assistant.py:715-913` |
+| Task 4: Unit Tests (17 subtasks) | [x] | VERIFIED | `test_home_assistant_control.py` - 37 tests |
+| Task 5: Tool Export (2 subtasks) | [x] | VERIFIED | `__init__.py:120-131, 220-229` |
+
+**Summary: 27 of 27 completed tasks verified, 0 questionable, 0 falsely marked complete**
+
+### Test Coverage and Gaps
+
+- **37 unit tests** covering all ACs
+- Test classes organized by functionality:
+  - `TestAllowlistValidator` (10 tests) - AC#1-4
+  - `TestActionMapping` (12 tests) - AC#6
+  - `TestHomeAssistantControlHandler` (6 tests) - AC#5, 7, 8
+  - `TestHomeAssistantControlToolSchema` (3 tests)
+  - `TestHomeAssistantClientControl` (4 tests)
+  - `TestControlWithParameters` (2 tests)
+
+**No test gaps identified.**
+
+### Architectural Alignment
+
+- Extends HomeAssistantClient from Story 16.1 as specified
+- Uses singleton pattern for AllowlistValidator (efficient, testable)
+- Follows MCP tool patterns (async handler, tool dict, structured logging)
+- Security constraint enforced: allowlist check BEFORE any API call
+
+### Security Notes
+
+- CRITICAL security requirement met: allowlist check at line 736-768 occurs BEFORE any API call
+- Empty allowlist (HA_CONTROL_ALLOWLIST="") blocks ALL control with FORBIDDEN error
+- All control attempts logged with `allowed=true/false` for audit trail
+- Bearer token authentication properly implemented
+
+### Best-Practices and References
+
+- [Home Assistant REST API - Services](https://developers.home-assistant.io/docs/api/rest#post-apiservicesdomainservice)
+- Pattern: Singleton for validators with reset function for testing
+- Pattern: Async HTTP client with context manager
+
+### Action Items
+
+**Code Changes Required:**
+- None
+
+**Advisory Notes:**
+- Note: Tool registration in server.py will happen in Story 16.5
+- Note: The 0.2s sleep after service call allows HA to process state changes - consider making this configurable if latency becomes an issue
+- Note: Consider adding retry logic for transient network errors in production
 
 ---
 

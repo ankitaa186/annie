@@ -1,0 +1,222 @@
+<story-context id="16-4-configuration-environment-setup" v="1.0">
+  <metadata>
+    <epicId>16</epicId>
+    <storyId>4</storyId>
+    <title>Configuration & Environment Setup</title>
+    <status>drafted</status>
+    <generatedAt>2026-01-10</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>.bmad-ephemeral/stories/16-4-configuration-environment-setup.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>developer or operator</asA>
+    <iWant>all Home Assistant integration environment variables properly documented and loaded</iWant>
+    <soThat>I can configure the HA connection, allowlists, and MQTT settings for Annie</soThat>
+    <tasks>
+      <task id="1" name="Update env.example">
+        <subtask>Add Epic 16 section header with description</subtask>
+        <subtask>Add HA_URL with description and example</subtask>
+        <subtask>Add HA_ACCESS_TOKEN with instructions to generate token</subtask>
+        <subtask>Add HA_CONTROL_ALLOWLIST with wildcard syntax documentation</subtask>
+        <subtask>Add HA_TIMEOUT with default value (10)</subtask>
+        <subtask>Add HA_MQTT_BROKER (optional)</subtask>
+        <subtask>Add HA_MQTT_PORT with default (1883)</subtask>
+        <subtask>Add HA_MQTT_USERNAME (optional)</subtask>
+        <subtask>Add HA_MQTT_PASSWORD (optional, note: sensitive)</subtask>
+        <subtask>Add HA_MQTT_TOPICS with default pattern</subtask>
+        <subtask>Add HA_MQTT_ALERT_USER_ID</subtask>
+      </task>
+      <task id="2" name="Update mcp_server/config.py">
+        <subtask>Add HA_URL loading with empty default</subtask>
+        <subtask>Add HA_ACCESS_TOKEN loading with empty default</subtask>
+        <subtask>Add HA_ACCESS_TOKEN to SENSITIVE_VARS list</subtask>
+        <subtask>Add HA_CONTROL_ALLOWLIST loading with empty default</subtask>
+        <subtask>Add HA_TIMEOUT loading with default 10</subtask>
+        <subtask>Add validation function for HA config</subtask>
+        <subtask>Ensure masking works in get_masked_config()</subtask>
+      </task>
+      <task id="3" name="Update backend/api/config.py">
+        <subtask>Add HA_MQTT_BROKER loading with empty default</subtask>
+        <subtask>Add HA_MQTT_PORT loading with default 1883</subtask>
+        <subtask>Add HA_MQTT_USERNAME loading with empty default</subtask>
+        <subtask>Add HA_MQTT_PASSWORD loading with empty default</subtask>
+        <subtask>Add HA_MQTT_PASSWORD to SENSITIVE_VARS list</subtask>
+        <subtask>Add HA_MQTT_TOPICS loading with default "annie/alerts/#"</subtask>
+        <subtask>Add HA_MQTT_ALERT_USER_ID loading with empty default</subtask>
+        <subtask>Ensure masking works for MQTT password</subtask>
+      </task>
+      <task id="4" name="Update docker-compose.yml">
+        <subtask>Add HA_* environment variables to mcp-server service</subtask>
+        <subtask>Add HA_MQTT_* environment variables to backend service</subtask>
+        <subtask>Verify variable passthrough from host .env</subtask>
+      </task>
+      <task id="5" name="Add Config Validation">
+        <subtask>Implement validate_ha_config() in mcp_server/config.py</subtask>
+        <subtask>Implement validate_mqtt_config() in backend/api/config.py</subtask>
+      </task>
+    </tasks>
+  </story>
+
+  <acceptanceCriteria>
+    <criterion id="AC1" title="All Env Vars in env.example">
+      <given>the env.example file</given>
+      <when>a developer reviews it</when>
+      <then>all Home Assistant environment variables are documented with clear descriptions, default values where applicable, links to obtain tokens, grouping under Epic 16 section</then>
+      <variables>HA_URL, HA_ACCESS_TOKEN, HA_CONTROL_ALLOWLIST, HA_TIMEOUT, HA_MQTT_BROKER, HA_MQTT_PORT, HA_MQTT_USERNAME, HA_MQTT_PASSWORD, HA_MQTT_TOPICS, HA_MQTT_ALERT_USER_ID</variables>
+      <testable>Verify env.example contains all 10 variables with descriptions</testable>
+    </criterion>
+    <criterion id="AC2" title="HA_ACCESS_TOKEN in SENSITIVE_VARS">
+      <given>the logging configuration</given>
+      <when>HA_ACCESS_TOKEN is logged</when>
+      <then>it is masked (e.g., "eyJ0...4x9z" to "eyJ0...9z")</then>
+      <testable>Log config, verify token is masked</testable>
+    </criterion>
+    <criterion id="AC3" title="HA_MQTT_PASSWORD in SENSITIVE_VARS">
+      <given>the logging configuration</given>
+      <when>HA_MQTT_PASSWORD is logged</when>
+      <then>it is masked</then>
+      <testable>Log config, verify password is masked</testable>
+    </criterion>
+    <criterion id="AC4" title="Config Loading in mcp_server/config.py">
+      <given>the MCP server config module</given>
+      <when>the server starts</when>
+      <then>HA_URL, HA_ACCESS_TOKEN, HA_CONTROL_ALLOWLIST, HA_TIMEOUT are loaded</then>
+      <testable>Import config, verify variables accessible</testable>
+    </criterion>
+    <criterion id="AC5" title="Config Loading in backend/api/config.py">
+      <given>the backend config module</given>
+      <when>the backend starts</when>
+      <then>all MQTT variables are loaded (HA_MQTT_*)</then>
+      <testable>Import config, verify MQTT variables accessible</testable>
+    </criterion>
+    <criterion id="AC6" title="Docker Compose Env Vars">
+      <given>docker-compose.yml</given>
+      <when>containers start</when>
+      <then>HA environment variables are passed to appropriate services</then>
+      <testable>Check docker-compose.yml includes HA_* variables</testable>
+    </criterion>
+    <criterion id="AC7" title="Graceful Handling When HA Not Configured">
+      <given>HA_URL or HA_ACCESS_TOKEN is empty</given>
+      <when>the tools are called</when>
+      <then>they return CONFIG_ERROR without crashing</then>
+      <testable>Start without HA_URL, call tool, verify CONFIG_ERROR response</testable>
+    </criterion>
+  </acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc path="docs/epics/epic-16-home-assistant-integration.md" title="Epic 16: Home Assistant Integration" section="Story 16.4: Configuration">
+        <snippet>Add all required environment variables and configuration. Files: env.example, mcp_server/config.py, backend/api/config.py, docker-compose.yml. New Environment Variables include HA_URL, HA_ACCESS_TOKEN, HA_CONTROL_ALLOWLIST, HA_TIMEOUT, and MQTT configuration.</snippet>
+      </doc>
+      <doc path=".bmad-ephemeral/stories/tech-spec-epic-16.md" title="Epic 16 Technical Specification" section="Dependencies and Integrations">
+        <snippet>Environment Variables for Epic 16: HA_URL, HA_ACCESS_TOKEN, HA_CONTROL_ALLOWLIST, HA_TIMEOUT for REST API; HA_MQTT_BROKER, HA_MQTT_PORT, HA_MQTT_USERNAME, HA_MQTT_PASSWORD, HA_MQTT_TOPICS, HA_MQTT_ALERT_USER_ID for MQTT.</snippet>
+      </doc>
+      <doc path="CLAUDE.md" title="Project Documentation" section="Environment Configuration">
+        <snippet>Setup instructions for environment variables. Required variables must be set in .env file. Sensitive variables are masked in logs. Docker Compose environment section defines variable passthrough from host.</snippet>
+      </doc>
+      <doc path="env.example" title="Environment Template" section="Full File">
+        <snippet>Template file showing existing patterns for documenting environment variables with section headers, descriptions, defaults, and links to obtain API keys. SENSITIVE_VARS are masked in logging.</snippet>
+      </doc>
+      <doc path=".bmad-ephemeral/stories/tech-spec-epic-16.md" title="Epic 16 Tech Spec" section="Non-Functional Requirements - Security">
+        <snippet>Token Protection: HA_ACCESS_TOKEN and HA_MQTT_PASSWORD added to SENSITIVE_VARS (masked in logs). Principle of Least Privilege: Empty allowlist = no control operations permitted.</snippet>
+      </doc>
+    </docs>
+    <code>
+      <file path="mcp_server/config.py" kind="config" symbol="SENSITIVE_VARS" lines="69-74" reason="Existing SENSITIVE_VARS list where HA_ACCESS_TOKEN must be added">
+        <snippet>Current list includes BRAVE_SEARCH_API_KEY, STOCK_API_KEY, TAVILY_API_KEY, REDDIT_CLIENT_SECRET. Follow this pattern to add HA_ACCESS_TOKEN.</snippet>
+      </file>
+      <file path="mcp_server/config.py" kind="config" symbol="validate_environment" lines="77-159" reason="Existing validation pattern to follow for adding HA config loading">
+        <snippet>Validates required/optional vars, loads API keys with warnings if not set, returns config dict. Use get_env_var() with appropriate defaults.</snippet>
+      </file>
+      <file path="mcp_server/config.py" kind="config" symbol="mask_sensitive_value" lines="12-28" reason="Masking function already implemented - will be used for HA tokens">
+        <snippet>Shows first 4 and last 4 characters, replaces middle with "...". Values shorter than 8 chars become "***".</snippet>
+      </file>
+      <file path="backend/api/config.py" kind="config" symbol="SENSITIVE_VARS" lines="76-84" reason="Backend SENSITIVE_VARS list where HA_MQTT_PASSWORD must be added">
+        <snippet>Current list includes GROK_API_KEY, CHATGPT_API_KEY, GEMINI_API_KEY, TELEGRAM_BOT_TOKEN, LANGFUSE_SECRET_KEY. Add HA_MQTT_PASSWORD here.</snippet>
+      </file>
+      <file path="backend/api/config.py" kind="config" symbol="validate_environment" lines="87-191" reason="Backend validation pattern with LLM provider logic to follow">
+        <snippet>Validates required/optional vars, loads provider-specific keys, handles errors. Add MQTT config loading following this pattern.</snippet>
+      </file>
+      <file path="docker-compose.yml" kind="config" symbol="mcp-server.environment" lines="69-82" reason="MCP server environment section where HA_* vars will be added">
+        <snippet>Shows pattern for passing env vars from host .env to container using ${VAR_NAME} or ${VAR_NAME:-default} syntax.</snippet>
+      </file>
+      <file path="docker-compose.yml" kind="config" symbol="backend.environment" lines="14-41" reason="Backend environment section where HA_MQTT_* vars will be added">
+        <snippet>Shows comprehensive environment passthrough pattern including LLM keys, timeouts, and Langfuse config.</snippet>
+      </file>
+      <file path="env.example" kind="config" symbol="Epic 15 Section" lines="114-144" reason="Reference for documenting new epic section with proper formatting">
+        <snippet>Shows proper section header format (# ============), variable grouping, descriptions, defaults, and links to obtain credentials.</snippet>
+      </file>
+    </code>
+    <dependencies>
+      <python>
+        <package name="mcp_server/requirements.txt">
+          <dep name="httpx" version=">=0.24.0" note="Async HTTP client for HA REST API calls" />
+        </package>
+        <package name="backend/requirements.txt">
+          <dep name="aiomqtt" version=">=2.0.0" note="NEW - async MQTT client needed for Story 16.3 but config in 16.4" />
+        </package>
+      </python>
+      <docker>
+        <compose name="docker-compose.yml" note="Orchestrates all services with environment passthrough" />
+      </docker>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint source="Dev Notes">Follow existing patterns in config.py files using os.getenv() with sensible defaults</constraint>
+    <constraint source="Dev Notes">Group HA variables under Epic 16 section header in env.example</constraint>
+    <constraint source="Architecture">HA_ACCESS_TOKEN and HA_MQTT_PASSWORD must be in SENSITIVE_VARS for log masking</constraint>
+    <constraint source="Dev Notes">Use empty string defaults for optional variables - graceful handling when not configured</constraint>
+    <constraint source="Architecture">MCP server handles HA_URL, HA_ACCESS_TOKEN, HA_CONTROL_ALLOWLIST, HA_TIMEOUT</constraint>
+    <constraint source="Architecture">Backend handles HA_MQTT_* variables for MQTT subscriber service</constraint>
+    <constraint source="Dev Notes">Implement is_ha_configured() helper function to check if HA is properly configured</constraint>
+    <constraint source="Testing">Unit tests should verify config loading and masking works correctly</constraint>
+  </constraints>
+
+  <interfaces>
+    <interface name="mcp_server/config.py - HA Config" kind="function">
+      <signature>def validate_ha_config() -> list[str]</signature>
+      <path>mcp_server/config.py</path>
+      <description>Return list of configuration issues for HA (empty list = valid)</description>
+    </interface>
+    <interface name="mcp_server/config.py - HA Check" kind="function">
+      <signature>def is_ha_configured() -> bool</signature>
+      <path>mcp_server/config.py</path>
+      <description>Check if HA_URL and HA_ACCESS_TOKEN are set (for graceful skip)</description>
+    </interface>
+    <interface name="backend/api/config.py - MQTT Config" kind="function">
+      <signature>def validate_mqtt_config() -> list[str]</signature>
+      <path>backend/api/config.py</path>
+      <description>Validate MQTT config only if HA_MQTT_BROKER is set</description>
+    </interface>
+    <interface name="mask_sensitive_value" kind="function">
+      <signature>def mask_sensitive_value(value: str, show_first: int = 4, show_last: int = 4) -> str</signature>
+      <path>mcp_server/config.py, backend/api/config.py</path>
+      <description>Existing function to mask sensitive values in logs</description>
+    </interface>
+  </interfaces>
+
+  <tests>
+    <standards>
+      Use pytest with pytest-asyncio for async tests. Follow existing test patterns in mcp_server/tests/ and backend/tests/unit/.
+      Test config loading with environment variable patching using @patch.dict(os.environ, {...}).
+      Verify SENSITIVE_VARS masking by checking mask_sensitive_value output.
+      Test graceful handling when HA not configured by verifying is_ha_configured() returns False.
+    </standards>
+    <locations>
+      <location>mcp_server/tests/unit/test_config.py (create if not exists)</location>
+      <location>backend/tests/unit/test_config.py (create if not exists)</location>
+    </locations>
+    <ideas>
+      <idea ac="AC1">File inspection test verifying env.example contains all 10 HA variables with descriptions</idea>
+      <idea ac="AC2">Test mask_sensitive_value masks HA_ACCESS_TOKEN correctly (show first 4 + last 4)</idea>
+      <idea ac="AC3">Test SENSITIVE_VARS includes HA_MQTT_PASSWORD, verify masking in logs</idea>
+      <idea ac="AC4">Test validate_environment() in mcp_server returns config with HA_URL, HA_ACCESS_TOKEN, HA_CONTROL_ALLOWLIST, HA_TIMEOUT</idea>
+      <idea ac="AC5">Test validate_environment() in backend returns config with all HA_MQTT_* variables</idea>
+      <idea ac="AC6">File inspection test verifying docker-compose.yml passes HA_* vars to correct services</idea>
+      <idea ac="AC7">Test is_ha_configured() returns False when HA_URL or HA_ACCESS_TOKEN empty</idea>
+      <idea ac="AC7">Test validate_ha_config() returns list of issues when required vars missing</idea>
+    </ideas>
+  </tests>
+</story-context>

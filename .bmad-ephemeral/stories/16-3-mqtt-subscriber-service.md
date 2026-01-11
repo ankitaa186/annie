@@ -1,6 +1,6 @@
 # Story 16.3: MQTT Subscriber Service
 
-Status: drafted
+Status: ready-for-dev
 
 ## Story
 
@@ -303,6 +303,8 @@ async def shutdown():
 ## Dev Agent Record
 
 ### Context Reference
+
+- `.bmad-ephemeral/stories/16-3-mqtt-subscriber-service.context.xml`
 
 ### Agent Model Used
 

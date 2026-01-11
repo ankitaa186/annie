@@ -60,7 +60,7 @@ story_location: .bmad-ephemeral/stories
 # Epic 13: Proactive AI Worker - COMPLETED (11/11 stories done) - 5,311 LOC + 3,362 test LOC
 # Epic 14: Direct Memory Storage - COMPLETED (6/6 stories)
 # Epic 15: Extended MCP Tools - COMPLETED (6/6 stories) - 158 tests pass
-# Epic 16: Home Assistant Integration - CONTEXTED (0/5 stories, 5 drafted)
+# Epic 16: Home Assistant Integration - IN PROGRESS (1/5 stories done)
 # =============================================================================
 
 development_status:
@@ -246,9 +246,9 @@ development_status:
   # Dependencies: Home Assistant REST API, Mosquitto MQTT Broker (optional)
   # ============================================================================
   epic-16: contexted
-  16-1-home-assistant-query-tool: drafted
-  16-2-home-assistant-control-tool: drafted
-  16-3-mqtt-subscriber-service: drafted
-  16-4-configuration-environment-setup: drafted
-  16-5-integration-testing-documentation: drafted
+  16-1-home-assistant-query-tool: done
+  16-2-home-assistant-control-tool: done
+  16-3-mqtt-subscriber-service: ready-for-dev
+  16-4-configuration-environment-setup: done
+  16-5-integration-testing-documentation: in-progress
   epic-16-retrospective: optional

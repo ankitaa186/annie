@@ -1,6 +1,6 @@
 # Story 16.5: Integration Testing & Documentation
 
-Status: drafted
+Status: ready-for-dev
 
 ## Story
 
@@ -269,6 +269,8 @@ aiomqtt>=2.0.0
 ## Dev Agent Record
 
 ### Context Reference
+
+- .bmad-ephemeral/stories/16-5-integration-testing-documentation.context.xml
 
 ### Agent Model Used
 

@@ -1,0 +1,275 @@
+<story-context id="16-1-home-assistant-query-tool" v="1.0">
+  <metadata>
+    <epicId>16</epicId>
+    <storyId>1</storyId>
+    <title>Home Assistant Query Tool</title>
+    <status>ready-for-dev</status>
+    <generatedAt>2026-01-10</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>.bmad-ephemeral/stories/16-1-home-assistant-query-tool.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>user of Annie</asA>
+    <iWant>to query the state of my Home Assistant entities (lights, sensors, climate, etc.)</iWant>
+    <soThat>Annie can answer questions about my smart home status like "Is the garage door closed?" or "What's the thermostat set to?"</soThat>
+    <tasks>
+      <task id="1" title="Create Home Assistant HTTP Client Base">
+        <acs>AC #3, #4, #5, #7</acs>
+        <subtasks>
+          <subtask>Create `mcp_server/tools/home_assistant.py`</subtask>
+          <subtask>Implement `HomeAssistantClient` class with httpx async client</subtask>
+          <subtask>Add configuration loading: HA_URL, HA_ACCESS_TOKEN, HA_TIMEOUT</subtask>
+          <subtask>Implement CONFIG_ERROR check on initialization</subtask>
+          <subtask>Add Bearer token authentication header</subtask>
+          <subtask>Implement timeout handling with HA_TIMEOUT</subtask>
+          <subtask>Handle 401 UNAUTHORIZED responses</subtask>
+          <subtask>Handle 404 NOT_FOUND responses</subtask>
+          <subtask>Handle network errors (connection refused, DNS failure)</subtask>
+        </subtasks>
+      </task>
+      <task id="2" title="Implement Entity Query Methods">
+        <acs>AC #1, #2</acs>
+        <subtasks>
+          <subtask>Implement `get_entity_state(entity_id: str)` method - GET `/api/states/{entity_id}`</subtask>
+          <subtask>Implement `get_entities_by_ids(entity_ids: List[str])` method - aggregate results</subtask>
+          <subtask>Implement `get_entities_by_domain(domain: str)` method - GET `/api/states` and filter</subtask>
+          <subtask>Handle "all" domain for complete state dump</subtask>
+        </subtasks>
+      </task>
+      <task id="3" title="Create MCP Tool Handler">
+        <acs>AC #1, #2, #6</acs>
+        <subtasks>
+          <subtask>Create `home_assistant_query` tool function</subtask>
+          <subtask>Define input schema with oneOf validation (entity_ids OR domain)</subtask>
+          <subtask>Implement tool handler calling appropriate client methods</subtask>
+          <subtask>Format response: status, provider, entities[], query_count</subtask>
+          <subtask>Add structured logging with duration_ms</subtask>
+        </subtasks>
+      </task>
+      <task id="4" title="Write Unit Tests">
+        <acs>AC #8</acs>
+        <subtasks>
+          <subtask>Create `mcp_server/tests/test_home_assistant_query.py`</subtask>
+          <subtask>Test: `test_query_single_entity()` - single entity by ID</subtask>
+          <subtask>Test: `test_query_multiple_entities()` - list of entity IDs</subtask>
+          <subtask>Test: `test_query_by_domain()` - all entities in domain</subtask>
+          <subtask>Test: `test_query_entity_not_found()` - 404 handling</subtask>
+          <subtask>Test: `test_query_unauthorized()` - 401 handling</subtask>
+          <subtask>Test: `test_query_timeout()` - timeout handling</subtask>
+          <subtask>Test: `test_query_config_error()` - missing configuration</subtask>
+          <subtask>Test: `test_query_network_error()` - connection failure</subtask>
+          <subtask>Use pytest-httpx or unittest.mock for mocking HTTP responses</subtask>
+          <subtask>Verify >90% code coverage</subtask>
+        </subtasks>
+      </task>
+      <task id="5" title="Tool Registration (Deferred to Story 16.5)">
+        <acs>N/A - preparation only</acs>
+        <subtasks>
+          <subtask>Prepare tool for export in `mcp_server/tools/__init__.py`</subtask>
+        </subtasks>
+      </task>
+    </tasks>
+  </story>
+
+  <acceptanceCriteria>
+    <ac id="1" title="Query Specific Entities by ID">
+      <given>a list of entity IDs (e.g., `["light.living_room", "sensor.temperature"]`)</given>
+      <when>the `home_assistant_query` tool is called with `entity_ids` parameter</when>
+      <then>the tool returns state, attributes, and last_changed for each entity</then>
+      <testable>Call tool with 2+ entity IDs, verify all entities returned with complete data</testable>
+    </ac>
+    <ac id="2" title="Query All Entities by Domain">
+      <given>a domain name (e.g., "light", "sensor", "climate")</given>
+      <when>the `home_assistant_query` tool is called with `domain` parameter</when>
+      <then>the tool returns all entities in that domain with state, attributes, and last_changed</then>
+      <testable>Call tool with domain="light", verify all light entities returned</testable>
+    </ac>
+    <ac id="3" title="Handle Entity Not Found (404)">
+      <given>an entity ID that doesn't exist in Home Assistant</given>
+      <when>the `home_assistant_query` tool is called with that entity ID</when>
+      <then>the tool returns a graceful error with status="error", error_code="NOT_FOUND"</then>
+      <testable>Call tool with non-existent entity, verify error response format</testable>
+    </ac>
+    <ac id="4" title="Handle Invalid Token (401)">
+      <given>an invalid or expired HA_ACCESS_TOKEN</given>
+      <when>the `home_assistant_query` tool is called</when>
+      <then>the tool returns status="error", error_code="UNAUTHORIZED" with clear message</then>
+      <testable>Set invalid token, call tool, verify UNAUTHORIZED error</testable>
+    </ac>
+    <ac id="5" title="Request Timeout Handling">
+      <given>Home Assistant takes longer than HA_TIMEOUT seconds to respond</given>
+      <when>the `home_assistant_query` tool is called</when>
+      <then>the tool returns status="error", error_code="TIMEOUT" after HA_TIMEOUT seconds (default: 10)</then>
+      <testable>Mock slow HA response, verify timeout at configured threshold</testable>
+    </ac>
+    <ac id="6" title="Structured Logging">
+      <given>any tool call (success or failure)</given>
+      <when>the operation completes</when>
+      <then>structured logs include: tool_name, entity_count, duration_ms, status</then>
+      <testable>Check logs for required fields after tool calls</testable>
+    </ac>
+    <ac id="7" title="Handle Missing Configuration">
+      <given>HA_URL or HA_ACCESS_TOKEN is not configured</given>
+      <when>the `home_assistant_query` tool is called</when>
+      <then>the tool returns status="error", error_code="CONFIG_ERROR" with clear message</then>
+      <testable>Remove HA_URL from env, call tool, verify CONFIG_ERROR</testable>
+    </ac>
+    <ac id="8" title="Unit Tests with Mocked HA Responses">
+      <given>the tool implementation</given>
+      <when>unit tests are run</when>
+      <then>all test cases pass with >90% code coverage using mocked HTTP responses</then>
+      <testable>Run pytest with coverage, verify threshold met</testable>
+    </ac>
+  </acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc>
+        <path>docs/epics/epic-16-home-assistant-integration.md</path>
+        <title>Epic 16: Home Assistant Integration</title>
+        <section>Story 16.1: Home Assistant Query Tool</section>
+        <snippet>Implements `home_assistant_query` MCP tool for reading entity states from Home Assistant REST API. Schema, response format, and acceptance criteria defined.</snippet>
+      </doc>
+      <doc>
+        <path>.bmad-ephemeral/stories/tech-spec-epic-16.md</path>
+        <title>Epic 16 Technical Specification</title>
+        <section>Detailed Design - Services and Modules</section>
+        <snippet>HomeAssistantClient in mcp_server/tools/home_assistant.py. Data models for EntityState and query responses. REST API endpoints: /api/states and /api/states/{entity_id}.</snippet>
+      </doc>
+      <doc>
+        <path>CLAUDE.md</path>
+        <title>Project Guidelines</title>
+        <section>MCP Server Communication</section>
+        <snippet>Tools follow JSON-RPC 2.0 protocol. Register in tools.py with schema. Use structured logging with duration_ms for monitoring.</snippet>
+      </doc>
+    </docs>
+    <code>
+      <file>
+        <path>mcp_server/tools/web_search.py</path>
+        <kind>reference-implementation</kind>
+        <symbol>web_search_tool_handler, _tavily_search</symbol>
+        <lines>1-275</lines>
+        <reason>Pattern for async HTTP client, error handling (RATE_LIMIT, TIMEOUT, SERVER_ERROR), tool schema with handler, structured logging with duration_ms</reason>
+      </file>
+      <file>
+        <path>mcp_server/tools/__init__.py</path>
+        <kind>registry</kind>
+        <symbol>ToolRegistry, web_search_tool</symbol>
+        <lines>1-207</lines>
+        <reason>Export pattern for new tools. Follow existing structure to add home_assistant_query exports.</reason>
+      </file>
+      <file>
+        <path>mcp_server/config.py</path>
+        <kind>configuration</kind>
+        <symbol>get_config, SENSITIVE_VARS, validate_environment</symbol>
+        <lines>1-185</lines>
+        <reason>Pattern for loading optional API keys, adding to SENSITIVE_VARS for masking. HA_ACCESS_TOKEN should be added to SENSITIVE_VARS in Story 16.4.</reason>
+      </file>
+      <file>
+        <path>mcp_server/logging.py</path>
+        <kind>utility</kind>
+        <symbol>get_logger</symbol>
+        <reason>Use get_logger(__name__) for structured logging in tool implementation</reason>
+      </file>
+      <file>
+        <path>mcp_server/tests/test_web_search_tool.py</path>
+        <kind>test-reference</kind>
+        <symbol>TestTavilySearch, TestWebSearchToolHandler</symbol>
+        <lines>1-649</lines>
+        <reason>Testing patterns: AsyncMock for httpx.AsyncClient, patch patterns for config and HTTP calls, test class organization by functionality</reason>
+      </file>
+      <file>
+        <path>mcp_server/tests/conftest.py</path>
+        <kind>test-fixtures</kind>
+        <symbol>mock_env_vars, mock_httpx_client</symbol>
+        <lines>1-72</lines>
+        <reason>Test environment setup, mock fixtures for HTTP client. Add HA_URL and HA_ACCESS_TOKEN to TEST_ENV_VARS.</reason>
+      </file>
+    </code>
+    <dependencies>
+      <python>
+        <package name="httpx" version=">=0.24.0" note="Already in requirements.txt - async HTTP client for HA REST API" />
+        <package name="pytest" version=">=9.0.0" note="Already in requirements.txt - testing framework" />
+        <package name="pytest-asyncio" version=">=1.3.0" note="Already in requirements.txt - async test support" />
+      </python>
+      <external>
+        <service name="Home Assistant" protocol="REST API" port="8123" note="Must be accessible from Docker network" />
+      </external>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint source="Architecture">Use httpx.AsyncClient consistent with other MCP tools</constraint>
+    <constraint source="Security">HA_ACCESS_TOKEN must be added to SENSITIVE_VARS for log masking (Story 16.4)</constraint>
+    <constraint source="Performance">Query latency p95 target: less than 500ms</constraint>
+    <constraint source="Error Handling">Use structured error responses with status, error_code, error_message fields</constraint>
+    <constraint source="Logging">All tool calls must log duration_ms for performance monitoring</constraint>
+    <constraint source="Testing">Minimum 90% code coverage with mocked HTTP responses</constraint>
+    <constraint source="Dev Notes">Follow existing tool patterns from Epic 15 (web_search, web_crawl)</constraint>
+  </constraints>
+
+  <interfaces>
+    <interface>
+      <name>Home Assistant REST API - Get States</name>
+      <kind>REST endpoint</kind>
+      <signature>GET /api/states</signature>
+      <path>External: http://HA_URL:8123/api/states</path>
+      <notes>Returns all entity states. Requires Bearer token. Filter client-side by domain prefix.</notes>
+    </interface>
+    <interface>
+      <name>Home Assistant REST API - Get State</name>
+      <kind>REST endpoint</kind>
+      <signature>GET /api/states/{entity_id}</signature>
+      <path>External: http://HA_URL:8123/api/states/{entity_id}</path>
+      <notes>Returns single entity state. 404 if not found. 401 if invalid token.</notes>
+    </interface>
+    <interface>
+      <name>home_assistant_query Tool Schema</name>
+      <kind>MCP Tool</kind>
+      <signature>home_assistant_query(entity_ids?: string[], domain?: string) -> QueryResponse</signature>
+      <path>mcp_server/tools/home_assistant.py</path>
+      <notes>oneOf validation: either entity_ids or domain required. Response includes status, provider, entities[], query_count.</notes>
+    </interface>
+    <interface>
+      <name>EntityState Response Format</name>
+      <kind>Data Model</kind>
+      <signature>{ entity_id: str, state: str, attributes: dict, last_changed: str }</signature>
+      <notes>Match HA REST API response structure for consistency</notes>
+    </interface>
+    <interface>
+      <name>Error Response Format</name>
+      <kind>Data Model</kind>
+      <signature>{ status: "error", provider: "home_assistant", error_code: str, error_message: str, entity_id?: str }</signature>
+      <notes>error_code values: NOT_FOUND, UNAUTHORIZED, TIMEOUT, CONFIG_ERROR, NETWORK_ERROR</notes>
+    </interface>
+  </interfaces>
+
+  <tests>
+    <standards>
+      Follow pytest patterns from existing MCP tool tests. Use unittest.mock with AsyncMock for httpx.AsyncClient mocking.
+      Organize tests into classes by functionality (TestHomeAssistantClient, TestQueryToolHandler, TestToolSchema).
+      Use conftest.py for shared fixtures. Set SKIP_ENV_VALIDATION=true in test env to avoid validation on import.
+      Target >90% code coverage.
+    </standards>
+    <locations>
+      <location>mcp_server/tests/test_home_assistant_query.py</location>
+      <location>mcp_server/tests/conftest.py (add HA env vars)</location>
+    </locations>
+    <ideas>
+      <idea ac="1">test_query_single_entity() - mock GET /api/states/{entity_id}, verify response parsing</idea>
+      <idea ac="1">test_query_multiple_entities() - mock multiple GETs, verify aggregation</idea>
+      <idea ac="2">test_query_by_domain_light() - mock GET /api/states, filter light.*, verify count</idea>
+      <idea ac="2">test_query_by_domain_all() - mock GET /api/states, no filter, return all</idea>
+      <idea ac="3">test_query_entity_not_found() - mock 404 response, verify NOT_FOUND error</idea>
+      <idea ac="4">test_query_unauthorized() - mock 401 response, verify UNAUTHORIZED error</idea>
+      <idea ac="5">test_query_timeout() - mock httpx.TimeoutException, verify TIMEOUT error</idea>
+      <idea ac="6">test_structured_logging() - capture logs, verify duration_ms, status, entity_count</idea>
+      <idea ac="7">test_config_error_missing_url() - unset HA_URL, verify CONFIG_ERROR</idea>
+      <idea ac="7">test_config_error_missing_token() - unset HA_ACCESS_TOKEN, verify CONFIG_ERROR</idea>
+      <idea ac="8">test_network_error() - mock connection refused, verify NETWORK_ERROR</idea>
+      <idea ac="schema">test_tool_schema_structure() - verify name, description, inputSchema, handler</idea>
+      <idea ac="schema">test_input_schema_one_of() - verify oneOf constraint for entity_ids OR domain</idea>
+    </ideas>
+  </tests>
+</story-context>

@@ -1,0 +1,317 @@
+<story-context id="16-3-mqtt-subscriber-service" v="1.0">
+  <metadata>
+    <epicId>16</epicId>
+    <storyId>3</storyId>
+    <title>MQTT Subscriber Service</title>
+    <status>drafted</status>
+    <generatedAt>2026-01-10</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>.bmad-ephemeral/stories/16-3-mqtt-subscriber-service.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>user of Annie</asA>
+    <iWant>to receive proactive alerts from my Home Assistant automations via Telegram</iWant>
+    <soThat>Annie can notify me about important home events like motion detection, door left open, or temperature changes without me asking</soThat>
+    <tasks>
+      <task id="1" title="Create MQTT Subscriber Class (AC: #1, #2, #6, #8, #9)">
+        <subtask>Create `backend/api/mqtt_subscriber.py`</subtask>
+        <subtask>Implement `MQTTSubscriber` class with aiomqtt client</subtask>
+        <subtask>Add configuration loading: HA_MQTT_BROKER, HA_MQTT_PORT, HA_MQTT_USERNAME, HA_MQTT_PASSWORD, HA_MQTT_TOPICS</subtask>
+        <subtask>Implement `start()` method to connect and subscribe</subtask>
+        <subtask>Implement `stop()` method for graceful shutdown</subtask>
+        <subtask>Add connection check: skip if HA_MQTT_BROKER not configured</subtask>
+        <subtask>Implement reconnection with 5s backoff on disconnect</subtask>
+        <subtask>Handle authentication if username/password provided</subtask>
+      </task>
+      <task id="2" title="Implement Message Parsing (AC: #3, #4)">
+        <subtask>Implement `parse_message(payload: bytes, topic: str) -> dict` method</subtask>
+        <subtask>Try JSON parsing first: extract title, message, entity_id, state</subtask>
+        <subtask>Fall back to plain text: use payload as message, default title</subtask>
+        <subtask>Handle malformed JSON gracefully (treat as plain text)</subtask>
+        <subtask>Validate required fields (at minimum: message content)</subtask>
+      </task>
+      <task id="3" title="Implement Telegram Forwarding (AC: #5, #7)">
+        <subtask>Import and use existing `TelegramDelivery` class</subtask>
+        <subtask>Format message with Markdown: **{title}**, {message}, _Topic: {topic}_</subtask>
+        <subtask>Call `TelegramDelivery.send_message(user_id, formatted_text)`</subtask>
+        <subtask>Use `HA_MQTT_ALERT_USER_ID` as target user</subtask>
+        <subtask>Add structured logging with topic, message_type, forwarded</subtask>
+      </task>
+      <task id="4" title="Integrate with Backend Startup (AC: #8)">
+        <subtask>Add MQTT subscriber to backend startup in `main.py`</subtask>
+        <subtask>Register shutdown handler for SIGTERM</subtask>
+        <subtask>Ensure subscriber runs as background task (asyncio)</subtask>
+        <subtask>Handle startup gracefully if MQTT not configured</subtask>
+      </task>
+      <task id="5" title="Write Unit Tests (AC: #10)">
+        <subtask>Create `backend/tests/test_mqtt_subscriber.py`</subtask>
+        <subtask>Test: `test_mqtt_connect()` - connection establishment</subtask>
+        <subtask>Test: `test_mqtt_subscribe_topics()` - topic subscription</subtask>
+        <subtask>Test: `test_mqtt_receive_json_message()` - JSON parsing</subtask>
+        <subtask>Test: `test_mqtt_receive_plain_text()` - plain text handling</subtask>
+        <subtask>Test: `test_mqtt_malformed_json()` - fallback to text</subtask>
+        <subtask>Test: `test_mqtt_forward_to_telegram()` - Telegram delivery</subtask>
+        <subtask>Test: `test_mqtt_reconnect_on_disconnect()` - reconnection logic</subtask>
+        <subtask>Test: `test_mqtt_graceful_shutdown()` - SIGTERM handling</subtask>
+        <subtask>Test: `test_mqtt_skip_when_not_configured()` - skip behavior</subtask>
+        <subtask>Use `unittest.mock.AsyncMock` for aiomqtt mocking</subtask>
+        <subtask>Verify >90% code coverage</subtask>
+      </task>
+    </tasks>
+  </story>
+
+  <acceptanceCriteria>
+    <criterion id="AC1" title="Connect to Mosquitto Broker on Startup">
+      <given>HA_MQTT_BROKER is configured</given>
+      <when>the backend service starts</when>
+      <then>the MQTT subscriber connects to the broker at HA_MQTT_BROKER:HA_MQTT_PORT</then>
+      <testable>Start service with valid broker config, verify connection in logs</testable>
+    </criterion>
+    <criterion id="AC2" title="Subscribe to Configured Topics">
+      <given>HA_MQTT_TOPICS=annie/alerts/#</given>
+      <when>the MQTT client connects</when>
+      <then>it subscribes to all topics matching the pattern (wildcard # supported)</then>
+      <testable>Verify subscription to "annie/alerts/#" in mock client calls</testable>
+    </criterion>
+    <criterion id="AC3" title="Parse JSON Messages">
+      <given>a message in JSON format: {"title": "...", "message": "...", "entity_id": "...", "state": "..."}</given>
+      <when>the subscriber receives the message</when>
+      <then>it extracts title, message, and optional fields correctly</then>
+      <testable>Send JSON message, verify parsed fields</testable>
+    </criterion>
+    <criterion id="AC4" title="Parse Plain Text Messages">
+      <given>a message in plain text format</given>
+      <when>the subscriber receives the message</when>
+      <then>it uses the text as the message body with a default title</then>
+      <testable>Send plain text, verify message body used</testable>
+    </criterion>
+    <criterion id="AC5" title="Forward Messages to Telegram">
+      <given>a parsed MQTT message and HA_MQTT_ALERT_USER_ID configured</given>
+      <when>the message is received</when>
+      <then>it is forwarded to Telegram via TelegramDelivery.send_message() with format: **{title}**, {message}, _Topic: {topic}_</then>
+      <testable>Mock TelegramDelivery, verify send_message called with correct format</testable>
+    </criterion>
+    <criterion id="AC6" title="Auto-Reconnect on Connection Loss">
+      <given>the MQTT connection is lost</given>
+      <when>the subscriber detects disconnection</when>
+      <then>it attempts reconnection with 5-second backoff, max 30 seconds to reconnect</then>
+      <testable>Simulate disconnect, verify reconnect attempts with backoff</testable>
+    </criterion>
+    <criterion id="AC7" title="Log All Received Messages">
+      <given>any MQTT message is received</given>
+      <when>the message is processed</when>
+      <then>structured logs include: topic, message_type (json/text), forwarded (true/false)</then>
+      <testable>Check logs for required fields after message processing</testable>
+    </criterion>
+    <criterion id="AC8" title="Graceful Shutdown on SIGTERM">
+      <given>the backend receives SIGTERM signal</given>
+      <when>shutdown is initiated</when>
+      <then>the MQTT client disconnects cleanly before process exit</then>
+      <testable>Send SIGTERM, verify clean disconnect in logs</testable>
+    </criterion>
+    <criterion id="AC9" title="Skip if MQTT Not Configured">
+      <given>HA_MQTT_BROKER is empty or not set</given>
+      <when>the backend service starts</when>
+      <then>the MQTT subscriber is not started (no error, just skipped)</then>
+      <testable>Start without HA_MQTT_BROKER, verify no MQTT connection attempted</testable>
+    </criterion>
+    <criterion id="AC10" title="Unit Tests with Mocked MQTT Client">
+      <given>the subscriber implementation</given>
+      <when>unit tests are run</when>
+      <then>all test cases pass with >90% code coverage using mocked aiomqtt client</then>
+      <testable>Run pytest with coverage, verify threshold met</testable>
+    </criterion>
+  </acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc>
+        <path>docs/epics/epic-16-home-assistant-integration.md</path>
+        <title>Epic 16: Home Assistant Integration</title>
+        <section>Story 16.3: MQTT Subscriber Service</section>
+        <snippet>MQTT subscriber in the backend to receive Home Assistant alerts. Subscribe to Mosquitto broker, parse JSON and plain text messages, forward to Telegram.</snippet>
+      </doc>
+      <doc>
+        <path>.bmad-ephemeral/stories/tech-spec-epic-16.md</path>
+        <title>Epic Technical Specification: Home Assistant Integration</title>
+        <section>MQTT Alert Flow</section>
+        <snippet>HA Automation triggers -> Mosquitto MQTT -> Backend MQTTSubscriber receives message -> Parse JSON payload -> TelegramDelivery.send_message(user_id, formatted_alert)</snippet>
+      </doc>
+      <doc>
+        <path>.bmad-ephemeral/stories/16-4-configuration-environment-setup.md</path>
+        <title>Story 16.4: Configuration and Environment Setup</title>
+        <section>MQTT Configuration Variables</section>
+        <snippet>HA_MQTT_BROKER, HA_MQTT_PORT (1883), HA_MQTT_USERNAME, HA_MQTT_PASSWORD, HA_MQTT_TOPICS (annie/alerts/#), HA_MQTT_ALERT_USER_ID. HA_MQTT_PASSWORD in SENSITIVE_VARS for masking.</snippet>
+      </doc>
+      <doc>
+        <path>CLAUDE.md</path>
+        <title>Project Overview and Development Guidelines</title>
+        <section>Architecture - Service Communication Flow</section>
+        <snippet>Telegram Bot (User Interface) -> HTTP -> Backend API (Chat Logic + LLM Integration). Backend uses Redis for state management.</snippet>
+      </doc>
+      <doc>
+        <path>CLAUDE.md</path>
+        <title>Project Overview and Development Guidelines</title>
+        <section>Logging Standards</section>
+        <snippet>Structured logging with request_id for tracing, duration_ms for monitoring. Sensitive values automatically masked. JSON format for production.</snippet>
+      </doc>
+      <doc>
+        <path>CLAUDE.md</path>
+        <title>Project Overview and Development Guidelines</title>
+        <section>Development Workflow</section>
+        <snippet>Service-by-Service: Implement features in one service at a time, test with Docker. Every service includes health check endpoint/validation.</snippet>
+      </doc>
+    </docs>
+    <code>
+      <file>
+        <path>backend/api/proactive/telegram_delivery.py</path>
+        <kind>service</kind>
+        <symbol>TelegramDelivery</symbol>
+        <lines>320-743</lines>
+        <reason>Existing Telegram delivery class to reuse for forwarding MQTT alerts. Provides send_proactive_message() method, markdown-to-HTML conversion, rate limit handling, and delivery result tracking.</reason>
+      </file>
+      <file>
+        <path>backend/api/config.py</path>
+        <kind>config</kind>
+        <symbol>get_config, SENSITIVE_VARS</symbol>
+        <lines>1-270</lines>
+        <reason>Configuration module pattern to follow for loading HA_MQTT_* environment variables. Contains SENSITIVE_VARS list for masking passwords.</reason>
+      </file>
+      <file>
+        <path>backend/api/main.py</path>
+        <kind>entry</kind>
+        <symbol>startup_event, shutdown_event</symbol>
+        <lines>419-454</lines>
+        <reason>FastAPI startup/shutdown event handlers where MQTT subscriber should be integrated. Shows pattern for starting background tasks with asyncio.create_task().</reason>
+      </file>
+      <file>
+        <path>backend/api/logging.py</path>
+        <kind>utility</kind>
+        <symbol>get_logger</symbol>
+        <reason>Logging utility to use for structured logging with extra fields (topic, message_type, forwarded, duration_ms).</reason>
+      </file>
+      <file>
+        <path>backend/tests/proactive/test_telegram_delivery.py</path>
+        <kind>test</kind>
+        <symbol>test patterns</symbol>
+        <lines>1-293</lines>
+        <reason>Test patterns to follow: pytest fixtures with mock_redis and mock_bot, AsyncMock for async testing, validation error testing, rate limit testing.</reason>
+      </file>
+      <file>
+        <path>backend/api/proactive/__init__.py</path>
+        <kind>module</kind>
+        <symbol>TelegramDelivery export</symbol>
+        <reason>Export location showing how to import TelegramDelivery class.</reason>
+      </file>
+    </code>
+    <dependencies>
+      <python>
+        <package name="aiomqtt" version=">=2.0.0" note="NEW - async MQTT client for subscriber (added in Story 16.5)"/>
+        <package name="fastapi" version=">=0.104.0" note="existing - web framework"/>
+        <package name="redis" version=">=5.0.0" note="existing - state management"/>
+        <package name="python-telegram-bot" version="20.7" note="existing - Telegram delivery via TelegramDelivery class"/>
+        <package name="pytest" version=">=7.4.0" note="existing - unit testing"/>
+        <package name="pytest-asyncio" version=">=0.21.0" note="existing - async test support"/>
+      </python>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint type="pattern">Follow existing async pattern in proactive/telegram_delivery.py for async service classes</constraint>
+    <constraint type="pattern">Use get_config() for loading environment variables, not direct os.getenv()</constraint>
+    <constraint type="pattern">Add HA_MQTT_PASSWORD to SENSITIVE_VARS list (Story 16.4 prerequisite)</constraint>
+    <constraint type="pattern">Use structured logging with extra={} for all log messages</constraint>
+    <constraint type="pattern">New service file goes in backend/api/ directory (not MCP server)</constraint>
+    <constraint type="testing">Use unittest.mock.AsyncMock for mocking aiomqtt client</constraint>
+    <constraint type="testing">Achieve >90% code coverage for mqtt_subscriber.py</constraint>
+    <constraint type="integration">Start MQTT subscriber as asyncio background task in main.py startup_event</constraint>
+    <constraint type="integration">Register shutdown handler to call subscriber.stop() on SIGTERM</constraint>
+    <constraint type="error-handling">Never crash on MQTT errors - log warning and continue</constraint>
+    <constraint type="error-handling">Graceful skip if HA_MQTT_BROKER not configured (no error)</constraint>
+  </constraints>
+
+  <interfaces>
+    <interface name="MQTTSubscriber" kind="class">
+      <signature>
+class MQTTSubscriber:
+    def __init__(self, broker: str, port: int, topics: str, username: str = "", password: str = "", alert_user_id: str = ""):
+        ...
+    async def start(self) -> None:
+        """Connect to broker, subscribe to topics, and process messages in loop."""
+        ...
+    async def stop(self) -> None:
+        """Gracefully disconnect from broker."""
+        ...
+    async def handle_message(self, message) -> None:
+        """Parse message and forward to Telegram."""
+        ...
+    def parse_message(self, payload: bytes, topic: str) -> dict:
+        """Parse JSON or plain text payload into message dict."""
+        ...
+      </signature>
+      <path>backend/api/mqtt_subscriber.py</path>
+    </interface>
+    <interface name="TelegramDelivery.send_proactive_message" kind="method">
+      <signature>
+async def send_proactive_message(
+    self,
+    user_id: str,
+    message: str,
+    trigger_id: str,
+    parse_mode: str = "HTML",
+    max_retries: Optional[int] = None
+) -> DeliveryResult:
+      </signature>
+      <path>backend/api/proactive/telegram_delivery.py</path>
+    </interface>
+    <interface name="MQTT Message Format" kind="data">
+      <signature>
+# JSON format (from Home Assistant automations)
+{
+    "title": str,       # Alert title
+    "message": str,     # Alert body
+    "entity_id": str,   # Optional: triggering entity
+    "state": str        # Optional: entity state
+}
+
+# Plain text format
+"Motion detected in backyard"
+      </signature>
+      <path>.bmad-ephemeral/stories/tech-spec-epic-16.md</path>
+    </interface>
+    <interface name="Telegram Output Format" kind="template">
+      <signature>
+**{title}**
+
+{message}
+
+_Topic: {topic}_
+      </signature>
+      <path>.bmad-ephemeral/stories/16-3-mqtt-subscriber-service.md</path>
+    </interface>
+  </interfaces>
+
+  <tests>
+    <standards>
+      Follow existing test patterns from backend/tests/proactive/. Use pytest with pytest-asyncio for async tests. Create fixtures for mock_redis and mock MQTT client using AsyncMock. Mock external dependencies (aiomqtt, TelegramDelivery) to isolate unit tests. Use structured assertions to verify log output contains required fields.
+    </standards>
+    <locations>
+      <location>backend/tests/test_mqtt_subscriber.py</location>
+      <location>backend/tests/unit/ (for unit tests following project convention)</location>
+    </locations>
+    <ideas>
+      <idea ac="AC1">test_mqtt_connect() - Mock aiomqtt.Client, verify connect called with correct broker/port</idea>
+      <idea ac="AC2">test_mqtt_subscribe_topics() - Verify client.subscribe() called with configured topics</idea>
+      <idea ac="AC3">test_mqtt_receive_json_message() - Send JSON payload, verify parsed dict has title, message, entity_id, state</idea>
+      <idea ac="AC4">test_mqtt_receive_plain_text() - Send plain text, verify message body used with default title</idea>
+      <idea ac="AC4">test_mqtt_malformed_json() - Send invalid JSON, verify fallback to plain text handling</idea>
+      <idea ac="AC5">test_mqtt_forward_to_telegram() - Mock TelegramDelivery, verify send_proactive_message called with correct format</idea>
+      <idea ac="AC6">test_mqtt_reconnect_on_disconnect() - Simulate MqttError, verify reconnect with 5s sleep</idea>
+      <idea ac="AC7">test_mqtt_logging() - Verify structured log fields: topic, message_type, forwarded</idea>
+      <idea ac="AC8">test_mqtt_graceful_shutdown() - Call stop(), verify running=False and client disconnect</idea>
+      <idea ac="AC9">test_mqtt_skip_when_not_configured() - Empty broker, verify start() returns early without error</idea>
+      <idea ac="AC10">Run pytest --cov=backend/api/mqtt_subscriber --cov-report=term-missing, verify >90%</idea>
+    </ideas>
+  </tests>
+</story-context>

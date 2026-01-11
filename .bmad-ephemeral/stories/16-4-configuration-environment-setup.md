@@ -1,6 +1,6 @@
 # Story 16.4: Configuration & Environment Setup
 
-Status: drafted
+Status: done
 
 ## Story
 
@@ -97,47 +97,47 @@ Status: drafted
 ## Tasks / Subtasks
 
 ### Task 1: Update env.example (AC: #1)
-- [ ] Add Epic 16 section header with description
-- [ ] Add HA_URL with description and example
-- [ ] Add HA_ACCESS_TOKEN with instructions to generate token
-- [ ] Add HA_CONTROL_ALLOWLIST with wildcard syntax documentation
-- [ ] Add HA_TIMEOUT with default value (10)
-- [ ] Add HA_MQTT_BROKER (optional)
-- [ ] Add HA_MQTT_PORT with default (1883)
-- [ ] Add HA_MQTT_USERNAME (optional)
-- [ ] Add HA_MQTT_PASSWORD (optional, note: sensitive)
-- [ ] Add HA_MQTT_TOPICS with default pattern
-- [ ] Add HA_MQTT_ALERT_USER_ID
+- [x] Add Epic 16 section header with description
+- [x] Add HA_URL with description and example
+- [x] Add HA_ACCESS_TOKEN with instructions to generate token
+- [x] Add HA_CONTROL_ALLOWLIST with wildcard syntax documentation
+- [x] Add HA_TIMEOUT with default value (10)
+- [x] Add HA_MQTT_BROKER (optional)
+- [x] Add HA_MQTT_PORT with default (1883)
+- [x] Add HA_MQTT_USERNAME (optional)
+- [x] Add HA_MQTT_PASSWORD (optional, note: sensitive)
+- [x] Add HA_MQTT_TOPICS with default pattern
+- [x] Add HA_MQTT_ALERT_USER_ID
 
 ### Task 2: Update mcp_server/config.py (AC: #2, #4)
-- [ ] Add HA_URL loading with empty default
-- [ ] Add HA_ACCESS_TOKEN loading with empty default
-- [ ] Add HA_ACCESS_TOKEN to SENSITIVE_VARS list
-- [ ] Add HA_CONTROL_ALLOWLIST loading with empty default
-- [ ] Add HA_TIMEOUT loading with default 10
-- [ ] Add validation function for HA config
-- [ ] Ensure masking works in get_masked_config()
+- [x] Add HA_URL loading with empty default
+- [x] Add HA_ACCESS_TOKEN loading with empty default
+- [x] Add HA_ACCESS_TOKEN to SENSITIVE_VARS list
+- [x] Add HA_CONTROL_ALLOWLIST loading with empty default
+- [x] Add HA_TIMEOUT loading with default 10
+- [x] Add validation function for HA config
+- [x] Ensure masking works in get_masked_config()
 
 ### Task 3: Update backend/api/config.py (AC: #3, #5)
-- [ ] Add HA_MQTT_BROKER loading with empty default
-- [ ] Add HA_MQTT_PORT loading with default 1883
-- [ ] Add HA_MQTT_USERNAME loading with empty default
-- [ ] Add HA_MQTT_PASSWORD loading with empty default
-- [ ] Add HA_MQTT_PASSWORD to SENSITIVE_VARS list
-- [ ] Add HA_MQTT_TOPICS loading with default "annie/alerts/#"
-- [ ] Add HA_MQTT_ALERT_USER_ID loading with empty default
-- [ ] Ensure masking works for MQTT password
+- [x] Add HA_MQTT_BROKER loading with empty default
+- [x] Add HA_MQTT_PORT loading with default 1883
+- [x] Add HA_MQTT_USERNAME loading with empty default
+- [x] Add HA_MQTT_PASSWORD loading with empty default
+- [x] Add HA_MQTT_PASSWORD to SENSITIVE_VARS list
+- [x] Add HA_MQTT_TOPICS loading with default "annie/alerts/#"
+- [x] Add HA_MQTT_ALERT_USER_ID loading with empty default
+- [x] Ensure masking works for MQTT password
 
 ### Task 4: Update docker-compose.yml (AC: #6)
-- [ ] Add HA_* environment variables to mcp-server service
-- [ ] Add HA_MQTT_* environment variables to backend service
-- [ ] Verify variable passthrough from host .env
+- [x] Add HA_* environment variables to mcp-server service
+- [x] Add HA_MQTT_* environment variables to backend service
+- [x] Verify variable passthrough from host .env
 
 ### Task 5: Add Config Validation (AC: #7)
-- [ ] Implement `validate_ha_config()` in mcp_server/config.py
+- [x] Implement `validate_ha_config()` in mcp_server/config.py
   - Check HA_URL and HA_ACCESS_TOKEN are set
   - Return list of missing/invalid configs
-- [ ] Implement `validate_mqtt_config()` in backend/api/config.py
+- [x] Implement `validate_mqtt_config()` in backend/api/config.py
   - Only validate if HA_MQTT_BROKER is set
   - Check HA_MQTT_ALERT_USER_ID if broker is configured
 
@@ -287,15 +287,38 @@ def is_ha_configured() -> bool:
 
 ### Context Reference
 
+- .bmad-ephemeral/stories/16-4-configuration-environment-setup.context.xml
+
 ### Agent Model Used
 
-{{agent_model_name_version}}
+Claude Opus 4.5 (claude-opus-4-5-20251101)
 
 ### Debug Log References
 
+- Fixed endless log spam issue: Moved MQTT status logging from validate_environment() to startup_event() in main.py
+
 ### Completion Notes List
 
+- All 10 HA environment variables added to env.example with comprehensive documentation
+- HA_ACCESS_TOKEN added to SENSITIVE_VARS in mcp_server/config.py
+- HA_MQTT_PASSWORD added to SENSITIVE_VARS in backend/api/config.py
+- validate_ha_config() and is_ha_configured() implemented in mcp_server/config.py
+- validate_mqtt_config() and is_mqtt_configured() implemented in backend/api/config.py
+- Docker Compose updated to pass HA_* vars to mcp-server, HA_MQTT_* vars to backend
+- 33 unit tests created and passing (15 MCP server + 18 backend)
+
 ### File List
+
+**Modified:**
+- env.example (lines 146-207: Epic 16 section with all 10 HA variables)
+- mcp_server/config.py (HA_* config loading, SENSITIVE_VARS, validation functions)
+- backend/api/config.py (HA_MQTT_* config loading, SENSITIVE_VARS, validation functions)
+- backend/api/main.py (MQTT status logging moved to startup_event)
+- docker-compose.yml (HA_* to mcp-server, HA_MQTT_* to backend)
+
+**Created:**
+- mcp_server/tests/test_ha_config.py (15 tests)
+- backend/tests/unit/test_mqtt_config.py (18 tests)
 
 ---
 

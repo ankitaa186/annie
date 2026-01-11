@@ -117,6 +117,19 @@ from .reddit_search import (
     _reddit_json_search,
 )
 
+# Home Assistant Tools (Epic 16 - Stories 16.1, 16.2)
+from .home_assistant import (
+    home_assistant_query_tool,
+    home_assistant_query_handler,
+    home_assistant_control_tool,
+    home_assistant_control_handler,
+    HomeAssistantClient,
+    AllowlistValidator,
+    get_allowlist_validator,
+    reset_allowlist_validator,
+    map_action_to_service,
+)
+
 __all__ = [
     # Registry
     "ToolRegistry",
@@ -203,4 +216,15 @@ __all__ = [
     "reddit_search_tool_handler",
     "_praw_search_sync",
     "_reddit_json_search",
+
+    # Home Assistant
+    "home_assistant_query_tool",
+    "home_assistant_query_handler",
+    "home_assistant_control_tool",
+    "home_assistant_control_handler",
+    "HomeAssistantClient",
+    "AllowlistValidator",
+    "get_allowlist_validator",
+    "reset_allowlist_validator",
+    "map_action_to_service",
 ]
