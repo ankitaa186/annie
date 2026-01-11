@@ -50,16 +50,17 @@ story_location: .bmad-ephemeral/stories
 # Epic 3:  Memory & Persistence - COMPLETED (2/2 stories)
 # Epic 4:  Decision Support Tools - COMPLETED (1/1 usable story - moved to Epic 10)
 # Epic 5:  Telegram Bot Interface - COMPLETED (3/3 stories)
-# Epic 6:  Integration & Quality - BACKLOG (0/4 stories) - MVP critical
-# Epic 7:  User Profile & Personalization - CONTEXTED (1/2 stories done)
+# Epic 6:  Integration & Quality - COMPLETED (4/4 stories)
+# Epic 7:  User Profile & Personalization - COMPLETED (1/2 stories, 1 rejected)
 # Epic 8:  Langfuse Integration - COMPLETED (6/6 stories)
 # Epic 9:  Multi-LLM Provider (Gemini) - COMPLETED (5/5 stories)
-# Epic 10: Portfolio Management - CONTEXTED (5/7 stories done, 1 blocked, 1 rejected)
+# Epic 10: Portfolio Management - COMPLETED (6/7 stories, 1 rejected)
 # Epic 11: Real-Time Status Updates - COMPLETED (6/6 stories)
 # Epic 12: Memory Storage Enhancements - COMPLETED (5/5 stories)
 # Epic 13: Proactive AI Worker - COMPLETED (11/11 stories done) - 5,311 LOC + 3,362 test LOC
-# Epic 14: Direct Memory Storage - CONTEXTED (0/6 stories)
-# Epic 15: Extended MCP Tools - IN PROGRESS (5/6 stories done) - 158 tests pass
+# Epic 14: Direct Memory Storage - COMPLETED (6/6 stories)
+# Epic 15: Extended MCP Tools - COMPLETED (6/6 stories) - 158 tests pass
+# Epic 16: Home Assistant Integration - BACKLOG (0/5 stories)
 # =============================================================================
 
 development_status:
@@ -117,19 +118,19 @@ development_status:
   # ============================================================================
   # EPIC 6: Integration & Quality (BACKLOG - MVP CRITICAL)
   # ============================================================================
-  epic-6: backlog
-  6-1-end-to-end-integration: backlog
-  6-2-unit-integration-testing: backlog
-  6-3-error-scenario-performance-testing: backlog
-  6-4-documentation-deployment-readiness: backlog
+  epic-6: completed
+  6-1-end-to-end-integration: done
+  6-2-unit-integration-testing: done
+  6-3-error-scenario-performance-testing: done
+  6-4-documentation-deployment-readiness: done
   epic-6-retrospective: optional
 
   # ============================================================================
   # EPIC 7: User Profile & Personalization (CONTEXTED)
   # ============================================================================
-  epic-7: contexted
+  epic-7: completed
   7-1-profile-integration-smart-caching: done
-  7-2-onboarding-enhancement-incomplete-profiles: backlog
+  7-2-onboarding-enhancement-incomplete-profiles: rejected
   epic-7-retrospective: optional
 
   # ============================================================================
@@ -158,9 +159,9 @@ development_status:
   # ============================================================================
   # EPIC 10: Portfolio Management & Financial Tools (CONTEXTED)
   # ============================================================================
-  epic-10: contexted
+  epic-10: completed
   10-1-portfolio-access-mcp-tools: done
-  10-2-watchlist-intent-tracking: blocked  # Waiting on agentic-memories
+  10-2-watchlist-intent-tracking: done
   10-3-portfolio-summary-llm-context: done
   10-4-portfolio-update-remove-tools: done
   10-5-portfolio-value-performance-tracking: done
@@ -216,13 +217,13 @@ development_status:
   # Fast path for LLM-initiated memory storage via /v1/memories/direct
   # Dependencies: agentic-memories direct API
   # ============================================================================
-  epic-14: contexted
+  epic-14: completed
   14-1-update-store-memory-tool-schema: done
   14-2-update-store-memory-tool-handler: done
   14-3-add-delete-memory-tool: done
   14-4-register-new-tools-in-mcp-server: done
   14-5-update-system-prompt: done
-  14-6-integration-testing-validation: review
+  14-6-integration-testing-validation: done
   epic-14-retrospective: optional
 
   # ============================================================================
@@ -230,11 +231,24 @@ development_status:
   # Web Search (Tavily/DDG), Web Crawl (crawl4ai), Reddit (PRAW), Profile Update
   # Dependencies: Tavily API, Reddit OAuth, agentic-memories profile API
   # ============================================================================
-  epic-15: in-progress
+  epic-15: completed
   15-1-web-search-tool: done             # Phase 1 - COMPLETED (29/29 tests pass)
   15-2-web-crawl-tool: done              # Phase 1 - COMPLETED (45/45 tests pass)
   15-3-reddit-search-tool: done          # Phase 1 - COMPLETED (45/45 tests pass)
   15-4-update-user-profile-tool: done    # Phase 1 - COMPLETED (39/39 tests pass)
-  15-5-tool-registration-integration-tests: drafted  # Phase 2 - depends on 15.1-15.4
+  15-5-tool-registration-integration-tests: done  # Phase 2 - COMPLETED
   15-6-env-config-documentation: done    # Phase 3 - COMPLETED
   epic-15-retrospective: optional
+
+  # ============================================================================
+  # EPIC 16: Home Assistant Integration (BACKLOG)
+  # Bidirectional HA integration: Query/Control via MCP tools, Alerts via MQTT
+  # Dependencies: Home Assistant REST API, Mosquitto MQTT Broker (optional)
+  # ============================================================================
+  epic-16: backlog
+  16-1-home-assistant-query-tool: backlog
+  16-2-home-assistant-control-tool: backlog
+  16-3-mqtt-subscriber-service: backlog
+  16-4-configuration-environment-setup: backlog
+  16-5-integration-testing-documentation: backlog
+  epic-16-retrospective: optional
