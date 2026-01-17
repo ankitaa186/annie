@@ -678,6 +678,7 @@ home_assistant_query_tool = {
                 "items": {"type": "string"},
                 "description": (
                     "List of specific entity IDs to query. "
+                    "Provide either entity_ids OR domain (not both). "
                     "Examples: ['light.living_room', 'sensor.outdoor_temperature', 'binary_sensor.garage_door']"
                 )
             },
@@ -686,6 +687,7 @@ home_assistant_query_tool = {
                 "enum": ["light", "switch", "sensor", "climate", "binary_sensor", "cover", "fan", "lock", "media_player", "all"],
                 "description": (
                     "Query all entities in a domain. Use 'all' to get complete state dump. "
+                    "Provide either entity_ids OR domain (not both). "
                     "Common domains: light, switch, sensor, climate, binary_sensor, cover, fan, lock"
                 )
             },
@@ -697,11 +699,7 @@ home_assistant_query_tool = {
                     "Default: true. Set to false to include all entities."
                 )
             }
-        },
-        "oneOf": [
-            {"required": ["entity_ids"]},
-            {"required": ["domain"]}
-        ]
+        }
     },
     "handler": home_assistant_query_handler
 }
