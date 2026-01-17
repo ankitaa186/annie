@@ -70,6 +70,7 @@ SENSITIVE_VARS = [
     "BRAVE_SEARCH_API_KEY",
     "STOCK_API_KEY",
     "TAVILY_API_KEY",
+    "JINA_API_KEY",
     "REDDIT_CLIENT_SECRET",
     "HA_ACCESS_TOKEN",  # Epic 16: Home Assistant Integration
 ]

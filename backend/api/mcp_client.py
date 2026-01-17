@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from api.config import get_config
-from api.logging import get_logger
+from api.logging import get_logger, truncate_for_logging
 from api.status import emit_status
 from api.status_summarizers import summarize_tool_result
 
@@ -275,16 +275,17 @@ class MCPClient:
             # Make request to tools/call endpoint
             url = f"{self.mcp_server_url}/tools/call"
 
+            # INFO level: Log with truncated arguments (safe for production)
             logger.info(
                 "Calling MCP tool",
                 extra={
                     "tool_name": tool_name,
                     "request_id": request_id,
-                    "parameters": arguments
+                    "parameters": truncate_for_logging(arguments, max_length=500)
                 }
             )
 
-            # Debug: Log full request payload
+            # DEBUG level: Log full request payload (for debugging, not shown in production)
             logger.debug(
                 "MCP tool request payload",
                 extra={
@@ -384,17 +385,19 @@ class MCPClient:
             if isinstance(tool_result, dict) and tool_result.get("status") == "error":
                 tool_success = False
 
+            # INFO level: Log with truncated response (safe for production)
             logger.info(
                 "Tool execution completed",
                 extra={
                     "tool_name": tool_name,
                     "request_id": request_id,
                     "duration_ms": duration_ms,
-                    "success": tool_success
+                    "success": tool_success,
+                    "response_preview": truncate_for_logging(tool_result, max_length=500)
                 }
             )
 
-            # Debug: Log full response payload
+            # DEBUG level: Log full response (for debugging, not shown in production)
             logger.debug(
                 "MCP tool response payload",
                 extra={

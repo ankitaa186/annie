@@ -1,0 +1,51 @@
+# docker-compose.prod.yml
+# Production overrides - Grafana Loki logging
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Prerequisites:
+#   1. Install Loki Docker plugin:
+#      docker plugin install grafana/loki-docker-driver:latest --alias loki --grant-all-permissions
+#   2. Set LOKI_URL in .env:
+#      LOKI_URL=https://<user-id>:<api-key>@logs-prod-us-central1.grafana.net/loki/api/v1/push
+#
+# Environment: Production only (ENV=prod)
+# See: docs/epics/epic-17-cloud-logging.md
+
+x-loki-logging: &loki-logging
+  driver: loki
+  options:
+    loki-url: "${LOKI_URL}"
+    loki-retries: "5"
+    loki-batch-size: "400"
+    loki-timeout: "2s"
+
+services:
+  backend:
+    logging:
+      <<: *loki-logging
+      options:
+        loki-url: "${LOKI_URL}"
+        loki-external-labels: "service=backend,env=prod,project=annie"
+
+  mcp-server:
+    logging:
+      <<: *loki-logging
+      options:
+        loki-url: "${LOKI_URL}"
+        loki-external-labels: "service=mcp-server,env=prod,project=annie"
+
+  telegram-bot:
+    logging:
+      <<: *loki-logging
+      options:
+        loki-url: "${LOKI_URL}"
+        loki-external-labels: "service=telegram-bot,env=prod,project=annie"
+
+  redis:
+    logging:
+      <<: *loki-logging
+      options:
+        loki-url: "${LOKI_URL}"
+        loki-external-labels: "service=redis,env=prod,project=annie"

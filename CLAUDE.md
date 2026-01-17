@@ -55,15 +55,31 @@ External Services (Brave Search, agentic-memories)
 
 ## Development Commands
 
+### Environment Modes
+
+Annie supports two environment modes controlled by the `ENVIRONMENT` variable in `.env`:
+
+| Mode | ENVIRONMENT | Logging | Use Case |
+|------|-------------|---------|----------|
+| Development | `dev` | Local (docker logs) | Local development |
+| Staging | `staging` | Local (docker logs) | Staging environment |
+| Production | `prod` | Grafana Cloud Loki | Production deployment |
+
+**Production Setup:**
+1. Set `ENVIRONMENT=prod` in `.env`
+2. Set `LOKI_URL` in `.env` (get from Grafana Cloud → Connections → Loki)
+3. Run `make start` (Loki plugin auto-installs if missing)
+
+All commands automatically read `ENVIRONMENT` from `.env`. You can override with `ENV=prod` on command line if needed.
+
 ### Starting and Stopping Services
 
 ```bash
-# Start all services (checks Docker, validates .env, starts containers)
-make start
-# OR
-./scripts/run_docker.sh
+# Start services (reads ENVIRONMENT from .env automatically)
+make start                    # Uses ENVIRONMENT from .env
+./scripts/run_docker.sh       # Alternative
 
-# Stop all services gracefully
+# Stop services
 make stop
 
 # Restart services
@@ -71,7 +87,12 @@ make restart
 
 # Rebuild containers (after dependency changes)
 make rebuild
+
+# Check Loki plugin status (for production)
+make check-loki
 ```
+
+**Note:** Set `ENVIRONMENT=prod` in `.env` for production mode with Loki logging. The Loki Docker plugin will be auto-installed if missing.
 
 ### Viewing Logs
 

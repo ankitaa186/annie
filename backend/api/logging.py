@@ -49,6 +49,10 @@ SENSITIVE_FIELDS = [
     "brave_search_api_key",
     "stock_api_key",
     "telegram_bot_token",
+    "access_token",
+    "refresh_token",
+    "client_secret",
+    "private_key",
 ]
 
 
@@ -121,6 +125,30 @@ class JSONFormatter(logging.Formatter):
             )
         
         return masked
+
+
+def truncate_for_logging(data: Any, max_length: int = 500) -> str:
+    """
+    Truncate data for safe logging at DEBUG level.
+
+    Prevents large responses (like SEC filings, web crawls) from exposing
+    sensitive user queries or conversation content in logs.
+
+    Args:
+        data: Data to truncate (dict, list, str, or any type)
+        max_length: Maximum length in characters (default: 500)
+
+    Returns:
+        Truncated string representation
+    """
+    # Convert to string
+    data_str = str(data) if not isinstance(data, str) else data
+
+    # Truncate if too long
+    if len(data_str) <= max_length:
+        return data_str
+
+    return data_str[:max_length] + f"... [truncated, {len(data_str)} total chars]"
 
 
 class HumanReadableFormatter(logging.Formatter):

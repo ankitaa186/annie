@@ -416,6 +416,41 @@ def check_langfuse_health() -> Dict[str, Any]:
         }
 
 
+def check_cloud_logging_health() -> Dict[str, Any]:
+    """Check cloud logging (Grafana Loki) configuration status.
+
+    Returns:
+        Dictionary with cloud logging status including enabled, provider, and configured.
+    """
+    import os
+
+    env = os.environ.get("ENV", "dev")
+    loki_url = os.environ.get("LOKI_URL", "")
+
+    if env != "prod":
+        return {
+            "enabled": False,
+            "provider": None,
+            "status": "disabled",
+            "note": "Cloud logging only active in production (ENV=prod)"
+        }
+
+    # Production mode
+    if loki_url and loki_url != "REPLACE_ME":
+        return {
+            "enabled": True,
+            "provider": "grafana_loki",
+            "status": "configured"
+        }
+    else:
+        return {
+            "enabled": True,
+            "provider": "grafana_loki",
+            "status": "not_configured",
+            "note": "LOKI_URL not set - logs not being shipped to Grafana Cloud"
+        }
+
+
 @app.on_event("startup")
 async def startup_event():
     """Application startup handler."""
@@ -507,7 +542,8 @@ async def full_health_check() -> JSONResponse:
         "llm_api": check_llm_api_health(),
         "agentic_memories": await check_agentic_memories_health(),
         "proactive_worker": await check_proactive_worker_health(),
-        "langfuse": check_langfuse_health()
+        "langfuse": check_langfuse_health(),
+        "cloud_logging": check_cloud_logging_health()
     }
 
     # Overall status is "ok" if at least the API itself is running

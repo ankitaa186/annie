@@ -82,6 +82,10 @@ SENSITIVE_VARS = [
     "STOCK_API_KEY",
     "LANGFUSE_SECRET_KEY",
     "HA_MQTT_PASSWORD",  # Epic 16: Home Assistant Integration
+    "HA_ACCESS_TOKEN",  # Epic 16: Home Assistant REST API token
+    "TAVILY_API_KEY",  # Epic 15: Web search
+    "JINA_API_KEY",  # Epic 15: Web crawl
+    "REDDIT_CLIENT_SECRET",  # Epic 15: Reddit search
 ]
 
 

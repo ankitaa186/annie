@@ -61,6 +61,7 @@ story_location: .bmad-ephemeral/stories
 # Epic 14: Direct Memory Storage - COMPLETED (6/6 stories)
 # Epic 15: Extended MCP Tools - COMPLETED (6/6 stories) - 158 tests pass
 # Epic 16: Home Assistant Integration - IN PROGRESS (1/5 stories done)
+# Epic 17: Cloud Logging Integration - COMPLETED (6/6 stories done)
 # =============================================================================
 
 development_status:
@@ -252,3 +253,17 @@ development_status:
   16-4-configuration-environment-setup: done
   16-5-integration-testing-documentation: in-progress
   epic-16-retrospective: optional
+
+  # ============================================================================
+  # EPIC 17: Cloud Logging Integration (BACKLOG)
+  # Environment-aware cloud logging via Grafana Loki for production deployments
+  # Dependencies: Grafana Cloud (free tier), Loki Docker plugin
+  # ============================================================================
+  epic-17: completed
+  17-1-production-docker-compose-override: done
+  17-2-environment-aware-startup-script: done
+  17-3-makefile-updates-environment-consistency: done
+  17-4-environment-configuration: done
+  17-5-grafana-alerting-configuration: done
+  17-6-integration-testing-validation: done
+  epic-17-retrospective: optional

@@ -1,10 +1,18 @@
 # Annie Makefile
 # Development commands for managing Annie services
 
-.PHONY: help install venv test test-unit test-integration test-backend test-mcp test-telegram coverage start stop logs clean clean-venv clean-all rebuild restart health shell lint format format-check gh gh-read gh-diff gh-write gh-update
+.PHONY: help install venv test test-unit test-integration test-backend test-mcp test-telegram coverage start stop logs clean clean-venv clean-all rebuild restart health shell check-loki lint format format-check gh gh-read gh-diff gh-write gh-update
 
 # Detect Docker Compose command (v2 or v1)
 COMPOSE_CMD := $(shell if docker compose version >/dev/null 2>&1; then echo "docker compose"; else echo "docker-compose"; fi)
+
+# Read ENVIRONMENT from .env if ENV not set on command line
+# Priority: ENV from command line > ENVIRONMENT from .env > default "dev"
+ENV ?= $(shell grep -E '^ENVIRONMENT=' .env 2>/dev/null | cut -d'=' -f2 || echo "dev")
+
+# Compose file selection based on ENV (dev or prod)
+# Production mode uses Loki logging via docker-compose.prod.yml
+COMPOSE_FILES = $(if $(filter prod,$(ENV)),-f docker-compose.yml -f docker-compose.prod.yml,)
 
 # Detect uv or fallback to pip
 UV_AVAILABLE := $(shell command -v uv 2>/dev/null)
@@ -17,6 +25,8 @@ VENV := . .venv/bin/activate &&
 help: ## Show this help message
 	@echo "Annie Development Commands"
 	@echo "=========================="
+	@echo ""
+	@echo "  Environment: Use ENV=prod for production mode (e.g., make start ENV=prod)"
 	@echo ""
 	@echo "  Setup:"
 	@grep -E '^(install|start|stop|clean|clean-venv|clean-all):.*## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "    \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -69,9 +79,9 @@ start: ## Start all Docker services
 	@echo "Starting Annie services..."
 	@./scripts/run_docker.sh
 
-stop: ## Stop all Docker services
+stop: ## Stop all Docker services (use ENV=prod for production)
 	@echo "Stopping Annie services..."
-	@$(COMPOSE_CMD) down
+	@$(COMPOSE_CMD) $(COMPOSE_FILES) down
 	@echo "Services stopped."
 
 clean: ## Clean up Docker resources and caches
@@ -166,41 +176,47 @@ test-telegram-e2e: venv ## Run Telegram bot e2e tests only
 # DOCKER
 # ============================================================
 
-logs: ## View logs (use SERVICE=name for specific service)
+logs: ## View logs (use SERVICE=name, ENV=prod for production)
 	@if [ -z "$(SERVICE)" ]; then \
 		echo "Viewing logs from all services..."; \
-		$(COMPOSE_CMD) logs -f; \
+		$(COMPOSE_CMD) $(COMPOSE_FILES) logs -f; \
 	else \
 		echo "Viewing logs from $(SERVICE)..."; \
-		$(COMPOSE_CMD) logs -f $(SERVICE); \
+		$(COMPOSE_CMD) $(COMPOSE_FILES) logs -f $(SERVICE); \
 	fi
 
-rebuild: ## Rebuild Docker containers
+rebuild: ## Rebuild Docker containers (use ENV=prod for production)
 	@echo "Rebuilding containers..."
-	@$(COMPOSE_CMD) build --no-cache
+	@$(COMPOSE_CMD) $(COMPOSE_FILES) build --no-cache
 	@echo "Containers rebuilt."
 
 restart: stop start ## Restart all services
 
-health: ## Check service health
+health: ## Check service health (use ENV=prod for production)
 	@echo "Checking service health..."
-	@$(COMPOSE_CMD) ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}"
+	@$(COMPOSE_CMD) $(COMPOSE_FILES) ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}"
 
-shell: ## Access service shell (use SERVICE=name)
+shell: ## Access service shell (use SERVICE=name, ENV=prod for production)
 	@if [ -z "$(SERVICE)" ]; then \
 		echo "Error: SERVICE variable is required"; \
 		echo "Usage: make shell SERVICE=backend"; \
 		exit 1; \
 	fi
 	@echo "Accessing $(SERVICE) shell..."
-	@$(COMPOSE_CMD) exec $(SERVICE) /bin/bash || $(COMPOSE_CMD) exec $(SERVICE) /bin/sh
+	@$(COMPOSE_CMD) $(COMPOSE_FILES) exec $(SERVICE) /bin/bash || $(COMPOSE_CMD) $(COMPOSE_FILES) exec $(SERVICE) /bin/sh
+
+check-loki: ## Verify Loki Docker plugin is installed (for production logging)
+	@if docker plugin ls 2>/dev/null | grep -q "loki.*true"; then \
+		echo "✓ Loki plugin installed and enabled"; \
+	else \
+		echo "✗ Loki plugin not installed or not enabled"; \
+		echo "Install with: docker plugin install grafana/loki-docker-driver:latest --alias loki --grant-all-permissions"; \
+		exit 1; \
+	fi
 
 # ============================================================
 # GITHUB ENVIRONMENT MANAGEMENT
 # ============================================================
-
-# Default environment is dev
-ENV ?= dev
 
 gh: ## Interactive GitHub environment manager
 	@python3 scripts/github_env.py
