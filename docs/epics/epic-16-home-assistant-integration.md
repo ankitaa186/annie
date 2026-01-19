@@ -476,6 +476,205 @@ test_mqtt_forward_to_telegram()
 
 ---
 
+### Story 16.6: Voice Message Tool for Smart Home Speakers
+
+**Priority**: P1
+**Estimate**: 1 day
+
+Implement `send_voice_message_to_smart_home` MCP tool enabling Annie to speak through Alexa devices via Home Assistant's `notify.alexa_media` service. This gives Annie an ambient voice presence in the home with emotional expression capabilities.
+
+**File**: `mcp_server/tools/home_assistant.py`
+
+**Schema**:
+```python
+{
+    "name": "send_voice_message_to_smart_home",
+    "description": (
+        "Send a voice message to smart home speakers (Alexa devices) via Home Assistant. "
+        "USE WITH DISCRETION - CONSTRAINTS: "
+        "1) Only effective when user is physically at home. "
+        "2) COMPLEMENT to text responses, not replacement - always send text too. "
+        "3) 60-second cooldown between messages. "
+        "VOICE TYPES - choose based on emotional context: "
+        "- 'say': Neutral delivery (default) "
+        "- 'announce': Attention tone first - for urgent matters "
+        "- 'whisper': Soft, intimate - for gentle reminders, private moments "
+        "- 'excited': Happy, enthusiastic - for celebrations, good news "
+        "- 'disappointed': Empathetic, sympathetic - for comfort, bad news "
+        "- 'conversational': Casual, friendly - like chatting with a friend "
+        "- 'news': Formal delivery - for factual information "
+        "- 'fun': Animated, playful - for greetings, lighthearted moments "
+        "AVOID: routine responses, sensitive info, late night (unless urgent)."
+    ),
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "message": {
+                "type": "string",
+                "description": "The message for Annie to speak aloud"
+            },
+            "devices": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Target device entity IDs (e.g., ['media_player.kitchen_echo', 'media_player.bedroom_echo'])"
+            },
+            "voice_type": {
+                "type": "string",
+                "enum": ["say", "announce", "whisper", "excited", "disappointed", "conversational", "news", "fun"],
+                "default": "say",
+                "description": (
+                    "How to deliver the message. "
+                    "'say': Neutral (default). "
+                    "'announce': Attention tone first. "
+                    "'whisper': Soft, intimate. "
+                    "'excited': Happy, enthusiastic. "
+                    "'disappointed': Empathetic, sympathetic. "
+                    "'conversational': Casual, friendly. "
+                    "'news': Formal, factual. "
+                    "'fun': Animated, playful."
+                )
+            }
+        },
+        "required": ["message", "devices"]
+    }
+}
+```
+
+**Response (Success)**:
+```python
+{
+    "status": "success",
+    "provider": "home_assistant",
+    "devices": ["media_player.kitchen_echo", "media_player.bedroom_echo"],
+    "message": "Dinner is ready!",
+    "voice_type": "announce",
+    "cooldown_seconds": 60
+}
+```
+
+**Response (Cooldown)**:
+```python
+{
+    "status": "error",
+    "provider": "home_assistant",
+    "error_code": "COOLDOWN",
+    "error_message": "Voice message on cooldown. Try again in 45 seconds.",
+    "seconds_remaining": 45
+}
+```
+
+**Response (Invalid Device)**:
+```python
+{
+    "status": "error",
+    "provider": "home_assistant",
+    "error_code": "INVALID_DEVICE",
+    "error_message": "Unknown device(s): ['media_player.fake_echo']",
+    "invalid_devices": ["media_player.fake_echo"],
+    "valid_devices": ["media_player.kitchen_echo", "media_player.bedroom_echo", "media_player.living_room_echo"]
+}
+```
+
+**Voice Type SSML Mapping**:
+```python
+VOICE_TYPES = {
+    # Basic delivery
+    "say": {"method": "tts", "ssml": None},
+    "announce": {"method": "announce", "ssml": None},
+
+    # Effects (SSML wrapped)
+    "whisper": {
+        "method": "tts",
+        "ssml": '<amazon:effect name="whispered">{message}</amazon:effect>'
+    },
+
+    # Emotions (SSML wrapped)
+    "excited": {
+        "method": "tts",
+        "ssml": '<amazon:emotion name="excited" intensity="medium">{message}</amazon:emotion>'
+    },
+    "disappointed": {
+        "method": "tts",
+        "ssml": '<amazon:emotion name="disappointed" intensity="medium">{message}</amazon:emotion>'
+    },
+
+    # Speaking Styles (SSML wrapped)
+    "conversational": {
+        "method": "tts",
+        "ssml": '<amazon:domain name="conversational">{message}</amazon:domain>'
+    },
+    "news": {
+        "method": "tts",
+        "ssml": '<amazon:domain name="news">{message}</amazon:domain>'
+    },
+    "fun": {
+        "method": "tts",
+        "ssml": '<amazon:domain name="fun">{message}</amazon:domain>'
+    },
+}
+```
+
+**Implementation Flow**:
+```
+send_voice_message_to_smart_home(message, devices, voice_type)
+│
+├─→ Check cooldown (fail fast if < 60s since last success)
+│   └─→ Return COOLDOWN error with seconds_remaining
+│
+├─→ Validate inputs
+│   ├─→ message not empty
+│   └─→ devices list not empty
+│
+├─→ Query HA for valid media_player entities
+│   └─→ home_assistant_query(domain="media_player")
+│
+├─→ Validate ALL requested devices exist
+│   ├─→ All valid: proceed
+│   └─→ Any invalid: return INVALID_DEVICE + valid_devices list
+│       (fail entire request, no partial sends)
+│
+├─→ Build SSML-wrapped message based on voice_type
+│
+├─→ Call notify.alexa_media service
+│   POST /api/services/notify/alexa_media
+│   {
+│       "message": "<ssml-wrapped-message>",
+│       "target": ["media_player.kitchen_echo", ...],
+│       "data": {"type": "tts" | "announce"}
+│   }
+│
+├─→ On success: update _last_voice_message_time
+│
+└─→ Return result
+```
+
+**Acceptance Criteria**:
+- [ ] Tool `send_voice_message_to_smart_home` registered in MCP server
+- [ ] Calls `notify.alexa_media` service with SSML-wrapped message
+- [ ] Supports single or multiple device targets (entity IDs)
+- [ ] Supports 8 voice types: say, announce, whisper, excited, disappointed, conversational, news, fun
+- [ ] Wraps emotions/styles in appropriate SSML tags
+- [ ] Enforces 60-second cooldown between successful sends
+- [ ] Cooldown NOT consumed on failed attempts (errors, invalid devices)
+- [ ] Validates devices against live HA `media_player` domain query
+- [ ] Fails entire request if ANY device is invalid (no partial sends)
+- [ ] On invalid device: returns error with `valid_devices` list for Annie to learn
+- [ ] Returns clear status codes: success, COOLDOWN, INVALID_DEVICE, NETWORK_ERROR, CONFIG_ERROR
+- [ ] Tool description guides Annie's discretion (home-only, complement to text, voice type selection)
+- [ ] Logs all invocations with devices, voice_type, cooldown state, duration_ms
+- [ ] Unit tests for cooldown enforcement
+- [ ] Unit tests for device validation
+- [ ] Unit tests for SSML wrapping
+- [ ] Integration test (skippable) with real HA + Alexa
+
+**Out of Scope**:
+- Device registry / friendly name mapping (future story)
+- Quiet hours / time-based restrictions (future story)
+- Per-device cooldowns (single global cooldown for MVP)
+- Intensity parameter for emotions (fixed at "medium" for MVP)
+
+---
+
 ## 4. Technical Considerations
 
 ### 4.1 Home Assistant REST API
