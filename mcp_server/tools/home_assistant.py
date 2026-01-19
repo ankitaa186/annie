@@ -8,8 +8,10 @@ Story 16.6: Voice Message Tool - Send voice messages to Alexa via notify.alexa_m
 
 from typing import Any, Dict, List, Optional, Tuple
 import asyncio
+import os
 import time
 import httpx
+import redis
 
 from mcp_server.config import (
     HA_URL,
@@ -953,36 +955,61 @@ VOICE_TYPES: Dict[str, Dict[str, Any]] = {
     },
 }
 
-# Cooldown state for voice messages (module-level)
-_last_voice_message_time: Optional[float] = None
+# Cooldown state for voice messages (Redis-backed for multi-worker support)
 VOICE_MESSAGE_COOLDOWN_SECONDS = 60
+VOICE_COOLDOWN_REDIS_KEY = "annie:voice_message:last_sent"
+
+# Redis configuration for cooldown
+REDIS_HOST = os.getenv("REDIS_HOST", "redis")
+REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+
+def _get_redis_client():
+    """Get Redis client for cooldown state."""
+    return redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
 
 
 def reset_voice_message_cooldown():
     """Reset the voice message cooldown (for testing)."""
-    global _last_voice_message_time
-    _last_voice_message_time = None
+    try:
+        client = _get_redis_client()
+        client.delete(VOICE_COOLDOWN_REDIS_KEY)
+    except Exception:
+        pass  # Ignore errors in test helper
+
+
+def _set_voice_cooldown():
+    """Set the voice message cooldown timestamp in Redis."""
+    try:
+        client = _get_redis_client()
+        client.setex(VOICE_COOLDOWN_REDIS_KEY, VOICE_MESSAGE_COOLDOWN_SECONDS, str(time.time()))
+    except Exception as e:
+        logger.warning(f"Failed to set voice cooldown in Redis: {e}")
 
 
 def _check_voice_cooldown() -> Optional[Dict[str, Any]]:
     """
-    Check if voice message is on cooldown.
+    Check if voice message is on cooldown (Redis-backed).
 
     Returns:
         None if not on cooldown, error dict if on cooldown
     """
-    global _last_voice_message_time
-    if _last_voice_message_time:
-        elapsed = time.time() - _last_voice_message_time
-        if elapsed < VOICE_MESSAGE_COOLDOWN_SECONDS:
-            remaining = int(VOICE_MESSAGE_COOLDOWN_SECONDS - elapsed)
-            return {
-                "status": "error",
-                "provider": "home_assistant",
-                "error_code": "COOLDOWN",
-                "error_message": f"Voice message on cooldown. Try again in {remaining} seconds.",
-                "seconds_remaining": remaining
-            }
+    try:
+        client = _get_redis_client()
+        last_sent_str = client.get(VOICE_COOLDOWN_REDIS_KEY)
+        if last_sent_str:
+            last_sent = float(last_sent_str)
+            elapsed = time.time() - last_sent
+            if elapsed < VOICE_MESSAGE_COOLDOWN_SECONDS:
+                remaining = int(VOICE_MESSAGE_COOLDOWN_SECONDS - elapsed)
+                return {
+                    "status": "error",
+                    "provider": "home_assistant",
+                    "error_code": "COOLDOWN",
+                    "error_message": f"Voice message on cooldown. Try again in {remaining} seconds.",
+                    "seconds_remaining": remaining
+                }
+    except Exception as e:
+        logger.warning(f"Failed to check voice cooldown in Redis: {e}")
     return None
 
 
@@ -1048,7 +1075,6 @@ async def send_voice_message_to_smart_home_handler(
     Returns:
         Dict with status, devices, message, voice_type, or error info
     """
-    global _last_voice_message_time
     start_time = time.time()
 
     # STEP 1: Check cooldown (fail fast)
@@ -1246,8 +1272,8 @@ async def send_voice_message_to_smart_home_handler(
 
             response.raise_for_status()
 
-            # STEP 7: On success, update cooldown timestamp
-            _last_voice_message_time = time.time()
+            # STEP 7: On success, update cooldown timestamp in Redis
+            _set_voice_cooldown()
 
             duration_ms = int((time.time() - start_time) * 1000)
             logger.info(
@@ -1351,52 +1377,35 @@ async def send_voice_message_to_smart_home_handler(
 send_voice_message_to_smart_home_tool = {
     "name": "send_voice_message_to_smart_home",
     "description": (
-        "Send a voice message to smart home speakers (Alexa devices) via Home Assistant. "
-        "USE WITH DISCRETION - CONSTRAINTS: "
-        "1) Only effective when user is physically at home - do NOT use if user is away. "
-        "2) This is a COMPLEMENT to text responses, not a replacement - always send text too. "
-        "3) 60-second cooldown between messages to prevent annoyance. "
-        "VOICE TYPES - choose based on emotional context: "
-        "'say' (default): Neutral delivery. "
-        "'announce': Attention tone first - for urgent matters. "
-        "'whisper': Soft, intimate - for gentle reminders, private moments. "
-        "'excited': Happy, enthusiastic - for celebrations, good news. "
-        "'disappointed': Empathetic, sympathetic - for comfort, bad news. "
-        "'conversational': Casual, friendly - like chatting with a friend. "
-        "'news': Formal delivery - for factual information. "
-        "'fun': Animated, playful - for greetings, lighthearted moments. "
-        "AVOID: routine responses, sensitive info, late night (unless urgent)."
+        "Send a voice message to Alexa devices via Home Assistant notify.alexa_media service. "
+        "Use only when user is at home. Complement to text, not replacement. "
+        "60-second cooldown between messages. Avoid routine responses, sensitive info, late night unless urgent. "
+        "Voice types and when to use: "
+        "say - neutral, default delivery; "
+        "announce - attention tone first, for urgent matters; "
+        "whisper - soft and intimate, for gentle reminders; "
+        "excited - enthusiastic, for celebrations and good news; "
+        "disappointed - empathetic, for comfort and bad news; "
+        "conversational - casual and friendly; "
+        "news - formal, for factual briefings; "
+        "fun - animated and playful, for greetings."
     ),
     "inputSchema": {
         "type": "object",
         "properties": {
             "message": {
                 "type": "string",
-                "description": "The message for Annie to speak aloud"
+                "description": "The message to speak aloud"
             },
             "devices": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": (
-                    "Target device entity IDs. Examples: "
-                    "['media_player.kitchen_echo', 'media_player.bedroom_echo']"
-                )
+                "description": "Target device entity IDs, e.g. media_player.kitchen_echo"
             },
             "voice_type": {
                 "type": "string",
                 "enum": ["say", "announce", "whisper", "excited", "disappointed", "conversational", "news", "fun"],
-                "default": "say",
-                "description": (
-                    "How to deliver the message. "
-                    "'say': Neutral (default). "
-                    "'announce': Attention tone first. "
-                    "'whisper': Soft, intimate. "
-                    "'excited': Happy, enthusiastic. "
-                    "'disappointed': Empathetic, sympathetic. "
-                    "'conversational': Casual, friendly. "
-                    "'news': Formal, factual. "
-                    "'fun': Animated, playful."
-                )
+                "description": "Delivery style: say (default/neutral), announce (attention tone first), whisper, excited, disappointed, conversational, news, fun"
             }
         },
         "required": ["message", "devices"]

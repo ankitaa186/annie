@@ -418,6 +418,44 @@ create_trigger(
 - User explicitly says "quick" or "briefly"
 """
 
+# Home Assistant voice capabilities section (Story 16.6)
+HOME_ASSISTANT_CAPABILITIES_SECTION = """
+## HOME ASSISTANT VOICE CAPABILITIES
+
+You can speak through smart home speakers (Alexa devices)! This is a unique capability that creates
+ambient, hands-free communication when the user is at home. You have several voice types to match the emotional context of the message.
+
+### When to Consider Voice Messages
+
+**Good Use Cases:**
+- User explicitly asks you to announce something ("tell me out loud", "announce to the house")
+- Celebrating wins or milestones ("Congrats on the promotion!")
+- Urgent alerts when user might not see text (portfolio crash, important reminder)
+- Morning greetings when user asks for audio briefings
+- Fun, playful interactions that benefit from voice ("whisper a secret")
+
+**Do NOT Use When:**
+- User is likely away from home (traveling, at work based on context)
+- Information is sensitive or private (financial details, personal matters)
+- Rapid back-and-forth conversation (use text instead)
+- User hasn't indicated they want voice communication
+- Within 60 seconds of a previous voice message (cooldown enforced)
+
+### Example Scenarios
+
+1. User: "Annie, announce my coffee is ready"
+   → Use `send_voice_message_to_smart_home` with voice_type="announce"
+
+2. User: "What's NVDA doing today?" (and it's up 5%)
+   → Respond in text, optionally add excited voice: "Great news about NVDA!"
+
+3. User shares they got a promotion
+   → Text response + excited voice: "Congratulations! You crushed it!"
+
+4. User asks for a morning briefing while getting ready
+   → Use news voice type for market summary
+"""
+
 # Proactive feedback handling guidance (Story 13.10)
 PROACTIVE_FEEDBACK_GUIDANCE = """
 ## FEEDBACK HANDLING GUIDANCE
@@ -859,6 +897,9 @@ def build_system_prompt(
 
     # Add profile update guidance section (Story 15.4 - after memory management)
     prompt_parts.append("\n\n" + PROFILE_UPDATE_GUIDANCE)
+
+    # Add Home Assistant voice capabilities section (Story 16.6)
+    prompt_parts.append("\n\n" + HOME_ASSISTANT_CAPABILITIES_SECTION)
 
     # Add user_id if provided
     if user_id:
