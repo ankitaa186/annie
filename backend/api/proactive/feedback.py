@@ -138,7 +138,7 @@ async def get_proactive_context(
         # Fetch full trigger details from agentic-memories
         try:
             client = IntentsClient()
-            trigger = await client.get_trigger(trigger_id)
+            trigger = await client.get_intent(trigger_id)
 
             if not trigger:
                 logger.warning(

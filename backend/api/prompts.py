@@ -579,7 +579,14 @@ def format_proactive_context_for_prompt(proactive_context: Dict[str, Any]) -> Op
 
     # Add action context for LLM reference
     action_context = trigger_details.get("action_context", {})
-    if action_context:
+    # Handle case where action_context is stored as JSON string
+    if isinstance(action_context, str):
+        try:
+            import json
+            action_context = json.loads(action_context)
+        except (json.JSONDecodeError, TypeError):
+            action_context = {}
+    if action_context and isinstance(action_context, dict):
         sections.append("\nTrigger Configuration:")
 
         if action_context.get("original_request"):

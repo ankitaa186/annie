@@ -1377,18 +1377,9 @@ async def send_voice_message_to_smart_home_handler(
 send_voice_message_to_smart_home_tool = {
     "name": "send_voice_message_to_smart_home",
     "description": (
-        "Send a voice message to Alexa devices via Home Assistant notify.alexa_media service. "
-        "Use only when user is at home. Complement to text, not replacement. "
-        "60-second cooldown between messages. Avoid routine responses, sensitive info, late night unless urgent. "
-        "Voice types and when to use: "
-        "say - neutral, default delivery; "
-        "announce - attention tone first, for urgent matters; "
-        "whisper - soft and intimate, for gentle reminders; "
-        "excited - enthusiastic, for celebrations and good news; "
-        "disappointed - empathetic, for comfort and bad news; "
-        "conversational - casual and friendly; "
-        "news - formal, for factual briefings; "
-        "fun - animated and playful, for greetings."
+        "Send a voice message to Alexa devices via Home Assistant. "
+        "Has 60-second cooldown. Use only when user is at home. "
+        "Voice types: say, announce, whisper, excited, disappointed, conversational, news, fun."
     ),
     "inputSchema": {
         "type": "object",

@@ -7,6 +7,7 @@ Integrates with MemoryManager for conversation memory storage.
 """
 
 import asyncio
+import json
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -451,7 +452,6 @@ async def create_chat(request: ChatRequest, background_tasks: BackgroundTasks):
                 # Store profile in Redis for streaming endpoint (TTL: 5 minutes)
                 # Only store if profile has data (completeness > 0)
                 if profile.get("completeness", 0) > 0:
-                    import json
                     profile_key = f"profile_cache:{conversation_id}"
                     await state.redis_client.setex(
                         profile_key,

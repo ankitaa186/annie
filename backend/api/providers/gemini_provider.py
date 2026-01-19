@@ -292,7 +292,13 @@ class GeminiProvider(BaseProvider):
                     }
                 )
 
-            # Log request
+            # Log request with last user message for debugging
+            last_user_msg = None
+            for msg in reversed(messages):
+                if msg.get("role") == "user":
+                    last_user_msg = msg.get("content", "")[:200]
+                    break
+
             logger.info(
                 "Starting Gemini 3 Pro streaming request",
                 extra={
@@ -300,7 +306,8 @@ class GeminiProvider(BaseProvider):
                     "model": self.model_name,
                     "message_count": len(messages),
                     "has_system_instruction": system_instruction is not None,
-                    "tool_count": len(gemini_tools) if gemini_tools else 0
+                    "tool_count": len(gemini_tools) if gemini_tools else 0,
+                    "last_user_message": last_user_msg
                 }
             )
 
@@ -378,9 +385,47 @@ class GeminiProvider(BaseProvider):
                     # Track ALL function calls in this iteration (parallel tool calling support)
                     function_calls = []  # List of {name, args} dicts
 
+                    # Debug: Track raw chunk data for MALFORMED_FUNCTION_CALL diagnosis
+                    raw_chunk_data = []  # Accumulate for debugging if needed
+
                     # Process chunks
                     # Note: thought_signatures are handled automatically by ChatSession (Story 9.3)
                     for chunk in response:
+                        # Debug: Capture raw chunk structure for diagnosing MALFORMED_FUNCTION_CALL
+                        try:
+                            chunk_info = {
+                                "has_candidates": bool(chunk.candidates),
+                                "candidate_count": len(chunk.candidates) if chunk.candidates else 0
+                            }
+                            if chunk.candidates and len(chunk.candidates) > 0:
+                                cand = chunk.candidates[0]
+                                chunk_info["finish_reason"] = str(cand.finish_reason) if cand.finish_reason else None
+                                chunk_info["finish_reason_value"] = int(cand.finish_reason) if cand.finish_reason else None
+                                chunk_info["has_content"] = bool(cand.content)
+                                if cand.content:
+                                    chunk_info["has_parts"] = bool(cand.content.parts)
+                                    chunk_info["part_count"] = len(cand.content.parts) if cand.content.parts else 0
+                                    # Capture part types and any function call info
+                                    part_details = []
+                                    if cand.content.parts:
+                                        for part in cand.content.parts:
+                                            part_info = {"has_text": hasattr(part, 'text') and bool(part.text)}
+                                            if hasattr(part, 'function_call') and part.function_call:
+                                                # Capture raw function call info before any conversion
+                                                part_info["has_function_call"] = True
+                                                part_info["function_name"] = getattr(part.function_call, 'name', 'UNKNOWN')
+                                                # Try to get raw args as string to avoid conversion errors
+                                                try:
+                                                    part_info["function_args_raw"] = str(part.function_call.args)[:500]
+                                                except Exception as args_err:
+                                                    part_info["function_args_error"] = str(args_err)
+                                            else:
+                                                part_info["has_function_call"] = False
+                                            part_details.append(part_info)
+                                    chunk_info["parts"] = part_details
+                            raw_chunk_data.append(chunk_info)
+                        except Exception as debug_err:
+                            raw_chunk_data.append({"debug_capture_error": str(debug_err)})
 
                         # Check for safety blocks
                         if hasattr(chunk, 'prompt_feedback') and chunk.prompt_feedback.block_reason:
@@ -794,13 +839,14 @@ class GeminiProvider(BaseProvider):
 
                         # CRITICAL: If no tokens were generated, send error to user
                         # This happens with finish_reason like THINKING_OVERFLOW (12),
-                        # BLOCKLIST (7), PROHIBITED_CONTENT (8), etc.
+                        # BLOCKLIST (7), PROHIBITED_CONTENT (8), MALFORMED_FUNCTION_CALL (10) etc.
                         if token_count == 0:
                             # Map common finish reasons to user-friendly messages
                             error_messages = {
                                 7: "I couldn't complete my response due to content restrictions.",
                                 8: "I couldn't complete my response due to content policy.",
                                 9: "I couldn't complete my response due to sensitive information detection.",
+                                10: "I had trouble processing that request. Let me try a different approach.",
                                 12: "I ran into a processing limit while thinking. Please try rephrasing or simplifying your request.",
                             }
 
@@ -808,6 +854,44 @@ class GeminiProvider(BaseProvider):
                                 fr_value,
                                 "I wasn't able to generate a response. Please try again or rephrase your request."
                             )
+
+                            # For MALFORMED_FUNCTION_CALL, log detailed diagnostic info
+                            if fr_value == 10:
+                                # Extract tool names for debugging
+                                tool_names = []
+                                if gemini_tools:
+                                    tool_names = [t.get("name", "UNKNOWN") for t in gemini_tools]
+
+                                # Find chunks that had function call attempts (even partial/malformed)
+                                func_call_chunks = [
+                                    c for c in raw_chunk_data
+                                    if c.get("parts") and any(
+                                        p.get("has_function_call") or p.get("function_args_error")
+                                        for p in c.get("parts", [])
+                                    )
+                                ]
+
+                                # Get last chunk which should have the finish_reason
+                                last_chunk = raw_chunk_data[-1] if raw_chunk_data else {}
+
+                                logger.error(
+                                    "MALFORMED_FUNCTION_CALL detected - Gemini failed to generate valid function call. "
+                                    "RAW CHUNK DATA LOGGED FOR DIAGNOSIS.",
+                                    extra={
+                                        "provider": self.model_name,
+                                        "tool_iteration": tool_iteration,
+                                        "message_count": len(messages),
+                                        "last_user_content": messages[-1].get("content", "")[:500] if messages else None,
+                                        "tool_count": len(gemini_tools) if gemini_tools else 0,
+                                        "tool_names": tool_names,
+                                        "chunk_count": len(raw_chunk_data),
+                                        "func_call_chunks": func_call_chunks,
+                                        "last_chunk": last_chunk,
+                                        "all_chunks_with_parts": [
+                                            c for c in raw_chunk_data if c.get("parts")
+                                        ]
+                                    }
+                                )
 
                             logger.error(
                                 "Empty response from Gemini - sending error to user",
