@@ -222,17 +222,17 @@ class GeminiToolAdapter:
         self,
         tool_name: str,
         tool_result: Dict[str, Any],
-        max_size: int = 30000
+        max_size: int = 100000
     ) -> Dict[str, Any]:
         """
         Format MCP tool result for Gemini function response.
 
-        Handles large results by truncating with a warning.
+        Handles large results by intelligently reducing data while preserving valid JSON.
 
         Args:
             tool_name: Name of the tool that was executed
             tool_result: Result from MCP tool execution
-            max_size: Maximum result size in characters (default: 30KB)
+            max_size: Maximum result size in characters (default: 100KB)
 
         Returns:
             Gemini function response format:
@@ -249,46 +249,48 @@ class GeminiToolAdapter:
             result_str = json.dumps(tool_result)
             result_size = len(result_str)
 
-            # Truncate if too large
-            if result_size > max_size:
-                logger.warning(
-                    "Tool result too large, truncating",
+            # If under limit, return as-is
+            if result_size <= max_size:
+                logger.debug(
+                    "Formatted tool result for Gemini",
                     extra={
                         "tool_name": tool_name,
-                        "original_size": result_size,
-                        "max_size": max_size
+                        "result_size": result_size,
+                        "truncated": False
                     }
                 )
-
-                # Truncate and add warning
-                truncated_result = {
-                    "result": result_str[:max_size],
-                    "truncated": True,
-                    "original_size": result_size,
-                    "warning": f"Result truncated due to size ({result_size} > {max_size} chars)"
-                }
-
-                gemini_response = {
-                    "name": tool_name,
-                    "response": truncated_result
-                }
-            else:
-                # Return full result
-                gemini_response = {
+                return {
                     "name": tool_name,
                     "response": tool_result
                 }
 
-            logger.debug(
-                "Formatted tool result for Gemini",
+            # Result too large - try to reduce intelligently
+            logger.warning(
+                "Tool result too large, applying smart reduction",
                 extra={
                     "tool_name": tool_name,
-                    "result_size": result_size,
-                    "truncated": result_size > max_size
+                    "original_size": result_size,
+                    "max_size": max_size
                 }
             )
 
-            return gemini_response
+            reduced_result = self._reduce_result_size(tool_result, max_size)
+            reduced_str = json.dumps(reduced_result)
+
+            logger.info(
+                "Tool result reduced successfully",
+                extra={
+                    "tool_name": tool_name,
+                    "original_size": result_size,
+                    "reduced_size": len(reduced_str),
+                    "max_size": max_size
+                }
+            )
+
+            return {
+                "name": tool_name,
+                "response": reduced_result
+            }
 
         except Exception as e:
             logger.error(
@@ -309,6 +311,126 @@ class GeminiToolAdapter:
                     "status": "error"
                 }
             }
+
+    def _reduce_result_size(
+        self,
+        result: Any,
+        max_size: int,
+        depth: int = 0
+    ) -> Any:
+        """
+        Recursively reduce result size while preserving valid JSON structure.
+
+        Strategy:
+        1. For lists: Keep first N items that fit within budget
+        2. For dicts: Keep all keys but reduce nested values
+        3. For strings: Truncate with ellipsis marker
+        4. For primitives: Return as-is
+
+        Args:
+            result: The result to reduce
+            max_size: Target maximum size in characters
+            depth: Current recursion depth (for logging)
+
+        Returns:
+            Reduced result that serializes to valid JSON under max_size
+        """
+        # Check current size
+        current_str = json.dumps(result)
+        if len(current_str) <= max_size:
+            return result
+
+        # Handle different types
+        if isinstance(result, list):
+            # For lists, progressively reduce item count
+            if len(result) == 0:
+                return result
+
+            # Binary search for optimal item count
+            reduced_list = []
+            overhead = 50  # Reserve space for metadata
+            target_size = max_size - overhead
+
+            for item in result:
+                test_list = reduced_list + [item]
+                test_str = json.dumps(test_list)
+                if len(test_str) <= target_size:
+                    reduced_list.append(item)
+                else:
+                    # Try reducing the item itself if it's large
+                    reduced_item = self._reduce_result_size(item, target_size // 2, depth + 1)
+                    test_list = reduced_list + [reduced_item]
+                    test_str = json.dumps(test_list)
+                    if len(test_str) <= target_size:
+                        reduced_list.append(reduced_item)
+                    else:
+                        break
+
+            # Add truncation notice
+            if len(reduced_list) < len(result):
+                return {
+                    "items": reduced_list,
+                    "truncated": True,
+                    "shown": len(reduced_list),
+                    "total": len(result),
+                    "notice": f"Showing {len(reduced_list)} of {len(result)} items due to size limit"
+                }
+            return reduced_list
+
+        elif isinstance(result, dict):
+            # For dicts, try to reduce large nested values
+            reduced_dict = {}
+            # Reserve space for truncation metadata (count + notice, not full key list)
+            overhead = 150
+            target_size = max_size - overhead
+            current_size = 2  # Start with {}
+
+            # Sort keys by value size (smallest first) to maximize key retention
+            sorted_keys = sorted(
+                result.keys(),
+                key=lambda k: len(json.dumps(result[k]))
+            )
+
+            truncated_count = 0
+            for key in sorted_keys:
+                value = result[key]
+                value_str = json.dumps(value)
+                value_size = len(value_str)
+
+                # Calculate size with this key-value pair
+                pair_size = len(json.dumps(key)) + value_size + 4  # key: value,
+
+                if current_size + pair_size <= target_size:
+                    reduced_dict[key] = value
+                    current_size += pair_size
+                else:
+                    # Try to reduce the value
+                    remaining = target_size - current_size - len(json.dumps(key)) - 4
+                    if remaining > 100:  # Minimum useful size
+                        reduced_value = self._reduce_result_size(value, remaining, depth + 1)
+                        reduced_dict[key] = reduced_value
+                        current_size += len(json.dumps(key)) + len(json.dumps(reduced_value)) + 4
+                    else:
+                        truncated_count += 1
+
+            if truncated_count > 0:
+                # Only store count, not full list of keys (to avoid bloating response)
+                reduced_dict["_truncated"] = True
+                reduced_dict["_keys_omitted"] = truncated_count
+                reduced_dict["_notice"] = f"{truncated_count} keys omitted due to size limit"
+
+            return reduced_dict
+
+        elif isinstance(result, str):
+            # For strings, truncate with clear marker
+            if len(result) > max_size - 50:
+                truncate_at = max_size - 80
+                return result[:truncate_at] + f"... [TRUNCATED, {len(result)} total chars]"
+            return result
+
+        else:
+            # Primitives (int, float, bool, None) - return as-is
+            return result
 
     def extract_tool_arguments(self, gemini_call: Dict[str, Any]) -> Dict[str, Any]:
         """

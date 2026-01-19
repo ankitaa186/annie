@@ -250,39 +250,305 @@ class TestGeminiToolAdapterResultFormatting:
         assert formatted["name"] == "get_weather"
         assert formatted["response"] == tool_result
 
-    def test_format_large_tool_result_truncation(self):
-        """Test that large results are truncated."""
+    def test_default_max_size_is_100kb(self):
+        """Test that default max_size is 100KB."""
         adapter = GeminiToolAdapter()
 
-        # Create result larger than 30KB (default max_size)
-        large_data = "x" * 35000
-        tool_result = {"data": large_data}
+        # Create result just under 100KB - should pass through
+        data = "x" * 99000
+        tool_result = {"data": data}
 
-        formatted = adapter.format_tool_result_for_gemini(
-            "large_tool",
-            tool_result,
-            max_size=30000
-        )
+        formatted = adapter.format_tool_result_for_gemini("test_tool", tool_result)
 
-        assert formatted["name"] == "large_tool"
-        assert formatted["response"]["truncated"] is True
-        assert formatted["response"]["original_size"] > 30000
-        assert "warning" in formatted["response"]
+        # Should NOT be reduced
+        assert formatted["response"] == tool_result
+
+    def test_result_over_100kb_is_reduced(self):
+        """Test that results over 100KB are reduced."""
+        adapter = GeminiToolAdapter()
+
+        # Create result over 100KB
+        data = "x" * 110000
+        tool_result = {"data": data}
+
+        formatted = adapter.format_tool_result_for_gemini("test_tool", tool_result)
+
+        # Should be reduced - string truncated with marker
+        import json
+        result_str = json.dumps(formatted["response"])
+        assert len(result_str) <= 100000
+        assert "TRUNCATED" in formatted["response"]["data"]
 
     def test_format_tool_result_with_custom_max_size(self):
         """Test custom max_size parameter."""
         adapter = GeminiToolAdapter()
 
-        tool_result = {"data": "x" * 500}
+        tool_result = {"data": "x" * 5000}
 
         formatted = adapter.format_tool_result_for_gemini(
             "test_tool",
             tool_result,
-            max_size=300
+            max_size=1000
         )
 
-        # Should be truncated since result is ~500 chars
-        assert formatted["response"]["truncated"] is True
+        # Should be reduced
+        import json
+        result_str = json.dumps(formatted["response"])
+        assert len(result_str) <= 1000
+
+
+class TestSmartResultReduction:
+    """Test smart result size reduction preserves valid JSON."""
+
+    def test_reduce_large_list_keeps_valid_json(self):
+        """Test reducing large list produces valid JSON with truncation notice."""
+        adapter = GeminiToolAdapter()
+
+        # Create list with 1000 items
+        large_list = [{"id": i, "name": f"item_{i}", "data": "x" * 100} for i in range(1000)]
+        tool_result = {"items": large_list}
+
+        formatted = adapter.format_tool_result_for_gemini(
+            "list_tool",
+            tool_result,
+            max_size=10000
+        )
+
+        # Verify result is valid JSON
+        import json
+        result_str = json.dumps(formatted["response"])
+        assert len(result_str) <= 10000
+
+        # Parse and verify structure
+        parsed = json.loads(result_str)
+        assert "items" in parsed
+
+        # Should have truncation notice
+        items_data = parsed["items"]
+        if isinstance(items_data, dict):
+            assert items_data.get("truncated") is True
+            assert items_data.get("total") == 1000
+            assert items_data.get("shown") < 1000
+
+    def test_reduce_large_dict_keeps_valid_json(self):
+        """Test reducing large dict produces valid JSON."""
+        adapter = GeminiToolAdapter()
+
+        # Create dict with many keys
+        large_dict = {f"key_{i}": "x" * 500 for i in range(100)}
+
+        formatted = adapter.format_tool_result_for_gemini(
+            "dict_tool",
+            large_dict,
+            max_size=5000
+        )
+
+        # Verify result is valid JSON
+        import json
+        result_str = json.dumps(formatted["response"])
+        assert len(result_str) <= 5000
+
+        # Parse and verify it's valid
+        parsed = json.loads(result_str)
+        assert isinstance(parsed, dict)
+
+    def test_reduce_large_string_adds_truncation_marker(self):
+        """Test reducing large string adds clear truncation marker."""
+        adapter = GeminiToolAdapter()
+
+        large_string = "x" * 10000
+        tool_result = {"content": large_string}
+
+        formatted = adapter.format_tool_result_for_gemini(
+            "string_tool",
+            tool_result,
+            max_size=1000
+        )
+
+        # Verify result is valid JSON
+        import json
+        result_str = json.dumps(formatted["response"])
+        assert len(result_str) <= 1000
+
+        # Verify truncation marker is present
+        parsed = json.loads(result_str)
+        assert "TRUNCATED" in parsed["content"]
+        assert "10000 total chars" in parsed["content"]
+
+    def test_reduce_nested_structure_preserves_validity(self):
+        """Test deeply nested structures remain valid JSON after reduction."""
+        adapter = GeminiToolAdapter()
+
+        nested = {
+            "level1": {
+                "level2": {
+                    "level3": {
+                        "data": [{"item": "x" * 1000} for _ in range(50)]
+                    }
+                }
+            }
+        }
+
+        formatted = adapter.format_tool_result_for_gemini(
+            "nested_tool",
+            nested,
+            max_size=5000
+        )
+
+        # Verify result is valid JSON
+        import json
+        result_str = json.dumps(formatted["response"])
+        assert len(result_str) <= 5000
+
+        # Parse and verify structure is valid
+        parsed = json.loads(result_str)
+        assert isinstance(parsed, dict)
+
+    def test_reduce_empty_list_unchanged(self):
+        """Test empty list passes through unchanged."""
+        adapter = GeminiToolAdapter()
+
+        tool_result = {"items": []}
+
+        formatted = adapter.format_tool_result_for_gemini(
+            "empty_tool",
+            tool_result,
+            max_size=100
+        )
+
+        assert formatted["response"]["items"] == []
+
+    def test_reduce_primitives_unchanged(self):
+        """Test primitive values pass through unchanged."""
+        adapter = GeminiToolAdapter()
+
+        tool_result = {
+            "count": 42,
+            "ratio": 3.14,
+            "enabled": True,
+            "data": None
+        }
+
+        formatted = adapter.format_tool_result_for_gemini(
+            "primitive_tool",
+            tool_result,
+            max_size=1000
+        )
+
+        assert formatted["response"]["count"] == 42
+        assert formatted["response"]["ratio"] == 3.14
+        assert formatted["response"]["enabled"] is True
+        assert formatted["response"]["data"] is None
+
+    def test_reduce_mixed_content_prioritizes_small_keys(self):
+        """Test reduction keeps small values and reduces large ones."""
+        adapter = GeminiToolAdapter()
+
+        tool_result = {
+            "small_key": "small",
+            "medium_key": "x" * 500,
+            "large_key": "x" * 5000
+        }
+
+        formatted = adapter.format_tool_result_for_gemini(
+            "mixed_tool",
+            tool_result,
+            max_size=1000
+        )
+
+        import json
+        result_str = json.dumps(formatted["response"])
+        assert len(result_str) <= 1000
+
+        parsed = json.loads(result_str)
+        # Small key should be preserved
+        assert parsed.get("small_key") == "small"
+
+    def test_home_assistant_large_response_simulation(self):
+        """Simulate Home Assistant query returning 400KB+ of entities."""
+        adapter = GeminiToolAdapter()
+
+        # Simulate HA entities response (like the 424KB we saw in logs)
+        entities = []
+        for i in range(500):
+            entities.append({
+                "entity_id": f"sensor.device_{i}",
+                "state": "on" if i % 2 == 0 else "off",
+                "attributes": {
+                    "friendly_name": f"Device {i}",
+                    "device_class": "switch",
+                    "last_changed": "2026-01-19T12:00:00Z",
+                    "extra_data": "x" * 500  # Simulate attribute bloat
+                }
+            })
+
+        tool_result = {
+            "status": "success",
+            "entities": entities,
+            "count": len(entities)
+        }
+
+        # Original would be ~400KB+
+        import json
+        original_size = len(json.dumps(tool_result))
+        assert original_size > 300000  # Verify it's large
+
+        # Reduce to 100KB (default)
+        formatted = adapter.format_tool_result_for_gemini(
+            "home_assistant_query",
+            tool_result
+        )
+
+        result_str = json.dumps(formatted["response"])
+
+        # Must be under 100KB
+        assert len(result_str) <= 100000
+
+        # Must be valid JSON
+        parsed = json.loads(result_str)
+        assert isinstance(parsed, dict)
+
+        # Should have truncation indicators
+        assert "status" in parsed or "entities" in parsed or "truncated" in str(parsed)
+
+    def test_json_always_valid_after_reduction(self):
+        """Stress test: random large structures always produce valid JSON."""
+        import json
+        import random
+
+        adapter = GeminiToolAdapter()
+
+        for _ in range(10):
+            # Generate random structure
+            depth = random.randint(1, 5)
+            result = {}
+            current = result
+
+            for d in range(depth):
+                key = f"level_{d}"
+                if d == depth - 1:
+                    # Leaf: large list or string
+                    if random.choice([True, False]):
+                        current[key] = ["item_" + "x" * random.randint(100, 1000) for _ in range(random.randint(10, 100))]
+                    else:
+                        current[key] = "x" * random.randint(1000, 10000)
+                else:
+                    current[key] = {}
+                    current = current[key]
+
+            formatted = adapter.format_tool_result_for_gemini(
+                "stress_test",
+                result,
+                max_size=5000
+            )
+
+            # Must always be valid JSON
+            result_str = json.dumps(formatted["response"])
+            assert len(result_str) <= 5000
+
+            # Must parse without error
+            parsed = json.loads(result_str)
+            assert parsed is not None
 
 
 class TestGeminiToolAdapterEdgeCases:
