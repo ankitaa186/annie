@@ -3,6 +3,7 @@ Home Assistant Tools (Epic 16)
 
 Story 16.1: Query Tool - Entity state querying from Home Assistant via REST API.
 Story 16.2: Control Tool - Entity control with allowlist enforcement.
+Story 16.6: Voice Message Tool - Send voice messages to Alexa via notify.alexa_media.
 """
 
 from typing import Any, Dict, List, Optional, Tuple
@@ -908,4 +909,497 @@ home_assistant_control_tool = {
         "required": ["entity_id", "action"]
     },
     "handler": home_assistant_control_handler
+}
+
+
+# =============================================================================
+# Voice Message Tool (Story 16.6)
+# =============================================================================
+
+# Voice type to SSML mapping for Alexa emotional voice
+VOICE_TYPES: Dict[str, Dict[str, Any]] = {
+    # Basic delivery methods
+    "say": {"method": "tts", "ssml": None},
+    "announce": {"method": "announce", "ssml": None},
+
+    # Effects (SSML wrapped)
+    "whisper": {
+        "method": "tts",
+        "ssml": '<amazon:effect name="whispered">{message}</amazon:effect>'
+    },
+
+    # Emotions (SSML wrapped)
+    "excited": {
+        "method": "tts",
+        "ssml": '<amazon:emotion name="excited" intensity="medium">{message}</amazon:emotion>'
+    },
+    "disappointed": {
+        "method": "tts",
+        "ssml": '<amazon:emotion name="disappointed" intensity="medium">{message}</amazon:emotion>'
+    },
+
+    # Speaking Styles (SSML wrapped)
+    "conversational": {
+        "method": "tts",
+        "ssml": '<amazon:domain name="conversational">{message}</amazon:domain>'
+    },
+    "news": {
+        "method": "tts",
+        "ssml": '<amazon:domain name="news">{message}</amazon:domain>'
+    },
+    "fun": {
+        "method": "tts",
+        "ssml": '<amazon:domain name="fun">{message}</amazon:domain>'
+    },
+}
+
+# Cooldown state for voice messages (module-level)
+_last_voice_message_time: Optional[float] = None
+VOICE_MESSAGE_COOLDOWN_SECONDS = 60
+
+
+def reset_voice_message_cooldown():
+    """Reset the voice message cooldown (for testing)."""
+    global _last_voice_message_time
+    _last_voice_message_time = None
+
+
+def _check_voice_cooldown() -> Optional[Dict[str, Any]]:
+    """
+    Check if voice message is on cooldown.
+
+    Returns:
+        None if not on cooldown, error dict if on cooldown
+    """
+    global _last_voice_message_time
+    if _last_voice_message_time:
+        elapsed = time.time() - _last_voice_message_time
+        if elapsed < VOICE_MESSAGE_COOLDOWN_SECONDS:
+            remaining = int(VOICE_MESSAGE_COOLDOWN_SECONDS - elapsed)
+            return {
+                "status": "error",
+                "provider": "home_assistant",
+                "error_code": "COOLDOWN",
+                "error_message": f"Voice message on cooldown. Try again in {remaining} seconds.",
+                "seconds_remaining": remaining
+            }
+    return None
+
+
+def build_ssml_message(message: str, voice_type: str) -> str:
+    """
+    Build SSML-wrapped message based on voice type.
+
+    Args:
+        message: The message to speak
+        voice_type: One of the VOICE_TYPES keys
+
+    Returns:
+        SSML-wrapped message or plain message if no SSML needed
+    """
+    if voice_type not in VOICE_TYPES:
+        return message
+
+    voice_config = VOICE_TYPES[voice_type]
+    ssml_template = voice_config.get("ssml")
+
+    if ssml_template:
+        return ssml_template.format(message=message)
+    return message
+
+
+def get_voice_delivery_method(voice_type: str) -> str:
+    """
+    Get the delivery method (tts or announce) for a voice type.
+
+    Args:
+        voice_type: One of the VOICE_TYPES keys
+
+    Returns:
+        "tts" or "announce"
+    """
+    if voice_type in VOICE_TYPES:
+        return VOICE_TYPES[voice_type].get("method", "tts")
+    return "tts"
+
+
+async def send_voice_message_to_smart_home_handler(
+    message: str,
+    devices: List[str],
+    voice_type: str = "say"
+) -> Dict[str, Any]:
+    """
+    Send a voice message to smart home speakers (Alexa) via Home Assistant.
+
+    This tool calls the notify.alexa_media service with SSML-wrapped messages
+    for emotional voice expression.
+
+    CONSTRAINTS:
+    - Only effective when user is physically at home
+    - This is a COMPLEMENT to text responses, not replacement
+    - 60-second cooldown between successful sends
+    - Cooldown NOT consumed on errors
+
+    Args:
+        message: The message for Annie to speak aloud
+        devices: List of target device entity IDs (e.g., ["media_player.kitchen_echo"])
+        voice_type: How to deliver the message (say, announce, whisper, excited, etc.)
+
+    Returns:
+        Dict with status, devices, message, voice_type, or error info
+    """
+    global _last_voice_message_time
+    start_time = time.time()
+
+    # STEP 1: Check cooldown (fail fast)
+    cooldown_error = _check_voice_cooldown()
+    if cooldown_error:
+        duration_ms = int((time.time() - start_time) * 1000)
+        logger.info(
+            "send_voice_message.cooldown_blocked",
+            extra={
+                "tool_name": "send_voice_message_to_smart_home",
+                "devices": devices,
+                "voice_type": voice_type,
+                "cooldown_active": True,
+                "duration_ms": duration_ms,
+                "status": "error"
+            }
+        )
+        return cooldown_error
+
+    # STEP 2: Validate inputs
+    if not message or not message.strip():
+        duration_ms = int((time.time() - start_time) * 1000)
+        logger.warning(
+            "send_voice_message.invalid_input",
+            extra={
+                "tool_name": "send_voice_message_to_smart_home",
+                "error": "empty_message",
+                "duration_ms": duration_ms,
+                "status": "error"
+            }
+        )
+        return {
+            "status": "error",
+            "provider": "home_assistant",
+            "error_code": "INVALID_INPUT",
+            "error_message": "Message cannot be empty."
+        }
+
+    if not devices or len(devices) == 0:
+        duration_ms = int((time.time() - start_time) * 1000)
+        logger.warning(
+            "send_voice_message.invalid_input",
+            extra={
+                "tool_name": "send_voice_message_to_smart_home",
+                "error": "empty_devices",
+                "duration_ms": duration_ms,
+                "status": "error"
+            }
+        )
+        return {
+            "status": "error",
+            "provider": "home_assistant",
+            "error_code": "INVALID_INPUT",
+            "error_message": "At least one device must be specified."
+        }
+
+    if voice_type not in VOICE_TYPES:
+        duration_ms = int((time.time() - start_time) * 1000)
+        valid_types = list(VOICE_TYPES.keys())
+        logger.warning(
+            "send_voice_message.invalid_voice_type",
+            extra={
+                "tool_name": "send_voice_message_to_smart_home",
+                "voice_type": voice_type,
+                "valid_types": valid_types,
+                "duration_ms": duration_ms,
+                "status": "error"
+            }
+        )
+        return {
+            "status": "error",
+            "provider": "home_assistant",
+            "error_code": "INVALID_INPUT",
+            "error_message": f"Invalid voice_type '{voice_type}'. Valid types: {', '.join(valid_types)}"
+        }
+
+    # STEP 3: Query HA for valid media_player entities (device validation)
+    query_result = await home_assistant_query_handler(domain="media_player")
+
+    if query_result.get("status") != "success":
+        duration_ms = int((time.time() - start_time) * 1000)
+        logger.error(
+            "send_voice_message.ha_query_failed",
+            extra={
+                "tool_name": "send_voice_message_to_smart_home",
+                "error_code": query_result.get("error_code"),
+                "duration_ms": duration_ms,
+                "status": "error"
+            }
+        )
+        # Pass through HA errors (CONFIG_ERROR, NETWORK_ERROR, etc.)
+        return query_result
+
+    # Extract valid entity IDs from query result
+    valid_entities = query_result.get("entities", [])
+    valid_device_ids = [e.get("entity_id") for e in valid_entities if e.get("entity_id")]
+
+    # STEP 4: Validate ALL requested devices exist (fail-all on any invalid)
+    invalid_devices = [d for d in devices if d not in valid_device_ids]
+
+    if invalid_devices:
+        duration_ms = int((time.time() - start_time) * 1000)
+        logger.warning(
+            "send_voice_message.invalid_devices",
+            extra={
+                "tool_name": "send_voice_message_to_smart_home",
+                "invalid_devices": invalid_devices,
+                "valid_devices": valid_device_ids,
+                "duration_ms": duration_ms,
+                "status": "error"
+            }
+        )
+        return {
+            "status": "error",
+            "provider": "home_assistant",
+            "error_code": "INVALID_DEVICE",
+            "error_message": f"Unknown device(s): {invalid_devices}",
+            "invalid_devices": invalid_devices,
+            "valid_devices": valid_device_ids
+        }
+
+    # STEP 5: Build SSML-wrapped message
+    ssml_message = build_ssml_message(message.strip(), voice_type)
+    delivery_method = get_voice_delivery_method(voice_type)
+
+    # STEP 6: Call notify.alexa_media service
+    client = HomeAssistantClient()
+
+    config_error = client._check_config()
+    if config_error:
+        duration_ms = int((time.time() - start_time) * 1000)
+        logger.error(
+            "send_voice_message.config_error",
+            extra={
+                "tool_name": "send_voice_message_to_smart_home",
+                "error_code": "CONFIG_ERROR",
+                "duration_ms": duration_ms,
+                "status": "error"
+            }
+        )
+        return config_error
+
+    # Build notify service payload (different from standard service call)
+    # notify.alexa_media uses 'target' array, not 'entity_id'
+    url = f"{client.base_url}/api/services/notify/alexa_media"
+    payload = {
+        "message": ssml_message,
+        "target": devices,
+        "data": {"type": delivery_method}
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=client.timeout) as http_client:
+            response = await http_client.post(
+                url,
+                headers=client._get_headers(),
+                json=payload
+            )
+
+            if response.status_code == 401:
+                duration_ms = int((time.time() - start_time) * 1000)
+                logger.error(
+                    "send_voice_message.unauthorized",
+                    extra={
+                        "tool_name": "send_voice_message_to_smart_home",
+                        "error_code": "UNAUTHORIZED",
+                        "duration_ms": duration_ms,
+                        "status": "error"
+                    }
+                )
+                return {
+                    "status": "error",
+                    "provider": "home_assistant",
+                    "error_code": "UNAUTHORIZED",
+                    "error_message": "Invalid or expired access token."
+                }
+
+            if response.status_code == 404:
+                duration_ms = int((time.time() - start_time) * 1000)
+                logger.error(
+                    "send_voice_message.service_not_found",
+                    extra={
+                        "tool_name": "send_voice_message_to_smart_home",
+                        "error_code": "SERVICE_NOT_FOUND",
+                        "duration_ms": duration_ms,
+                        "status": "error"
+                    }
+                )
+                return {
+                    "status": "error",
+                    "provider": "home_assistant",
+                    "error_code": "SERVICE_NOT_FOUND",
+                    "error_message": "notify.alexa_media service not found. Ensure Alexa Media Player integration is installed."
+                }
+
+            response.raise_for_status()
+
+            # STEP 7: On success, update cooldown timestamp
+            _last_voice_message_time = time.time()
+
+            duration_ms = int((time.time() - start_time) * 1000)
+            logger.info(
+                "send_voice_message.completed",
+                extra={
+                    "tool_name": "send_voice_message_to_smart_home",
+                    "devices": devices,
+                    "voice_type": voice_type,
+                    "delivery_method": delivery_method,
+                    "cooldown_active": False,
+                    "duration_ms": duration_ms,
+                    "status": "success"
+                }
+            )
+
+            return {
+                "status": "success",
+                "provider": "home_assistant",
+                "devices": devices,
+                "message": message.strip(),
+                "voice_type": voice_type,
+                "cooldown_seconds": VOICE_MESSAGE_COOLDOWN_SECONDS
+            }
+
+    except httpx.TimeoutException:
+        duration_ms = int((time.time() - start_time) * 1000)
+        logger.error(
+            "send_voice_message.timeout",
+            extra={
+                "tool_name": "send_voice_message_to_smart_home",
+                "error_code": "TIMEOUT",
+                "duration_ms": duration_ms,
+                "status": "error"
+            }
+        )
+        return {
+            "status": "error",
+            "provider": "home_assistant",
+            "error_code": "TIMEOUT",
+            "error_message": f"Request timed out after {client.timeout}s."
+        }
+
+    except httpx.ConnectError:
+        duration_ms = int((time.time() - start_time) * 1000)
+        logger.error(
+            "send_voice_message.network_error",
+            extra={
+                "tool_name": "send_voice_message_to_smart_home",
+                "error_code": "NETWORK_ERROR",
+                "duration_ms": duration_ms,
+                "status": "error"
+            }
+        )
+        return {
+            "status": "error",
+            "provider": "home_assistant",
+            "error_code": "NETWORK_ERROR",
+            "error_message": f"Failed to connect to Home Assistant at {client.base_url}."
+        }
+
+    except httpx.HTTPStatusError as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+        logger.error(
+            "send_voice_message.http_error",
+            extra={
+                "tool_name": "send_voice_message_to_smart_home",
+                "error_code": "HTTP_ERROR",
+                "http_status": e.response.status_code,
+                "duration_ms": duration_ms,
+                "status": "error"
+            }
+        )
+        return {
+            "status": "error",
+            "provider": "home_assistant",
+            "error_code": "HTTP_ERROR",
+            "error_message": f"HTTP error {e.response.status_code}: {str(e)}"
+        }
+
+    except Exception as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+        logger.error(
+            "send_voice_message.unknown_error",
+            extra={
+                "tool_name": "send_voice_message_to_smart_home",
+                "error_code": "UNKNOWN",
+                "error": str(e),
+                "duration_ms": duration_ms,
+                "status": "error"
+            }
+        )
+        return {
+            "status": "error",
+            "provider": "home_assistant",
+            "error_code": "UNKNOWN",
+            "error_message": str(e)
+        }
+
+
+# Voice Message Tool Definition
+send_voice_message_to_smart_home_tool = {
+    "name": "send_voice_message_to_smart_home",
+    "description": (
+        "Send a voice message to smart home speakers (Alexa devices) via Home Assistant. "
+        "USE WITH DISCRETION - CONSTRAINTS: "
+        "1) Only effective when user is physically at home - do NOT use if user is away. "
+        "2) This is a COMPLEMENT to text responses, not a replacement - always send text too. "
+        "3) 60-second cooldown between messages to prevent annoyance. "
+        "VOICE TYPES - choose based on emotional context: "
+        "'say' (default): Neutral delivery. "
+        "'announce': Attention tone first - for urgent matters. "
+        "'whisper': Soft, intimate - for gentle reminders, private moments. "
+        "'excited': Happy, enthusiastic - for celebrations, good news. "
+        "'disappointed': Empathetic, sympathetic - for comfort, bad news. "
+        "'conversational': Casual, friendly - like chatting with a friend. "
+        "'news': Formal delivery - for factual information. "
+        "'fun': Animated, playful - for greetings, lighthearted moments. "
+        "AVOID: routine responses, sensitive info, late night (unless urgent)."
+    ),
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "message": {
+                "type": "string",
+                "description": "The message for Annie to speak aloud"
+            },
+            "devices": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Target device entity IDs. Examples: "
+                    "['media_player.kitchen_echo', 'media_player.bedroom_echo']"
+                )
+            },
+            "voice_type": {
+                "type": "string",
+                "enum": ["say", "announce", "whisper", "excited", "disappointed", "conversational", "news", "fun"],
+                "default": "say",
+                "description": (
+                    "How to deliver the message. "
+                    "'say': Neutral (default). "
+                    "'announce': Attention tone first. "
+                    "'whisper': Soft, intimate. "
+                    "'excited': Happy, enthusiastic. "
+                    "'disappointed': Empathetic, sympathetic. "
+                    "'conversational': Casual, friendly. "
+                    "'news': Formal, factual. "
+                    "'fun': Animated, playful."
+                )
+            }
+        },
+        "required": ["message", "devices"]
+    },
+    "handler": send_voice_message_to_smart_home_handler
 }

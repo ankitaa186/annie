@@ -252,7 +252,7 @@ development_status:
   16-3-mqtt-subscriber-service: ready-for-dev
   16-4-configuration-environment-setup: done
   16-5-integration-testing-documentation: in-progress
-  16-6-voice-message-tool-for-smart-home-speakers: ready-for-dev
+  16-6-voice-message-tool-for-smart-home-speakers: review
   epic-16-retrospective: optional
 
   # ============================================================================

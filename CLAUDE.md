@@ -570,3 +570,118 @@ All external tools implement fallback providers for resilience:
 | web_crawl | crawl4ai parse failure/timeout (15s) | Use Jina Reader |
 | reddit_search | PRAW OAuth failure/no credentials | Use JSON API |
 | update_user_profile | N/A (single provider) | Retry with backoff |
+
+---
+
+## Home Assistant Integration (Epic 16)
+
+Annie integrates with Home Assistant for smart home control and monitoring.
+
+### Voice Message Tool (`send_voice_message_to_smart_home`)
+Send voice messages to Alexa devices via Home Assistant's `notify.alexa_media` service.
+
+**When to Use:**
+- User explicitly asks Annie to speak aloud
+- Urgent notifications when user is at home
+- Hands-free scenarios (cooking, working)
+- Celebratory or emotional moments that benefit from voice
+
+**CRITICAL CONSTRAINTS:**
+- **Home-Only**: Only effective when user is physically at home
+- **Complement, Not Replace**: Always send text response too - voice is additive
+- **60-Second Cooldown**: Prevents spam/annoyance
+- **Discretion**: Avoid late night, sensitive info, routine responses
+
+**Voice Types - Choose Based on Emotional Context:**
+| Voice Type | Delivery | Use Case |
+|------------|----------|----------|
+| `say` | Neutral TTS (default) | General messages |
+| `announce` | Attention tone first | Urgent matters, alerts |
+| `whisper` | Soft, intimate | Gentle reminders, private |
+| `excited` | Happy, enthusiastic | Celebrations, good news |
+| `disappointed` | Empathetic | Comfort, bad news |
+| `conversational` | Casual, friendly | Chatting with a friend |
+| `news` | Formal delivery | Factual information |
+| `fun` | Animated, playful | Greetings, lighthearted |
+
+**Schema:**
+```json
+{
+  "message": "string (required) - The message to speak",
+  "devices": ["media_player.kitchen_echo", "media_player.bedroom_echo"],
+  "voice_type": "say|announce|whisper|excited|disappointed|conversational|news|fun (default: say)"
+}
+```
+
+**Response (Success):**
+```json
+{
+  "status": "success",
+  "devices": ["media_player.kitchen_echo"],
+  "message": "Dinner is ready!",
+  "voice_type": "announce",
+  "cooldown_seconds": 60
+}
+```
+
+**Response (Cooldown):**
+```json
+{
+  "status": "error",
+  "error_code": "COOLDOWN",
+  "seconds_remaining": 45
+}
+```
+
+**Response (Invalid Device):**
+```json
+{
+  "status": "error",
+  "error_code": "INVALID_DEVICE",
+  "invalid_devices": ["media_player.fake"],
+  "valid_devices": ["media_player.kitchen_echo", "media_player.bedroom_echo"]
+}
+```
+
+**Device Validation:**
+- Devices are validated against live Home Assistant media_player entities
+- If ANY device is invalid, entire request fails (no partial sends)
+- Error response includes list of valid devices for Annie to learn
+
+---
+
+### Home Assistant Query Tool (`home_assistant_query`)
+Query entity states from Home Assistant.
+
+**When to Use:**
+- Check device status ("Is the garage door closed?")
+- Read sensor values ("What's the indoor temperature?")
+- Get entity states before making decisions
+
+**Schema:**
+```json
+{
+  "entity_ids": ["light.living_room", "sensor.temperature"],
+  "domain": "light"
+}
+```
+Provide either `entity_ids` OR `domain` (not both).
+
+---
+
+### Home Assistant Control Tool (`home_assistant_control`)
+Control Home Assistant entities.
+
+**SECURITY:** Only entities in `HA_CONTROL_ALLOWLIST` can be controlled.
+
+**When to Use:**
+- User explicitly requests device control
+- NEVER control without clear user intent
+
+**Schema:**
+```json
+{
+  "entity_id": "light.living_room",
+  "action": "turn_on|turn_off|toggle|set_brightness|set_temperature|set_position|set_hvac_mode",
+  "parameters": {"brightness": 200}
+}

@@ -1,6 +1,6 @@
 # Story 16.6: Voice Message Tool for Smart Home Speakers
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -169,26 +169,26 @@ Status: ready-for-dev
 ## Tasks / Subtasks
 
 ### Task 1: Implement VOICE_TYPES Mapping (AC: #4)
-- [ ] Define VOICE_TYPES dict in `mcp_server/tools/home_assistant.py`
-- [ ] Map each voice_type to method (tts/announce) and SSML template
-- [ ] Implement `build_ssml_message(message, voice_type)` helper function
+- [x] Define VOICE_TYPES dict in `mcp_server/tools/home_assistant.py`
+- [x] Map each voice_type to method (tts/announce) and SSML template
+- [x] Implement `build_ssml_message(message, voice_type)` helper function
 
 ### Task 2: Implement Cooldown Mechanism (AC: #5, #6)
-- [ ] Add module-level `_last_voice_message_time: Optional[float] = None`
-- [ ] Add `VOICE_MESSAGE_COOLDOWN_SECONDS = 60`
-- [ ] Implement cooldown check at start of handler
-- [ ] Only update timestamp on SUCCESS (not on errors)
-- [ ] Return `seconds_remaining` in COOLDOWN error
+- [x] Add module-level `_last_voice_message_time: Optional[float] = None`
+- [x] Add `VOICE_MESSAGE_COOLDOWN_SECONDS = 60`
+- [x] Implement cooldown check at start of handler
+- [x] Only update timestamp on SUCCESS (not on errors)
+- [x] Return `seconds_remaining` in COOLDOWN error
 
 ### Task 3: Implement Device Validation (AC: #7, #8)
-- [ ] Call `home_assistant_query_handler(domain="media_player")`
-- [ ] Extract valid entity IDs from response
-- [ ] Compare requested devices against valid set
-- [ ] If any invalid: return INVALID_DEVICE with `valid_devices` list
-- [ ] Fail entire request (no partial sends)
+- [x] Call `home_assistant_query_handler(domain="media_player")`
+- [x] Extract valid entity IDs from response
+- [x] Compare requested devices against valid set
+- [x] If any invalid: return INVALID_DEVICE with `valid_devices` list
+- [x] Fail entire request (no partial sends)
 
 ### Task 4: Implement notify.alexa_media Service Call (AC: #2, #3)
-- [ ] Build service call payload:
+- [x] Build service call payload:
   ```python
   {
       "message": ssml_wrapped_message,
@@ -196,12 +196,12 @@ Status: ready-for-dev
       "data": {"type": "tts" | "announce"}
   }
   ```
-- [ ] POST to `/api/services/notify/alexa_media`
-- [ ] Handle success and error responses
+- [x] POST to `/api/services/notify/alexa_media`
+- [x] Handle success and error responses
 
 ### Task 5: Implement Main Handler (AC: #1, #9, #11)
-- [ ] Create `send_voice_message_to_smart_home_handler(message, devices, voice_type="say")`
-- [ ] Implement flow:
+- [x] Create `send_voice_message_to_smart_home_handler(message, devices, voice_type="say")`
+- [x] Implement flow:
   1. Check cooldown (fail fast)
   2. Validate inputs (message not empty, devices not empty)
   3. Query HA for valid media_player entities
@@ -210,31 +210,31 @@ Status: ready-for-dev
   6. Call notify.alexa_media service
   7. On success: update cooldown timestamp
   8. Return result
-- [ ] Add structured logging with all required fields
+- [x] Add structured logging with all required fields
 
 ### Task 6: Create Tool Schema Definition (AC: #1, #10)
-- [ ] Define `send_voice_message_to_smart_home_tool` dict with:
+- [x] Define `send_voice_message_to_smart_home_tool` dict with:
   - name
   - description (with LLM guidance)
   - inputSchema with message, devices, voice_type
-- [ ] Export from home_assistant.py
+- [x] Export from home_assistant.py
 
 ### Task 7: Register Tool in MCP Server (AC: #1)
-- [ ] Update `mcp_server/tools/__init__.py` to export new tool
-- [ ] Update `mcp_server/server.py` to register tool
-- [ ] Verify appears in /tools/list
+- [x] Update `mcp_server/tools/__init__.py` to export new tool
+- [x] Update `mcp_server/server.py` to register tool
+- [x] Verify appears in /tools/list
 
 ### Task 8: Write Unit Tests (AC: #12, #13, #14)
-- [ ] Create `mcp_server/tests/test_voice_message_tool.py`
-- [ ] Test cooldown enforcement:
+- [x] Create `mcp_server/tests/test_voice_message_tool.py`
+- [x] Test cooldown enforcement:
   - `test_cooldown_blocks_rapid_sends()`
   - `test_cooldown_allows_after_60s()`
   - `test_cooldown_not_consumed_on_error()`
-- [ ] Test device validation:
+- [x] Test device validation:
   - `test_valid_devices_pass()`
   - `test_invalid_device_returns_valid_list()`
   - `test_mixed_devices_fail_all()`
-- [ ] Test SSML wrapping:
+- [x] Test SSML wrapping:
   - `test_voice_type_say()`
   - `test_voice_type_announce()`
   - `test_voice_type_whisper()`
@@ -243,21 +243,16 @@ Status: ready-for-dev
   - `test_voice_type_conversational()`
   - `test_voice_type_news()`
   - `test_voice_type_fun()`
-- [ ] Verify >90% coverage
+- [x] Verify >90% coverage (50 tests pass, 100% coverage)
 
 ### Task 9: Write Integration Test (AC: #15)
-- [ ] Add skippable integration test:
-  ```python
-  @pytest.mark.skipif(not os.getenv("HA_URL"), reason="HA not configured")
-  def test_real_voice_message():
-      ...
-  ```
+- [x] Skipped per user request - live testing confirmed tool works with real HA
 
 ### Task 10: Update CLAUDE.md Documentation
-- [ ] Add `send_voice_message_to_smart_home` tool section
-- [ ] Document when to use
-- [ ] Document voice types with emotional guidance
-- [ ] Document constraints (home-only, cooldown, complement)
+- [x] Add `send_voice_message_to_smart_home` tool section
+- [x] Document when to use
+- [x] Document voice types with emotional guidance
+- [x] Document constraints (home-only, cooldown, complement)
 
 ---
 
@@ -366,9 +361,29 @@ def _check_cooldown() -> Optional[Dict[str, Any]]:
 
 ### Debug Log References
 
+Implementation completed 2026-01-19 following story context and acceptance criteria.
+
 ### Completion Notes List
 
+- Implemented full `send_voice_message_to_smart_home` MCP tool with 8 voice types
+- SSML wrapping for emotional expression: whisper, excited, disappointed, conversational, news, fun
+- 60-second cooldown enforced only on successful sends
+- Device validation via live HA query with fail-all semantics
+- 50 unit tests passing with comprehensive coverage
+- Live testing confirmed: tool sends voice messages to Alexa via HA notify.alexa_media
+- Logging includes all required fields: devices, voice_type, cooldown_state, duration_ms, status
+
 ### File List
+
+**Modified:**
+- `mcp_server/tools/home_assistant.py` - Added VOICE_TYPES, cooldown mechanism, device validation, handler, tool schema
+- `mcp_server/tools/__init__.py` - Exported new tool and helpers
+- `mcp_server/server.py` - Registered send_voice_message_to_smart_home_tool
+- `CLAUDE.md` - Added Home Assistant Integration section with voice message tool docs
+- `docs/epics/epic-16-home-assistant-integration.md` - Added Story 16.6 specification
+
+**Created:**
+- `mcp_server/tests/test_voice_message_tool.py` - 50 unit tests for voice message tool
 
 ---
 
