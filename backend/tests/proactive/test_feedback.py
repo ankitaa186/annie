@@ -59,7 +59,7 @@ async def test_get_proactive_context_valid_message(mock_redis, sample_proactive_
 
     with patch('api.proactive.feedback.IntentsClient') as mock_client:
         mock_instance = AsyncMock()
-        mock_instance.get_trigger = AsyncMock(return_value={
+        mock_instance.get_intent = AsyncMock(return_value={
             "id": "trigger_123",
             "intent_name": "Daily Briefing",
             "trigger_type": "cron"
@@ -103,7 +103,7 @@ async def test_get_proactive_context_within_window(mock_redis):
 
     with patch('api.proactive.feedback.IntentsClient') as mock_client:
         mock_instance = AsyncMock()
-        mock_instance.get_trigger = AsyncMock(return_value={
+        mock_instance.get_intent = AsyncMock(return_value={
             "id": "trigger_123",
             "intent_name": "Test"
         })
@@ -161,7 +161,7 @@ async def test_get_proactive_context_trigger_not_found(mock_redis, sample_proact
 
     with patch('api.proactive.feedback.IntentsClient') as mock_client:
         mock_instance = AsyncMock()
-        mock_instance.get_trigger = AsyncMock(return_value=None)
+        mock_instance.get_intent = AsyncMock(return_value=None)
         mock_client.return_value = mock_instance
 
         result = await get_proactive_context("user_123", mock_redis)
@@ -177,7 +177,7 @@ async def test_get_proactive_context_api_error(mock_redis, sample_proactive_mess
 
     with patch('api.proactive.feedback.IntentsClient') as mock_client:
         mock_instance = AsyncMock()
-        mock_instance.get_trigger = AsyncMock(side_effect=Exception("API Error"))
+        mock_instance.get_intent = AsyncMock(side_effect=Exception("API Error"))
         mock_client.return_value = mock_instance
 
         result = await get_proactive_context("user_123", mock_redis)
@@ -205,7 +205,7 @@ async def test_get_proactive_context_includes_time_diff(mock_redis, sample_proac
 
     with patch('api.proactive.feedback.IntentsClient') as mock_client:
         mock_instance = AsyncMock()
-        mock_instance.get_trigger = AsyncMock(return_value={"id": "trigger_123"})
+        mock_instance.get_intent = AsyncMock(return_value={"id": "trigger_123"})
         mock_client.return_value = mock_instance
 
         result = await get_proactive_context("user_123", mock_redis)
