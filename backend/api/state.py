@@ -79,7 +79,7 @@ class StateManager:
     # Configuration
     SESSION_TTL = 3600  # 1 hour in seconds
     CONVERSATION_TTL = 1800  # 30 minutes in seconds
-    MAX_MESSAGES = 20  # Max messages for LLM context
+    MAX_MESSAGES = 40  # Max messages for LLM context
     MAX_TOKENS = 20000  # Max tokens for LLM context (~4 chars per token)
     CHARS_PER_TOKEN = 4  # Simple token estimation heuristic
 

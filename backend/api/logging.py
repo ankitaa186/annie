@@ -38,9 +38,9 @@ except ImportError:
 
 
 # Sensitive fields that should be masked in logs
+# Note: Use specific field names to avoid masking non-sensitive fields like "estimated_tokens"
 SENSITIVE_FIELDS = [
     "api_key",
-    "token",
     "password",
     "secret",
     "authorization",
@@ -53,6 +53,9 @@ SENSITIVE_FIELDS = [
     "refresh_token",
     "client_secret",
     "private_key",
+    "bot_token",
+    "auth_token",
+    "bearer_token",
 ]
 
 
