@@ -462,20 +462,19 @@ class TestHomeAssistantQueryToolSchema:
         assert schema["properties"]["domain"]["type"] == "string"
         assert "enum" in schema["properties"]["domain"]
 
-    def test_input_schema_one_of_constraint(self):
-        """Verify oneOf constraint for entity_ids OR domain."""
+    def test_input_schema_mutual_exclusion_documented(self):
+        """Verify mutual exclusion of entity_ids/domain is documented in descriptions."""
         from mcp_server.tools.home_assistant import home_assistant_query_tool
 
         schema = home_assistant_query_tool["inputSchema"]
-        assert "oneOf" in schema
+        # Note: oneOf not used due to Gemini compatibility; mutual exclusion enforced in handler
+        # Verify descriptions document the constraint
+        entity_ids_desc = schema["properties"]["entity_ids"]["description"].lower()
+        domain_desc = schema["properties"]["domain"]["description"].lower()
 
-        one_of = schema["oneOf"]
-        assert len(one_of) == 2
-
-        # One requires entity_ids, other requires domain
-        required_fields = [list(item.get("required", []))[0] for item in one_of]
-        assert "entity_ids" in required_fields
-        assert "domain" in required_fields
+        # Both descriptions should mention the mutual exclusion
+        assert "not both" in entity_ids_desc or "either" in entity_ids_desc
+        assert "not both" in domain_desc or "either" in domain_desc
 
 
 class TestHomeAssistantPartialErrors:

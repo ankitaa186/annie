@@ -177,29 +177,30 @@ class TestCooldownMechanism:
 
     def test_cooldown_blocks_rapid_sends(self):
         """AC #5: Cooldown blocks sends within 60s."""
-        # Use Redis-backed cooldown by setting it directly
-        from mcp_server.tools.home_assistant import _set_voice_cooldown
-        _set_voice_cooldown()  # Set cooldown now
+        # Mock Redis client to simulate cooldown state
+        mock_redis = MagicMock()
+        mock_redis.get.return_value = str(time.time())  # Current timestamp = on cooldown
 
-        result = _check_voice_cooldown()
+        with patch("mcp_server.tools.home_assistant._get_redis_client", return_value=mock_redis):
+            result = _check_voice_cooldown()
 
-        assert result is not None
-        assert result["status"] == "error"
-        assert result["error_code"] == "COOLDOWN"
-        assert "seconds_remaining" in result
-        assert result["seconds_remaining"] > 0
-        assert result["seconds_remaining"] <= 60
+            assert result is not None
+            assert result["status"] == "error"
+            assert result["error_code"] == "COOLDOWN"
+            assert "seconds_remaining" in result
+            assert result["seconds_remaining"] > 0
+            assert result["seconds_remaining"] <= 60
 
     def test_cooldown_allows_after_60s(self):
         """AC #5: Cooldown allows sends after 60s."""
-        # Simulate expired cooldown by setting a timestamp in the past
-        from mcp_server.tools.home_assistant import _get_redis_client, VOICE_COOLDOWN_REDIS_KEY
-        client = _get_redis_client()
-        client.setex(VOICE_COOLDOWN_REDIS_KEY, 1, str(time.time() - 65))  # 65 seconds ago, expires in 1s
+        # Mock Redis client to simulate expired cooldown
+        mock_redis = MagicMock()
+        mock_redis.get.return_value = str(time.time() - 65)  # 65 seconds ago = expired
 
-        result = _check_voice_cooldown()
+        with patch("mcp_server.tools.home_assistant._get_redis_client", return_value=mock_redis):
+            result = _check_voice_cooldown()
 
-        assert result is None  # No cooldown error
+            assert result is None  # No cooldown error
 
 
 class TestDeviceValidation:
@@ -380,18 +381,19 @@ class TestErrorCodes:
     @pytest.mark.asyncio
     async def test_error_code_cooldown(self):
         """AC #9: COOLDOWN error code."""
-        # Set cooldown using Redis-backed mechanism
-        from mcp_server.tools.home_assistant import _set_voice_cooldown
-        _set_voice_cooldown()  # Set cooldown now
+        # Mock Redis client to simulate cooldown state
+        mock_redis = MagicMock()
+        mock_redis.get.return_value = str(time.time())  # Current timestamp = on cooldown
 
-        result = await send_voice_message_to_smart_home_handler(
-            message="Hello",
-            devices=["media_player.kitchen_echo"],
-            voice_type="say"
-        )
+        with patch("mcp_server.tools.home_assistant._get_redis_client", return_value=mock_redis):
+            result = await send_voice_message_to_smart_home_handler(
+                message="Hello",
+                devices=["media_player.kitchen_echo"],
+                voice_type="say"
+            )
 
-        assert result["status"] == "error"
-        assert result["error_code"] == "COOLDOWN"
+            assert result["status"] == "error"
+            assert result["error_code"] == "COOLDOWN"
 
     @pytest.mark.asyncio
     async def test_error_code_invalid_device(self):

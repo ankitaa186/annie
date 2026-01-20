@@ -122,7 +122,10 @@ class TestToolRegistration:
         assert schema["type"] == "object"
         assert "entity_ids" in schema["properties"]
         assert "domain" in schema["properties"]
-        assert "oneOf" in schema  # Requires either entity_ids OR domain
+        # Note: oneOf not used due to Gemini compatibility; mutual exclusion enforced in handler
+        # Check that descriptions mention "either entity_ids OR domain"
+        assert "either" in schema["properties"]["entity_ids"]["description"].lower() or \
+               "not both" in schema["properties"]["entity_ids"]["description"].lower()
 
     def test_control_tool_schema_complete(self):
         """Verify control tool has complete schema."""
@@ -488,12 +491,17 @@ class TestToolSchemaValidation:
         assert "SECURITY" in desc
         assert "allowlist" in desc.lower() or "ALLOWLIST" in desc
 
-    def test_query_schema_has_oneOf_constraint(self):
-        """Query tool requires either entity_ids OR domain."""
+    def test_query_schema_enforces_mutual_exclusion(self):
+        """Query tool enforces either entity_ids OR domain (not both)."""
         from mcp_server.tools import home_assistant_query_tool
 
         schema = home_assistant_query_tool["inputSchema"]
-        assert "oneOf" in schema
+        # Note: oneOf not used due to Gemini compatibility; mutual exclusion enforced in handler
+        # Verify descriptions document the constraint
+        entity_ids_desc = schema["properties"]["entity_ids"]["description"].lower()
+        domain_desc = schema["properties"]["domain"]["description"].lower()
+        assert "not both" in entity_ids_desc or "either" in entity_ids_desc
+        assert "not both" in domain_desc or "either" in domain_desc
 
     def test_control_schema_action_enum_complete(self):
         """Control tool action enum has all 7 actions."""

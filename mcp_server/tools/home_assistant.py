@@ -1378,6 +1378,7 @@ send_voice_message_to_smart_home_tool = {
     "name": "send_voice_message_to_smart_home",
     "description": (
         "Send a voice message to Alexa devices via Home Assistant. "
+        "COMPLEMENT to text responses, not a direct replacement. "
         "Has 60-second cooldown. Use only when user is at home. "
         "Voice types: say, announce, whisper, excited, disappointed, conversational, news, fun."
     ),
