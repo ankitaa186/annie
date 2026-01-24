@@ -70,8 +70,43 @@ SENSITIVE_VARS = [
     "BRAVE_SEARCH_API_KEY",
     "STOCK_API_KEY",
     "TAVILY_API_KEY",
+    "JINA_API_KEY",
     "REDDIT_CLIENT_SECRET",
+    "HA_ACCESS_TOKEN",  # Epic 16: Home Assistant Integration
 ]
+
+
+# Epic 16: Home Assistant Configuration
+# These are loaded at module level for easy access by HA tools
+HA_URL = os.getenv("HA_URL", "")
+HA_ACCESS_TOKEN = os.getenv("HA_ACCESS_TOKEN", "")
+HA_CONTROL_ALLOWLIST = os.getenv("HA_CONTROL_ALLOWLIST", "")
+HA_TIMEOUT = int(os.getenv("HA_TIMEOUT", "10"))
+
+
+def validate_ha_config() -> list:
+    """
+    Validate Home Assistant configuration.
+
+    Returns:
+        List of configuration issues (empty list = valid)
+    """
+    issues = []
+    if not HA_URL:
+        issues.append("HA_URL not configured")
+    if not HA_ACCESS_TOKEN:
+        issues.append("HA_ACCESS_TOKEN not configured")
+    return issues
+
+
+def is_ha_configured() -> bool:
+    """
+    Check if Home Assistant is configured.
+
+    Returns:
+        True if both HA_URL and HA_ACCESS_TOKEN are set
+    """
+    return bool(HA_URL and HA_ACCESS_TOKEN)
 
 
 def validate_environment() -> dict:
@@ -149,6 +184,19 @@ def validate_environment() -> dict:
         logger.warning(
             "REDDIT_CLIENT_ID or REDDIT_CLIENT_SECRET is not set. "
             "Reddit search will use JSON API fallback (no comments)."
+        )
+
+    # Epic 16: Home Assistant configuration (optional - for HA tools)
+    # Uses module-level variables for easy access by tools
+    config["HA_URL"] = HA_URL
+    config["HA_ACCESS_TOKEN"] = HA_ACCESS_TOKEN
+    config["HA_CONTROL_ALLOWLIST"] = HA_CONTROL_ALLOWLIST
+    config["HA_TIMEOUT"] = HA_TIMEOUT
+
+    if not is_ha_configured():
+        logger.info(
+            "Home Assistant not configured (HA_URL or HA_ACCESS_TOKEN missing). "
+            "HA tools will return CONFIG_ERROR until configured."
         )
 
     # Raise errors only if critical validation failed

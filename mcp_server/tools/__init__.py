@@ -117,6 +117,29 @@ from .reddit_search import (
     _reddit_json_search,
 )
 
+# Home Assistant Tools (Epic 16 - Stories 16.1, 16.2, 16.6)
+from .home_assistant import (
+    home_assistant_query_tool,
+    home_assistant_query_handler,
+    home_assistant_control_tool,
+    home_assistant_control_handler,
+    send_voice_message_to_smart_home_tool,
+    send_voice_message_to_smart_home_handler,
+    HomeAssistantClient,
+    AllowlistValidator,
+    get_allowlist_validator,
+    reset_allowlist_validator,
+    reset_voice_message_cooldown,
+    _set_voice_cooldown,
+    _get_redis_client,
+    VOICE_COOLDOWN_REDIS_KEY,
+    map_action_to_service,
+    build_ssml_message,
+    get_voice_delivery_method,
+    VOICE_TYPES,
+    VOICE_MESSAGE_COOLDOWN_SECONDS,
+)
+
 __all__ = [
     # Registry
     "ToolRegistry",
@@ -203,4 +226,25 @@ __all__ = [
     "reddit_search_tool_handler",
     "_praw_search_sync",
     "_reddit_json_search",
+
+    # Home Assistant
+    "home_assistant_query_tool",
+    "home_assistant_query_handler",
+    "home_assistant_control_tool",
+    "home_assistant_control_handler",
+    "send_voice_message_to_smart_home_tool",
+    "send_voice_message_to_smart_home_handler",
+    "HomeAssistantClient",
+    "AllowlistValidator",
+    "get_allowlist_validator",
+    "reset_allowlist_validator",
+    "reset_voice_message_cooldown",
+    "_set_voice_cooldown",
+    "_get_redis_client",
+    "VOICE_COOLDOWN_REDIS_KEY",
+    "map_action_to_service",
+    "build_ssml_message",
+    "get_voice_delivery_method",
+    "VOICE_TYPES",
+    "VOICE_MESSAGE_COOLDOWN_SECONDS",
 ]

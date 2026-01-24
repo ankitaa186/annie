@@ -55,15 +55,31 @@ External Services (Brave Search, agentic-memories)
 
 ## Development Commands
 
+### Environment Modes
+
+Annie supports two environment modes controlled by the `ENVIRONMENT` variable in `.env`:
+
+| Mode | ENVIRONMENT | Logging | Use Case |
+|------|-------------|---------|----------|
+| Development | `dev` | Local (docker logs) | Local development |
+| Staging | `staging` | Local (docker logs) | Staging environment |
+| Production | `prod` | Grafana Cloud Loki | Production deployment |
+
+**Production Setup:**
+1. Set `ENVIRONMENT=prod` in `.env`
+2. Set `LOKI_URL` in `.env` (get from Grafana Cloud → Connections → Loki)
+3. Run `make start` (Loki plugin auto-installs if missing)
+
+All commands automatically read `ENVIRONMENT` from `.env`. You can override with `ENV=prod` on command line if needed.
+
 ### Starting and Stopping Services
 
 ```bash
-# Start all services (checks Docker, validates .env, starts containers)
-make start
-# OR
-./scripts/run_docker.sh
+# Start services (reads ENVIRONMENT from .env automatically)
+make start                    # Uses ENVIRONMENT from .env
+./scripts/run_docker.sh       # Alternative
 
-# Stop all services gracefully
+# Stop services
 make stop
 
 # Restart services
@@ -71,7 +87,12 @@ make restart
 
 # Rebuild containers (after dependency changes)
 make rebuild
+
+# Check Loki plugin status (for production)
+make check-loki
 ```
+
+**Note:** Set `ENVIRONMENT=prod` in `.env` for production mode with Loki logging. The Loki Docker plugin will be auto-installed if missing.
 
 ### Viewing Logs
 
@@ -549,3 +570,203 @@ All external tools implement fallback providers for resilience:
 | web_crawl | crawl4ai parse failure/timeout (15s) | Use Jina Reader |
 | reddit_search | PRAW OAuth failure/no credentials | Use JSON API |
 | update_user_profile | N/A (single provider) | Retry with backoff |
+
+---
+
+## Home Assistant Integration (Epic 16)
+
+Annie integrates with Home Assistant for smart home control and monitoring.
+
+### Voice Message Tool (`send_voice_message_to_smart_home`)
+Send voice messages to Alexa devices via Home Assistant's `notify.alexa_media` service.
+
+**When to Use:**
+- User explicitly asks Annie to speak aloud
+- Urgent notifications when user is at home
+- Hands-free scenarios (cooking, working)
+- Celebratory or emotional moments that benefit from voice
+
+**CRITICAL CONSTRAINTS:**
+- **Home-Only**: Only effective when user is physically at home
+- **Complement, Not Replace**: Always send text response too - voice is additive
+- **60-Second Cooldown**: Prevents spam/annoyance
+- **Discretion**: Avoid late night, sensitive info, routine responses
+
+**Voice Types - Choose Based on Emotional Context:**
+| Voice Type | Delivery | Use Case |
+|------------|----------|----------|
+| `say` | Neutral TTS (default) | General messages |
+| `announce` | Attention tone first | Urgent matters, alerts |
+| `whisper` | Soft, intimate | Gentle reminders, private |
+| `excited` | Happy, enthusiastic | Celebrations, good news |
+| `disappointed` | Empathetic | Comfort, bad news |
+| `conversational` | Casual, friendly | Chatting with a friend |
+| `news` | Formal delivery | Factual information |
+| `fun` | Animated, playful | Greetings, lighthearted |
+
+**Schema:**
+```json
+{
+  "message": "string (required) - The message to speak",
+  "devices": ["media_player.kitchen_echo", "media_player.bedroom_echo"],
+  "voice_type": "say|announce|whisper|excited|disappointed|conversational|news|fun (default: say)"
+}
+```
+
+**Response (Success):**
+```json
+{
+  "status": "success",
+  "devices": ["media_player.kitchen_echo"],
+  "message": "Dinner is ready!",
+  "voice_type": "announce",
+  "cooldown_seconds": 60
+}
+```
+
+**Response (Cooldown):**
+```json
+{
+  "status": "error",
+  "error_code": "COOLDOWN",
+  "seconds_remaining": 45
+}
+```
+
+**Response (Invalid Device):**
+```json
+{
+  "status": "error",
+  "error_code": "INVALID_DEVICE",
+  "invalid_devices": ["media_player.fake"],
+  "valid_devices": ["media_player.kitchen_echo", "media_player.bedroom_echo"]
+}
+```
+
+**Device Validation:**
+- Devices are validated against live Home Assistant media_player entities
+- If ANY device is invalid, entire request fails (no partial sends)
+- Error response includes list of valid devices for Annie to learn
+
+---
+
+### Home Assistant Query Tool (`home_assistant_query`)
+Query entity states from Home Assistant.
+
+**When to Use:**
+- Check device status ("Is the garage door closed?")
+- Read sensor values ("What's the indoor temperature?")
+- Get entity states before making decisions
+
+**Schema:**
+```json
+{
+  "entity_ids": ["light.living_room", "sensor.temperature"],
+  "domain": "light"
+}
+```
+Provide either `entity_ids` OR `domain` (not both).
+
+---
+
+### Home Assistant Control Tool (`home_assistant_control`)
+Control Home Assistant entities.
+
+**SECURITY:** Only entities in `HA_CONTROL_ALLOWLIST` can be controlled.
+
+**When to Use:**
+- User explicitly requests device control
+- NEVER control without clear user intent
+
+**Schema:**
+```json
+{
+  "entity_id": "light.living_room",
+  "action": "turn_on|turn_off|toggle|set_brightness|set_temperature|set_position|set_hvac_mode",
+  "parameters": {"brightness": 200}
+}
+```
+
+---
+
+## File Context Sharing (Epic 18)
+
+Annie can receive and understand files (images, documents, spreadsheets) shared by users via Telegram, enabling multimodal analysis without manual copy-pasting.
+
+### Supported File Types
+
+| Category | MIME Types | Size Limit | Gemini Support | ChatGPT Support |
+|----------|------------|------------|----------------|-----------------|
+| **Images** | image/jpeg, image/png, image/gif, image/webp | 10MB | Native (inline_data) | Native (image_url) |
+| **Documents** | application/pdf, text/plain | 20MB | Native | Text extraction fallback |
+| **Word Docs** | application/vnd.openxmlformats-officedocument.wordprocessingml.document | 20MB | Native | Text extraction fallback |
+| **Spreadsheets** | text/csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet | 20MB | Native | Text extraction fallback |
+
+### Processing Model
+
+**Process-and-Discard**: Files exist only in memory during request lifecycle. No files are ever persisted to disk, Redis, or any database. File content (base64) is NEVER logged—only metadata (filename, mime_type, size).
+
+### Multi-File Support
+
+- Up to 10 files per message (Telegram media group)
+- Files downloaded in parallel
+- All files attached to single LLM request for cross-referencing
+
+### Provider Fallback Behavior
+
+| Scenario | Behavior |
+|----------|----------|
+| Gemini available | Files sent natively via `inline_data` |
+| Gemini unavailable, images | ChatGPT receives via `image_url` (native) |
+| Gemini unavailable, documents | ChatGPT receives extracted text (pypdf, python-docx, openpyxl) |
+| Both providers fail | Error message, conversation continues text-only |
+
+### FileAttachment Schema
+
+```python
+class FileAttachment(BaseModel):
+    filename: str      # Original filename (e.g., "portfolio.png")
+    mime_type: str     # MIME type (e.g., "image/png", "application/pdf")
+    size_bytes: int    # File size in bytes
+    data_base64: str   # Base64-encoded file content
+```
+
+### Chat Request with Files
+
+```
+POST /api/chat
+Content-Type: application/json
+
+{
+  "user_id": "telegram_12345",
+  "message": "What stocks do I own?",
+  "files": [
+    {
+      "filename": "portfolio.png",
+      "mime_type": "image/png",
+      "size_bytes": 245000,
+      "data_base64": "iVBORw0KGgoAAAANSUhEUgAA..."
+    }
+  ]
+}
+```
+
+### Error Responses
+
+| Error | HTTP Code | Response |
+|-------|-----------|----------|
+| Unsupported format | 400 | `{"detail": "Unsupported file type: application/zip"}` |
+| File too large | 400 | `{"detail": "File exceeds size limit: 25MB > 20MB max"}` |
+| Too many files | 422 | Pydantic validation error |
+
+### Key Implementation Files
+
+| File | Purpose |
+|------|---------|
+| `telegram_bot/file_handler.py` | File detection, download, validation, base64 encoding |
+| `telegram_bot/handlers/message.py` | Route file messages to handler |
+| `backend/api/models/file_attachment.py` | FileAttachment Pydantic model, validation |
+| `backend/api/routes/chat.py` | Accept files in ChatRequest, store in Redis |
+| `backend/api/routes/stream.py` | Load files, pass to LLM client |
+| `backend/api/providers/gemini_provider.py` | Build multimodal contents with `inline_data` |
+| `backend/api/providers/chatgpt_provider.py` | Build multimodal messages, text extraction fallback |

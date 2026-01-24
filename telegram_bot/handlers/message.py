@@ -18,6 +18,14 @@ import redis.asyncio as redis
 from telegram_bot.auth import AuthenticationModule
 from telegram_bot.backend_client import get_backend_client
 from telegram_bot.config import get_config
+from telegram_bot.file_handler import (
+    FileProcessingResult,
+    has_processable_files,
+    process_message_files,
+    format_file_acknowledgment,
+    format_file_error,
+    format_partial_success_acknowledgment,
+)
 from telegram_bot.logger import get_logger
 
 logger = get_logger(__name__)
@@ -25,6 +33,11 @@ logger = get_logger(__name__)
 
 # Conversation state storage (per user) - for tracking status messages and pending messages
 conversation_states: dict[int, dict] = {}
+
+# Media group buffering for multiple files sent at once
+# Structure: {media_group_id: {"messages": [Message], "caption": str, "user_id": int, "chat_id": int, "task": asyncio.Task}}
+media_group_buffers: dict[str, dict] = {}
+MEDIA_GROUP_WAIT_SECONDS = 1.0  # Wait time for additional files in media group
 
 
 def get_conversation_state(user_id: int) -> dict:
@@ -923,6 +936,26 @@ def setup_message_handlers(application):
     logger.info(
         "Voice message handler registered",
         extra={"event": "handler_registered", "handler_type": "voice"}
+    )
+
+    # Register photo message handler (for images with or without captions)
+    application.add_handler(
+        MessageHandler(filters.PHOTO, handle_file_message)
+    )
+
+    logger.info(
+        "Photo message handler registered",
+        extra={"event": "handler_registered", "handler_type": "photo"}
+    )
+
+    # Register document message handler (for PDFs, DOCX, XLSX, etc.)
+    application.add_handler(
+        MessageHandler(filters.Document.ALL, handle_file_message)
+    )
+
+    logger.info(
+        "Document message handler registered",
+        extra={"event": "handler_registered", "handler_type": "document"}
     )
 
 
@@ -1847,3 +1880,834 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 await handle_pending_messages(user_id, chat_id, pending, context)
         except Exception:
             pass  # Ignore errors in pending check after error
+
+
+async def _buffer_media_group_message(
+    media_group_id: str,
+    message: TelegramMessage,
+    caption: str,
+    user_id: int,
+    chat_id: int,
+    context: ContextTypes.DEFAULT_TYPE
+):
+    """
+    Buffer a message that's part of a media group (multiple files sent at once).
+
+    When users send multiple files at once in Telegram, they arrive as separate
+    messages with the same media_group_id. We buffer them and process together
+    after a short delay to ensure all files are collected.
+
+    Args:
+        media_group_id: Telegram's media group identifier
+        message: The Telegram message containing the file
+        caption: Caption from the message (usually only on first message)
+        user_id: Telegram user ID
+        chat_id: Telegram chat ID
+        context: Bot context
+    """
+    global media_group_buffers
+
+    if media_group_id not in media_group_buffers:
+        # First message in this media group - create buffer
+        media_group_buffers[media_group_id] = {
+            "messages": [message],
+            "caption": caption,  # Caption is usually only on first message
+            "user_id": user_id,
+            "chat_id": chat_id,
+            "context": context,
+            "task": None
+        }
+
+        logger.info(
+            "Media group buffer created",
+            extra={
+                "media_group_id": media_group_id,
+                "user_id": user_id,
+                "has_caption": bool(caption),
+                "event": "media_group_buffer_created"
+            }
+        )
+
+        # Schedule processing after delay
+        async def process_after_delay():
+            await asyncio.sleep(MEDIA_GROUP_WAIT_SECONDS)
+            await _process_media_group(media_group_id)
+
+        task = asyncio.create_task(process_after_delay())
+        media_group_buffers[media_group_id]["task"] = task
+
+    else:
+        # Additional message in existing media group - add to buffer
+        buffer = media_group_buffers[media_group_id]
+        buffer["messages"].append(message)
+
+        # Update caption if this message has one (first message with caption wins)
+        if caption and not buffer["caption"]:
+            buffer["caption"] = caption
+
+        logger.debug(
+            "Message added to media group buffer",
+            extra={
+                "media_group_id": media_group_id,
+                "message_count": len(buffer["messages"]),
+                "has_caption": bool(buffer["caption"]),
+                "event": "media_group_message_added"
+            }
+        )
+
+
+async def _process_media_group(media_group_id: str):
+    """
+    Process all buffered files from a media group together.
+
+    Called after the buffer delay expires. Collects all files,
+    uses the caption from the first message, and sends to backend.
+
+    Args:
+        media_group_id: The media group to process
+    """
+    global media_group_buffers, auth_module
+
+    if media_group_id not in media_group_buffers:
+        logger.warning(
+            "Media group buffer not found for processing",
+            extra={"media_group_id": media_group_id, "event": "media_group_buffer_missing"}
+        )
+        return
+
+    buffer = media_group_buffers.pop(media_group_id)
+    messages = buffer["messages"]
+    caption = buffer["caption"]
+    user_id = buffer["user_id"]
+    chat_id = buffer["chat_id"]
+    context = buffer["context"]
+
+    logger.info(
+        "Processing media group",
+        extra={
+            "media_group_id": media_group_id,
+            "user_id": user_id,
+            "message_count": len(messages),
+            "has_caption": bool(caption),
+            "event": "media_group_processing_start"
+        }
+    )
+
+    # Authorization check
+    if not auth_module.is_authorized(user_id):
+        logger.warning(
+            f"UNAUTHORIZED MEDIA GROUP - User ID: {user_id}",
+            extra={
+                "user_id": user_id,
+                "media_group_id": media_group_id,
+                "event": "media_group_blocked"
+            }
+        )
+        # Reply to first message
+        await messages[0].reply_text(auth_module.get_rejection_message())
+        return
+
+    # Process files from all messages in the group
+    from telegram_bot.file_handler import (
+        FileProcessingResult,
+        process_message_files,
+        format_file_acknowledgment,
+        format_partial_success_acknowledgment,
+    )
+
+    all_successful = []
+    all_failed = []
+
+    for msg in messages:
+        result = await process_message_files(msg, context)
+        all_successful.extend(result.successful)
+        all_failed.extend(result.failed)
+
+    # Create combined result
+    combined_result = FileProcessingResult(successful=all_successful, failed=all_failed)
+
+    logger.info(
+        "Media group files processed",
+        extra={
+            "media_group_id": media_group_id,
+            "successful_count": len(all_successful),
+            "failed_count": len(all_failed),
+            "event": "media_group_files_processed"
+        }
+    )
+
+    # Handle case where all files failed
+    if combined_result.all_failed:
+        error_msg = format_partial_success_acknowledgment(combined_result)
+        await messages[0].reply_text(error_msg)
+        return
+
+    # Send acknowledgment for successful files and capture message ID for streaming
+    status_message_id = None
+    if combined_result.has_successful:
+        ack_msg = format_file_acknowledgment(combined_result.successful)
+        if ack_msg:
+            ack_sent = await messages[0].reply_text(ack_msg)
+            status_message_id = ack_sent.message_id
+
+    # Set the status message ID in conversation state for streaming updates
+    state = get_conversation_state(user_id)
+    state["status_message_id"] = status_message_id
+
+    logger.debug(
+        "Media group status message set",
+        extra={
+            "user_id": user_id,
+            "status_message_id": status_message_id,
+            "event": "media_group_status_set"
+        }
+    )
+
+    # Forward to backend with combined files
+    await _forward_media_group_to_backend(
+        messages[0], context, user_id, chat_id, caption, combined_result
+    )
+
+
+async def _forward_media_group_to_backend(
+    reply_message: TelegramMessage,
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id: int,
+    chat_id: int,
+    caption: str,
+    file_result: "FileProcessingResult"
+):
+    """
+    Forward processed media group files to the backend.
+
+    Args:
+        reply_message: Message to reply to (first in group)
+        context: Bot context
+        user_id: Telegram user ID
+        chat_id: Telegram chat ID
+        caption: User's caption (or empty string)
+        file_result: Combined file processing result
+    """
+    redis = get_redis_client()
+    user_id_str = str(user_id)
+    processing_key = f"processing:{user_id_str}"
+
+    # Check/set processing flag
+    try:
+        is_processing = await redis.get(processing_key)
+        if is_processing:
+            await reply_message.reply_text(
+                "📝 I'm currently processing your previous message. "
+                "Please wait a moment and try again."
+            )
+            return
+
+        await redis.set(processing_key, "1", ex=180, nx=True)
+    except Exception as e:
+        logger.error(
+            "Redis error in media group processing",
+            extra={"user_id": user_id, "error": str(e)}
+        )
+
+    # Start typing indicator
+    typing_task = asyncio.create_task(keep_typing_indicator(context, chat_id))
+
+    # Build message text (use caption or default prompt)
+    message_text = caption if caption else "What do you see in these files? Please analyze them."
+
+    try:
+        backend_client = get_backend_client()
+        files_data = [f.to_dict() for f in file_result.successful]
+
+        response = await backend_client.send_message(
+            user_id=user_id,
+            message=message_text,
+            message_type="file",
+            files=files_data
+        )
+
+        conversation_id = response.get("conversation_id")
+
+        logger.info(
+            "Media group forwarded to backend",
+            extra={
+                "user_id": user_id,
+                "conversation_id": conversation_id,
+                "files_count": len(files_data),
+                "has_caption": bool(caption),
+                "event": "media_group_backend_forward"
+            }
+        )
+
+        # Stream response
+        state = get_conversation_state(user_id)
+        response_length = await stream_response_to_telegram(
+            backend_client,
+            conversation_id,
+            user_id,
+            reply_message,
+            typing_task,
+            context,
+            state
+        )
+
+        logger.info(
+            "Media group response streamed",
+            extra={
+                "user_id": user_id,
+                "response_length": response_length,
+                "event": "media_group_response_complete"
+            }
+        )
+
+    except Exception as e:
+        typing_task.cancel()
+        logger.error(
+            "Error processing media group",
+            extra={
+                "user_id": user_id,
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "event": "media_group_error"
+            },
+            exc_info=True
+        )
+        await reply_message.reply_text(
+            "Sorry, I encountered an error processing your files. Please try again."
+        )
+
+    finally:
+        # Clear processing flag
+        try:
+            await redis.delete(processing_key)
+        except Exception:
+            pass
+
+
+async def handle_file_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Handle incoming file messages (photos, documents) with authorization.
+
+    Processes files, sends acknowledgment, and forwards to backend for
+    multimodal LLM processing (Gemini native or ChatGPT fallback).
+
+    Args:
+        update: Telegram update object
+        context: Bot context
+    """
+    global auth_module
+
+    # Extract message data
+    message = update.message
+    user_id = message.from_user.id
+    chat_id = message.chat_id
+    message_id = message.message_id
+    timestamp = message.date
+    username = message.from_user.username
+
+    # Get caption if any (user's message along with the file)
+    caption = message.caption or ""
+
+    # Determine file type for logging
+    file_type = "photo" if message.photo else "document"
+
+    # Check for media group (multiple files sent at once)
+    media_group_id = message.media_group_id
+
+    # Log file message receipt
+    logger.info(
+        "File message received",
+        extra={
+            "user_id": user_id,
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "file_type": file_type,
+            "has_caption": bool(caption),
+            "caption_length": len(caption) if caption else 0,
+            "media_group_id": media_group_id,
+            "timestamp": timestamp.isoformat(),
+            "username": username,
+            "event": "file_message_received"
+        }
+    )
+
+    # Handle media groups (multiple files sent at once)
+    if media_group_id:
+        await _buffer_media_group_message(
+            media_group_id, message, caption, user_id, chat_id, context
+        )
+        return  # Processing will happen when buffer is flushed
+
+    # Authorization check (fail-fast pattern)
+    if not auth_module.is_authorized(user_id):
+        logger.warning(
+            f"UNAUTHORIZED FILE MESSAGE - User ID: {user_id}, Username: @{username or 'unknown'}",
+            extra={
+                "user_id": user_id,
+                "username": username,
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "file_type": file_type,
+                "event": "file_message_blocked"
+            }
+        )
+
+        # Send rejection message
+        await message.reply_text(auth_module.get_rejection_message())
+
+        logger.info(
+            "Rejection message sent to unauthorized user",
+            extra={
+                "user_id": user_id,
+                "event": "rejection_sent"
+            }
+        )
+        return
+
+    # User is authorized - proceed with processing
+    logger.info(
+        "File message authorized - processing",
+        extra={
+            "user_id": user_id,
+            "message_id": message_id,
+            "file_type": file_type,
+            "authorized": True,
+            "event": "file_message_authorized"
+        }
+    )
+
+    # Check if already processing another message
+    redis = get_redis_client()
+    user_id_str = str(user_id)
+    processing_key = f"processing:{user_id_str}"
+
+    try:
+        is_processing = await redis.get(processing_key)
+
+        if is_processing:
+            # Already processing - inform user that file messages can't be queued
+            logger.info(
+                "User has active request - cannot queue file message",
+                extra={
+                    "user_id": user_id,
+                    "message_id": message_id,
+                    "file_type": file_type,
+                    "event": "file_message_rejected_busy"
+                }
+            )
+
+            await message.reply_text(
+                "📝 I'm currently processing your previous message. "
+                "Files can't be queued - please wait a moment and try again."
+            )
+            return
+
+    except Exception as e:
+        # Redis error - log but continue processing (graceful degradation)
+        logger.error(
+            "Failed to check processing flag for file - proceeding",
+            extra={
+                "user_id": user_id,
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "event": "file_processing_check_failed"
+            }
+        )
+
+    # Set processing flag (atomic with NX flag)
+    try:
+        flag_set = await redis.set(processing_key, "1", ex=180, nx=True)
+
+        if not flag_set:
+            # Race condition: flag was set between check and set
+            logger.warning(
+                "Processing flag race condition for file message",
+                extra={
+                    "user_id": user_id,
+                    "event": "file_processing_flag_race"
+                }
+            )
+            await message.reply_text(
+                "📝 I'm currently processing another message. "
+                "Please wait a moment and try again."
+            )
+            return
+
+        logger.debug(
+            "Processing flag set for file message",
+            extra={
+                "user_id": user_id,
+                "ttl_seconds": 180,
+                "event": "file_processing_flag_set"
+            }
+        )
+    except Exception as e:
+        # Redis error - log but continue (graceful degradation)
+        logger.error(
+            "Failed to set processing flag for file - continuing anyway",
+            extra={
+                "user_id": user_id,
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "event": "file_processing_flag_set_failed"
+            }
+        )
+
+    # Process files from message
+    file_result = await process_message_files(message, context)
+
+    # Handle case where all files failed
+    if file_result.all_failed:
+        # Clear processing flag
+        try:
+            await redis.delete(processing_key)
+        except Exception:
+            pass
+
+        # Send error message for first failure
+        error_msg = format_partial_success_acknowledgment(file_result)
+        await message.reply_text(error_msg)
+
+        logger.warning(
+            "All files failed to process",
+            extra={
+                "user_id": user_id,
+                "failed_count": len(file_result.failed),
+                "errors": [e.to_dict() for e in file_result.failed],
+                "event": "all_files_failed"
+            }
+        )
+
+        # If there's a caption, process it as a text message without files
+        if caption:
+            logger.info(
+                "Processing caption as text-only message after file failures",
+                extra={
+                    "user_id": user_id,
+                    "caption_length": len(caption),
+                    "event": "caption_fallback"
+                }
+            )
+            # Graceful degradation: send caption as text-only
+            # Reset processing flag was already cleared, continue with text
+            await _process_text_with_files(
+                message, context, user_id, chat_id, caption, None, redis, processing_key
+            )
+        return
+
+    # Files processed (at least some successful)
+    # Send acknowledgment message
+    ack_message = format_partial_success_acknowledgment(file_result)
+    status_msg = await message.reply_text(ack_message)
+
+    logger.info(
+        "File acknowledgment sent",
+        extra={
+            "user_id": user_id,
+            "successful_count": len(file_result.successful),
+            "failed_count": len(file_result.failed),
+            "total_size_bytes": sum(f.size_bytes for f in file_result.successful),
+            "event": "file_acknowledgment_sent"
+        }
+    )
+
+    # Get or create conversation state
+    state = get_conversation_state(user_id)
+    state["status_message_id"] = status_msg.message_id
+
+    # Start typing indicator
+    typing_task = asyncio.create_task(keep_typing_indicator(context, chat_id))
+
+    # Build message content (use caption or default prompt)
+    message_text = caption if caption else "What do you see in this file? Please analyze it."
+
+    # Forward message to backend with files
+    try:
+        # Get backend client
+        backend_client = get_backend_client()
+
+        # Convert FileAttachments to dicts for JSON transport
+        files_data = [f.to_dict() for f in file_result.successful]
+
+        # Send message to backend with files
+        response = await backend_client.send_message(
+            user_id=user_id,
+            message=message_text,
+            message_type="file",
+            files=files_data
+        )
+
+        conversation_id = response.get("conversation_id")
+
+        logger.info(
+            "File message forwarded to backend successfully",
+            extra={
+                "user_id": user_id,
+                "conversation_id": conversation_id,
+                "files_count": len(files_data),
+                "total_size_bytes": sum(f.size_bytes for f in file_result.successful),
+                "event": "file_backend_forward_success"
+            }
+        )
+
+        # Stream response back to user (with first-token timeout enforcement)
+        try:
+            response_length = await stream_response_to_telegram(
+                backend_client,
+                conversation_id,
+                user_id,
+                message,
+                typing_task,
+                context,
+                state
+            )
+        except asyncio.TimeoutError:
+            # First token timeout - cancel typing and inform user
+            typing_task.cancel()
+            try:
+                await typing_task
+            except asyncio.CancelledError:
+                pass
+
+            logger.error(
+                "First token timeout exceeded for file message",
+                extra={
+                    "user_id": user_id,
+                    "conversation_id": conversation_id,
+                    "event": "file_first_token_timeout"
+                }
+            )
+
+            await message.reply_text(
+                "Sorry, the response is taking longer than expected. "
+                "Please try again or rephrase your question."
+            )
+            return
+
+        logger.info(
+            "File message processing complete",
+            extra={
+                "user_id": user_id,
+                "message_id": message_id,
+                "conversation_id": conversation_id,
+                "file_type": file_type,
+                "files_count": len(file_result.successful),
+                "response_length": response_length,
+                "event": "file_message_processed"
+            }
+        )
+
+        # Clear processing flag and check for pending messages
+        try:
+            await redis.delete(processing_key)
+            logger.debug(
+                "Processing flag cleared after file message",
+                extra={
+                    "user_id": user_id,
+                    "event": "file_processing_flag_cleared"
+                }
+            )
+        except Exception as e:
+            logger.error(
+                "Failed to clear processing flag after file",
+                extra={
+                    "user_id": user_id,
+                    "error": str(e),
+                    "event": "file_processing_flag_clear_failed"
+                }
+            )
+
+        # Check for pending text messages and process them
+        try:
+            pending = await get_and_clear_pending(redis, user_id_str)
+            if pending:
+                logger.info(
+                    "Pending messages detected after file - starting auto-pickup",
+                    extra={
+                        "user_id": user_id,
+                        "pending_length": len(pending),
+                        "event": "file_pending_auto_pickup"
+                    }
+                )
+                # Process pending messages recursively
+                await handle_pending_messages(user_id, chat_id, pending, context)
+        except Exception as e:
+            logger.error(
+                "Failed to check/process pending after file",
+                extra={
+                    "user_id": user_id,
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "event": "file_pending_check_failed"
+                }
+            )
+
+    except Exception as e:
+        # Cancel typing indicator on error
+        typing_task.cancel()
+        try:
+            await typing_task
+        except asyncio.CancelledError:
+            pass
+
+        # Clear processing flag on error
+        try:
+            await redis.delete(processing_key)
+            logger.debug(
+                "Processing flag cleared for file (error path)",
+                extra={
+                    "user_id": user_id,
+                    "event": "file_processing_flag_cleared_error"
+                }
+            )
+        except Exception:
+            pass  # Ignore errors during cleanup
+
+        # Backend error - send user-friendly error message
+        logger.error(
+            "Failed to process file message via backend",
+            extra={
+                "user_id": user_id,
+                "message_id": message_id,
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "event": "file_processing_failed"
+            },
+            exc_info=True
+        )
+
+        # Send error message to user
+        await message.reply_text(
+            "Sorry, I'm having trouble processing your file right now. "
+            "Please try again in a moment."
+        )
+
+        logger.info(
+            "Error message sent to user",
+            extra={
+                "user_id": user_id,
+                "event": "error_message_sent"
+            }
+        )
+
+        # Still check for pending messages even after error
+        try:
+            pending = await get_and_clear_pending(redis, user_id_str)
+            if pending:
+                logger.info(
+                    "Pending messages found after file error - processing",
+                    extra={
+                        "user_id": user_id,
+                        "event": "file_pending_after_error"
+                    }
+                )
+                await handle_pending_messages(user_id, chat_id, pending, context)
+        except Exception:
+            pass  # Ignore errors in pending check after error
+
+
+async def _process_text_with_files(
+    message: TelegramMessage,
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id: int,
+    chat_id: int,
+    message_text: str,
+    files_data: Optional[list],
+    redis,
+    processing_key: str
+):
+    """
+    Internal helper to process a text message with optional file attachments.
+
+    This is used for graceful degradation when files fail but caption is present.
+
+    Args:
+        message: Telegram message object
+        context: Bot context
+        user_id: User ID
+        chat_id: Chat ID
+        message_text: Message text content
+        files_data: Optional list of file dicts (or None for text-only)
+        redis: Redis client
+        processing_key: Redis key for processing flag
+    """
+    # Set processing flag
+    try:
+        await redis.set(processing_key, "1", ex=180, nx=True)
+    except Exception:
+        pass
+
+    # Get or create conversation state
+    state = get_conversation_state(user_id)
+
+    # Send status message
+    status_msg = await message.reply_text("🔄 Annie is thinking...")
+    state["status_message_id"] = status_msg.message_id
+
+    # Start typing indicator
+    typing_task = asyncio.create_task(keep_typing_indicator(context, chat_id))
+
+    try:
+        # Get backend client
+        backend_client = get_backend_client()
+
+        # Send message to backend (with or without files)
+        response = await backend_client.send_message(
+            user_id=user_id,
+            message=message_text,
+            message_type="text" if not files_data else "file",
+            files=files_data
+        )
+
+        conversation_id = response.get("conversation_id")
+
+        # Stream response
+        response_length = await stream_response_to_telegram(
+            backend_client,
+            conversation_id,
+            user_id,
+            message,
+            typing_task,
+            context,
+            state
+        )
+
+        logger.info(
+            "Text-with-files message processed",
+            extra={
+                "user_id": user_id,
+                "conversation_id": conversation_id,
+                "response_length": response_length,
+                "had_files": bool(files_data),
+                "event": "text_with_files_processed"
+            }
+        )
+
+    except Exception as e:
+        typing_task.cancel()
+        try:
+            await typing_task
+        except asyncio.CancelledError:
+            pass
+
+        logger.error(
+            "Failed to process text-with-files message",
+            extra={
+                "user_id": user_id,
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "event": "text_with_files_failed"
+            }
+        )
+
+        await message.reply_text(
+            "Sorry, I'm having trouble processing your message right now. "
+            "Please try again in a moment."
+        )
+
+    finally:
+        # Clear processing flag
+        try:
+            await redis.delete(processing_key)
+        except Exception:
+            pass

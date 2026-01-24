@@ -1,6 +1,11 @@
 #!/bin/bash
 # Annie Docker Startup Script
 # Checks Docker installation, creates .env if missing, and starts services
+# Supports environment modes: dev (default) and prod (with Grafana Loki logging)
+#
+# Usage:
+#   ./run_docker.sh           # Development mode (default)
+#   ENV=prod ./run_docker.sh  # Production mode with Loki logging
 
 set -e  # Exit on error
 
@@ -135,23 +140,94 @@ validate_env() {
     else
         echo -e "${GREEN}✓ Required environment variables are set${NC}"
     fi
+
+    # Set ENV from ENVIRONMENT variable in .env (for production logging detection)
+    # Priority: ENV shell variable > ENVIRONMENT from .env > default "dev"
+    if [ -z "$ENV" ]; then
+        ENV="${ENVIRONMENT:-dev}"
+    fi
+    export ENV
+}
+
+# Function: Check if Loki Docker plugin is installed, install if missing (production only)
+check_loki_plugin() {
+    if docker plugin ls 2>/dev/null | grep -q "loki.*true"; then
+        echo -e "${GREEN}✓ Loki Docker plugin installed and enabled${NC}"
+        return 0
+    fi
+
+    # Check if plugin exists but is disabled
+    if docker plugin ls 2>/dev/null | grep -q "loki.*false"; then
+        echo -e "${YELLOW}Loki plugin found but disabled. Enabling...${NC}"
+        if docker plugin enable loki 2>/dev/null; then
+            echo -e "${GREEN}✓ Loki Docker plugin enabled${NC}"
+            return 0
+        else
+            echo -e "${RED}Error: Failed to enable Loki plugin${NC}"
+            exit 1
+        fi
+    fi
+
+    # Plugin not installed - install it
+    echo -e "${YELLOW}Loki Docker plugin not found. Installing...${NC}"
+    echo ""
+    if docker plugin install grafana/loki-docker-driver:latest --alias loki --grant-all-permissions; then
+        echo ""
+        echo -e "${GREEN}✓ Loki Docker plugin installed successfully${NC}"
+        return 0
+    else
+        echo -e "${RED}Error: Failed to install Loki Docker plugin${NC}"
+        echo ""
+        echo "You can try manually:"
+        echo "  docker plugin install grafana/loki-docker-driver:latest --alias loki --grant-all-permissions"
+        echo ""
+        echo "Or run in dev mode: ENV=dev make start"
+        exit 1
+    fi
+}
+
+# Function: Validate production-specific environment variables
+validate_prod_env() {
+    if [ -z "$LOKI_URL" ] || [ "$LOKI_URL" = "REPLACE_ME" ]; then
+        echo -e "${RED}Error: LOKI_URL required for production mode${NC}"
+        echo ""
+        echo "Set in .env:"
+        echo "  LOKI_URL=https://<user-id>:<api-key>@logs-prod-us-central1.grafana.net/loki/api/v1/push"
+        echo ""
+        echo "Get your URL from: Grafana Cloud -> Connections -> Hosted Logs -> Loki -> Details"
+        echo ""
+        echo "Or run in dev mode: ENV=dev make start"
+        exit 1
+    fi
+    echo -e "${GREEN}✓ LOKI_URL configured${NC}"
 }
 
 # Function: Start Docker services
 start_services() {
     echo ""
-    echo -e "${GREEN}Starting Annie services...${NC}"
-    echo ""
 
-    # Run docker-compose up in detached mode
-    $COMPOSE_CMD up --build -d "$@"
+    if [ "$ENV" = "prod" ]; then
+        echo -e "${GREEN}Starting Annie services (${YELLOW}production${GREEN} mode)...${NC}"
+        echo ""
+        # Production mode: use base + prod override for Loki logging
+        $COMPOSE_CMD -f docker-compose.yml -f docker-compose.prod.yml up --build -d "$@"
+        echo ""
+        echo -e "${GREEN}✓ Services started with Loki logging enabled${NC}"
+        echo ""
+        echo "View logs at: https://grafana.com (your Grafana Cloud dashboard)"
+    else
+        echo -e "${GREEN}Starting Annie services (${YELLOW}development${GREEN} mode)...${NC}"
+        echo ""
+        # Development mode: use base compose only
+        $COMPOSE_CMD up --build -d "$@"
+        echo ""
+        echo -e "${GREEN}✓ Services started in development mode${NC}"
+    fi
 
     echo ""
-    echo -e "${GREEN}✓ Services started in detached mode${NC}"
-    echo ""
-    echo "Use 'docker compose logs -f' to view logs"
-    echo "Use 'docker compose ps' to check service status"
-    echo "Use 'docker compose down' to stop services"
+    echo "Use 'make logs' to view logs"
+    echo "Use 'make stop' to stop services"
+    echo "Use 'make health' to check service status"
 }
 
 # Main execution
@@ -160,7 +236,17 @@ main() {
     check_docker_compose
     create_env_file
     validate_env
-    
+
+    # Production-specific checks
+    if [ "$ENV" = "prod" ]; then
+        echo ""
+        echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo -e "${YELLOW}Production mode enabled (ENV=prod)${NC}"
+        echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        check_loki_plugin
+        validate_prod_env
+    fi
+
     # Start services with any additional arguments passed to script
     start_services "$@"
 }

@@ -6,6 +6,7 @@ via the agentic-memories service.
 """
 
 import asyncio
+import json
 import time
 from typing import Any, Dict
 
@@ -316,6 +317,25 @@ async def update_user_profile_tool_handler(
     """
     start_time = time.time()
 
+    # Parse JSON strings into Python objects if needed
+    # (Gemini sends value as string per schema, may contain JSON arrays/objects)
+    parsed_value = value
+    if isinstance(value, str):
+        stripped = value.strip()
+        # Try to parse JSON if it looks like an array or object
+        if (stripped.startswith('[') and stripped.endswith(']')) or \
+           (stripped.startswith('{') and stripped.endswith('}')):
+            try:
+                parsed_value = json.loads(stripped)
+                logger.debug(
+                    "Parsed JSON value for profile update",
+                    extra={"original": value[:100], "parsed_type": type(parsed_value).__name__}
+                )
+            except json.JSONDecodeError:
+                # Keep as string if parsing fails
+                pass
+    value = parsed_value
+
     # Validate category against allowed list
     if category not in ALLOWED_PROFILE_CATEGORIES:
         logger.warning(
@@ -603,10 +623,12 @@ update_user_profile_tool = {
                 )
             },
             "value": {
+                "type": "string",
                 "description": (
-                    "New value. Use string for simple fields, arrays for lists "
-                    "(e.g., hobbies: ['hiking', 'reading']), objects for structured data "
-                    "(e.g., spouse: {'name': 'Jane', 'occupation': 'engineer'})"
+                    "New value as a JSON string. For simple values use the value directly "
+                    "(e.g., 'vegetarian'). For arrays use JSON array format "
+                    "(e.g., '[\"hiking\", \"reading\"]'). For objects use JSON object format "
+                    "(e.g., '{\"name\": \"Jane\", \"occupation\": \"engineer\"}')"
                 )
             },
             "reason": {

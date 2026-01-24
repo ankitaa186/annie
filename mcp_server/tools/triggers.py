@@ -406,8 +406,8 @@ CRITICAL RULES:
                 "description": "MUST be 'scheduled' or 'condition'. Use 'scheduled' for ALL time-based triggers (both one-time and recurring - set schedule.mode='once' or 'cron'). Use 'condition' for event-based alerts. NEVER use 'once' or 'cron' here - those go in schedule.mode."
             },
             "action_context": {
-                "type": "object",
-                "description": "Comprehensive briefing for wake-up LLM with all execution guidance"
+                "type": "string",
+                "description": "JSON string with briefing for wake-up LLM. Must include: original_request, intent_summary, execution_instructions, message_guidance."
             },
             "schedule": {
                 "type": "object",
@@ -541,6 +541,10 @@ async def list_triggers_tool_handler(
                     triggers = result
                 else:
                     triggers = result.get("intents", [])
+
+                # Client-side filtering for disabled triggers (API doesn't filter properly)
+                if not include_disabled:
+                    triggers = [t for t in triggers if t.get("enabled", False)]
 
                 logger.info(
                     "Triggers listed successfully via MCP tool",

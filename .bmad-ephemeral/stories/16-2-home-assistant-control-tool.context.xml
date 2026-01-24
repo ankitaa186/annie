@@ -1,0 +1,303 @@
+<story-context id="16-2-home-assistant-control-tool" v="1.0">
+  <metadata>
+    <epicId>16</epicId>
+    <storyId>2</storyId>
+    <title>Home Assistant Control Tool (Allowlist-Enforced)</title>
+    <status>drafted</status>
+    <generatedAt>2026-01-10</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>.bmad-ephemeral/stories/16-2-home-assistant-control-tool.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>user of Annie</asA>
+    <iWant>to control my Home Assistant entities (lights, switches, climate, covers) through voice commands</iWant>
+    <soThat>Annie can execute actions like "Turn on the living room lights" or "Set the thermostat to 72" with proper security enforcement</soThat>
+    <tasks>
+      <task n="1" title="Implement AllowlistValidator Class">
+        <description>Create AllowlistValidator class in mcp_server/tools/home_assistant.py</description>
+        <subtasks>
+          <subtask>Parse HA_CONTROL_ALLOWLIST env var (comma-separated)</subtask>
+          <subtask>Implement is_allowed(entity_id: str) -> bool method</subtask>
+          <subtask>Handle exact match: "light.living_room" matches "light.living_room"</subtask>
+          <subtask>Handle wildcard: "light.*" matches any "light.xxx"</subtask>
+          <subtask>Handle empty allowlist: return False for all entities</subtask>
+          <subtask>Implement get_allowed_list() -> List[str] for error messages</subtask>
+        </subtasks>
+        <ac>AC #1, #2, #3, #4</ac>
+      </task>
+      <task n="2" title="Implement Control Methods in HomeAssistantClient">
+        <description>Add control methods to reuse HomeAssistantClient from Story 16.1</description>
+        <subtasks>
+          <subtask>Add call_service(domain, service, entity_id, data) -> dict method</subtask>
+          <subtask>POST /api/services/{domain}/{service} with Bearer auth</subtask>
+          <subtask>Implement get_domain_from_entity(entity_id: str) -> str helper</subtask>
+          <subtask>Implement map_action_to_service(action, entity_id) -> tuple[domain, service, data]</subtask>
+          <subtask>Handle all 7 action types: turn_on, turn_off, toggle, set_brightness, set_temperature, set_hvac_mode, set_position</subtask>
+        </subtasks>
+        <ac>AC #6, #7</ac>
+      </task>
+      <task n="3" title="Create MCP Tool Handler">
+        <description>Create home_assistant_control tool function</description>
+        <subtasks>
+          <subtask>Define input schema with entity_id, action, parameters</subtask>
+          <subtask>Check allowlist BEFORE making any API call</subtask>
+          <subtask>If denied: return FORBIDDEN with allowed entities list</subtask>
+          <subtask>If allowed: Get current state first (for previous_state)</subtask>
+          <subtask>Call the service</subtask>
+          <subtask>Get new state after (for new_state)</subtask>
+          <subtask>Format success response: status, provider, entity_id, action, parameters, previous_state, new_state</subtask>
+          <subtask>Add structured logging with allowed=true/false</subtask>
+        </subtasks>
+        <ac>AC #5, #7, #8</ac>
+      </task>
+      <task n="4" title="Write Unit Tests">
+        <description>Create tests in mcp_server/tests/test_home_assistant_control.py</description>
+        <subtasks>
+          <subtask>test_allowlist_parsing() - comma-separated parsing</subtask>
+          <subtask>test_allowlist_exact_match() - exact entity match</subtask>
+          <subtask>test_allowlist_wildcard_match() - domain wildcard</subtask>
+          <subtask>test_allowlist_empty_blocks_all() - empty list behavior</subtask>
+          <subtask>test_control_allowed_entity() - successful control</subtask>
+          <subtask>test_control_forbidden_entity() - denied with allowed list</subtask>
+          <subtask>test_control_turn_on/off/toggle() - action mapping tests</subtask>
+          <subtask>test_control_set_brightness() - brightness with parameters</subtask>
+          <subtask>test_control_set_temperature() - climate control</subtask>
+          <subtask>test_control_set_hvac_mode() - HVAC mode</subtask>
+          <subtask>test_control_set_position() - cover position</subtask>
+          <subtask>test_control_returns_states() - previous/new state</subtask>
+          <subtask>test_audit_logging() - verify log fields</subtask>
+        </subtasks>
+        <ac>AC #9</ac>
+      </task>
+      <task n="5" title="Tool Registration (Deferred to Story 16.5)">
+        <description>Prepare tool for export in mcp_server/tools/__init__.py</description>
+        <note>Actual registration happens in Story 16.5</note>
+      </task>
+    </tasks>
+  </story>
+
+  <acceptanceCriteria>
+    <criterion id="AC1" title="Allowlist Parsing">
+      <given>The HA_CONTROL_ALLOWLIST environment variable is set</given>
+      <when>The tool initializes</when>
+      <then>The allowlist is parsed into a list of allowed entity patterns</then>
+      <testable>Set HA_CONTROL_ALLOWLIST="light.living_room,switch.fan", verify parsing returns 2 entries</testable>
+    </criterion>
+    <criterion id="AC2" title="Exact Match Allowlist">
+      <given>An entity ID "light.living_room" in the allowlist</given>
+      <when>A control request is made for "light.living_room"</when>
+      <then>The request is allowed and executed</then>
+      <testable>Control exact-match entity, verify success response</testable>
+    </criterion>
+    <criterion id="AC3" title="Wildcard Allowlist Support">
+      <given>A pattern "light.*" in the allowlist</given>
+      <when>A control request is made for "light.bedroom" or "light.kitchen"</when>
+      <then>The request is allowed for any entity in the "light" domain</then>
+      <testable>Control "light.any_room" with "light.*" in allowlist, verify success</testable>
+    </criterion>
+    <criterion id="AC4" title="Empty Allowlist Blocks All Control">
+      <given>HA_CONTROL_ALLOWLIST is empty or not set</given>
+      <when>Any control request is made</when>
+      <then>The request returns FORBIDDEN error with message explaining all control is disabled</then>
+      <testable>Unset HA_CONTROL_ALLOWLIST, attempt control, verify FORBIDDEN</testable>
+    </criterion>
+    <criterion id="AC5" title="FORBIDDEN Error Includes Allowed Entities">
+      <given>An entity "light.bedroom" NOT in the allowlist</given>
+      <when>A control request is made for that entity</when>
+      <then>The error response includes the list of actually allowed entities</then>
+      <testable>Control non-allowed entity, verify error_message contains allowed list</testable>
+    </criterion>
+    <criterion id="AC6" title="Action to Service Mapping">
+      <given>Control actions (turn_on, turn_off, toggle, set_brightness, set_temperature, set_position, set_hvac_mode)</given>
+      <when>The tool executes an action</when>
+      <then>The action maps to the correct Home Assistant service call</then>
+      <testable>Test each action maps to correct POST /api/services/{domain}/{service}</testable>
+    </criterion>
+    <criterion id="AC7" title="Previous and New State in Response">
+      <given>A successful control operation</given>
+      <when>The operation completes</when>
+      <then>The response includes previous_state (before action) and new_state (after action)</then>
+      <testable>Control a light, verify response has both state fields</testable>
+    </criterion>
+    <criterion id="AC8" title="Audit Logging for All Attempts">
+      <given>Any control request (allowed or denied)</given>
+      <when>The request is processed</when>
+      <then>Structured logs include: tool_name, entity_id, action, allowed (true/false), duration_ms</then>
+      <testable>Check logs after allowed and denied requests, verify all fields present</testable>
+    </criterion>
+    <criterion id="AC9" title="Unit Tests for Allowlist and Control">
+      <given>The tool implementation</given>
+      <when>Unit tests are run</when>
+      <then>All test cases pass with >90% code coverage</then>
+      <testable>Run pytest with coverage, verify threshold met</testable>
+    </criterion>
+  </acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc>
+        <path>docs/epics/epic-16-home-assistant-integration.md</path>
+        <title>Epic 16: Home Assistant Integration</title>
+        <section>Story 16.2 Definition</section>
+        <snippet>Implement home_assistant_control MCP tool with mandatory allowlist enforcement. Supports turn_on, turn_off, toggle, set_brightness, set_temperature, set_position, set_hvac_mode actions.</snippet>
+      </doc>
+      <doc>
+        <path>.bmad-ephemeral/stories/tech-spec-epic-16.md</path>
+        <title>Epic 16 Technical Specification</title>
+        <section>Detailed Design</section>
+        <snippet>Control Tool Response format includes status, provider, entity_id, action, parameters, previous_state, new_state. FORBIDDEN error returns allowed entities list for transparency.</snippet>
+      </doc>
+      <doc>
+        <path>.bmad-ephemeral/stories/16-1-home-assistant-query-tool.md</path>
+        <title>Story 16.1: Home Assistant Query Tool</title>
+        <section>HomeAssistantClient Base Class</section>
+        <snippet>Prerequisite story. Creates HomeAssistantClient class with httpx async client, Bearer auth, timeout handling, and error response format (CONFIG_ERROR, UNAUTHORIZED, TIMEOUT, NETWORK_ERROR).</snippet>
+      </doc>
+      <doc>
+        <path>CLAUDE.md</path>
+        <title>Project Instructions</title>
+        <section>MCP Server Communication</section>
+        <snippet>MCP Server tools follow JSON-RPC 2.0 protocol. Tools registered in mcp_server/tools/__init__.py. All services use structured logging with tool_name, duration_ms, status fields.</snippet>
+      </doc>
+    </docs>
+
+    <code>
+      <artifact>
+        <path>mcp_server/tools/web_search.py</path>
+        <kind>tool module</kind>
+        <symbol>web_search_tool_handler, web_search_tool</symbol>
+        <reason>Reference implementation for MCP tool pattern: async handler function, tool schema dict with name/description/inputSchema/handler, structured logging with duration_ms</reason>
+      </artifact>
+      <artifact>
+        <path>mcp_server/tools/__init__.py</path>
+        <kind>registry</kind>
+        <symbol>__all__ exports</symbol>
+        <reason>Shows how tools are exported from the package. Story 16.2 tool will be added here in Story 16.5.</reason>
+      </artifact>
+      <artifact>
+        <path>mcp_server/config.py</path>
+        <kind>configuration</kind>
+        <symbol>get_config, SENSITIVE_VARS, validate_environment</symbol>
+        <reason>Pattern for loading env vars. HA_ACCESS_TOKEN will be added to SENSITIVE_VARS. get_config() returns config dict for tool handlers.</reason>
+      </artifact>
+      <artifact>
+        <path>mcp_server/tests/test_web_search_tool.py</path>
+        <kind>test</kind>
+        <symbol>TestWebSearchToolHandler, TestWebSearchToolSchema</symbol>
+        <reason>Reference test pattern: pytest-asyncio, Mock/AsyncMock, patching httpx.AsyncClient, testing handler + schema validation</reason>
+      </artifact>
+      <artifact>
+        <path>mcp_server/logging.py</path>
+        <kind>logging</kind>
+        <symbol>get_logger</symbol>
+        <reason>Logger factory for structured logging. Use get_logger(__name__) for tool modules.</reason>
+      </artifact>
+    </code>
+
+    <dependencies>
+      <python>
+        <package name="httpx" version=">=0.24.0" note="Already present - async HTTP client for HA REST API"/>
+        <package name="pytest" version=">=9.0.0" note="Already present - testing framework"/>
+        <package name="pytest-asyncio" version=">=1.3.0" note="Already present - async test support"/>
+      </python>
+      <environment>
+        <var name="HA_URL" required="true" example="http://192.168.1.x:8123" note="Home Assistant base URL"/>
+        <var name="HA_ACCESS_TOKEN" required="true" sensitive="true" note="Long-lived access token from HA"/>
+        <var name="HA_CONTROL_ALLOWLIST" required="false" example="light.*,switch.fan" note="Comma-separated entity patterns. Empty = block all control."/>
+        <var name="HA_TIMEOUT" required="false" default="10" note="Request timeout in seconds"/>
+      </environment>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint type="security" critical="true">
+      NEVER bypass the allowlist check. Allowlist validation MUST occur BEFORE any API call to Home Assistant.
+    </constraint>
+    <constraint type="security">
+      Empty allowlist (HA_CONTROL_ALLOWLIST="" or unset) MUST block ALL control operations with FORBIDDEN error.
+    </constraint>
+    <constraint type="audit">
+      All control attempts (allowed AND denied) MUST be logged with allowed=true/false field for audit trail.
+    </constraint>
+    <constraint type="architecture">
+      Extend HomeAssistantClient from Story 16.1. Add call_service() method to existing class. Do not duplicate HTTP client logic.
+    </constraint>
+    <constraint type="response">
+      Control response MUST include previous_state and new_state. Get state before call, get state after call.
+    </constraint>
+    <constraint type="pattern">
+      Follow existing MCP tool patterns: async handler function, tool dict with name/description/inputSchema/handler, structured logging.
+    </constraint>
+  </constraints>
+
+  <interfaces>
+    <interface>
+      <name>Home Assistant REST API - Call Service</name>
+      <kind>REST endpoint</kind>
+      <signature>POST /api/services/{domain}/{service} - Body: {"entity_id": "string", ...params}</signature>
+      <path>External - Home Assistant instance</path>
+      <auth>Authorization: Bearer {HA_ACCESS_TOKEN}</auth>
+    </interface>
+    <interface>
+      <name>Home Assistant REST API - Get State</name>
+      <kind>REST endpoint</kind>
+      <signature>GET /api/states/{entity_id} - Returns entity state, attributes, last_changed</signature>
+      <path>External - Home Assistant instance</path>
+      <note>Reuse from Story 16.1 HomeAssistantClient.get_entity_state()</note>
+    </interface>
+    <interface>
+      <name>home_assistant_control Tool Schema</name>
+      <kind>MCP tool</kind>
+      <signature>{name, description, inputSchema: {entity_id: string, action: enum, parameters: object}, handler: async function}</signature>
+      <path>mcp_server/tools/home_assistant.py</path>
+    </interface>
+    <interface>
+      <name>AllowlistValidator Class</name>
+      <kind>class interface</kind>
+      <signature>AllowlistValidator(allowlist_str: str) - is_allowed(entity_id: str) -> bool, get_allowed_list() -> List[str]</signature>
+      <path>mcp_server/tools/home_assistant.py</path>
+    </interface>
+    <interface>
+      <name>Action to Service Mapping</name>
+      <kind>mapping table</kind>
+      <signature>ACTION_MAP: {turn_on/turn_off/toggle -> domain.turn_on/turn_off/toggle, set_brightness -> light.turn_on with brightness, set_temperature/set_hvac_mode -> climate.*, set_position -> cover.set_cover_position}</signature>
+      <path>mcp_server/tools/home_assistant.py</path>
+    </interface>
+  </interfaces>
+
+  <tests>
+    <standards>
+      Tests follow pytest patterns established in Epic 15. Use pytest-asyncio for async handler tests.
+      Mock httpx.AsyncClient with AsyncMock for HTTP calls. Use unittest.mock.patch for get_config()
+      and environment variables. Test both success paths and error scenarios (FORBIDDEN, allowlist
+      violations). Target >90% code coverage per project standards.
+    </standards>
+    <locations>
+      <location>mcp_server/tests/test_home_assistant_control.py</location>
+    </locations>
+    <ideas>
+      <idea ac="AC1">test_allowlist_parsing_comma_separated - parse "light.living_room,switch.fan" into 2 entries</idea>
+      <idea ac="AC1">test_allowlist_parsing_whitespace_trim - handle "light.a, switch.b " with spaces</idea>
+      <idea ac="AC2">test_allowlist_exact_match_allowed - "light.living_room" in list, control "light.living_room"</idea>
+      <idea ac="AC2">test_allowlist_exact_match_denied - "light.living_room" in list, control "light.bedroom" fails</idea>
+      <idea ac="AC3">test_allowlist_wildcard_matches_any - "light.*" allows "light.bedroom", "light.kitchen"</idea>
+      <idea ac="AC3">test_allowlist_wildcard_different_domain_denied - "light.*" does not allow "switch.fan"</idea>
+      <idea ac="AC4">test_empty_allowlist_blocks_all - HA_CONTROL_ALLOWLIST="" returns FORBIDDEN for any entity</idea>
+      <idea ac="AC4">test_unset_allowlist_blocks_all - no HA_CONTROL_ALLOWLIST env var returns FORBIDDEN</idea>
+      <idea ac="AC5">test_forbidden_error_includes_allowed_list - error_message contains allowed entities</idea>
+      <idea ac="AC6">test_action_mapping_turn_on - turn_on -> {domain}.turn_on</idea>
+      <idea ac="AC6">test_action_mapping_turn_off - turn_off -> {domain}.turn_off</idea>
+      <idea ac="AC6">test_action_mapping_toggle - toggle -> {domain}.toggle</idea>
+      <idea ac="AC6">test_action_mapping_set_brightness - set_brightness -> light.turn_on with brightness param</idea>
+      <idea ac="AC6">test_action_mapping_set_temperature - set_temperature -> climate.set_temperature</idea>
+      <idea ac="AC6">test_action_mapping_set_hvac_mode - set_hvac_mode -> climate.set_hvac_mode</idea>
+      <idea ac="AC6">test_action_mapping_set_position - set_position -> cover.set_cover_position</idea>
+      <idea ac="AC7">test_success_response_includes_previous_state - verify previous_state in response</idea>
+      <idea ac="AC7">test_success_response_includes_new_state - verify new_state in response</idea>
+      <idea ac="AC8">test_audit_log_allowed_request - log includes allowed=true, entity_id, action, duration_ms</idea>
+      <idea ac="AC8">test_audit_log_denied_request - log includes allowed=false, entity_id, action</idea>
+      <idea ac="AC9">test_coverage_threshold - pytest --cov reports >90%</idea>
+    </ideas>
+  </tests>
+</story-context>

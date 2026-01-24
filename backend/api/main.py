@@ -157,12 +157,25 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     Provides detailed validation error information for debugging while
     maintaining security (no internal implementation details exposed).
     """
+    # Convert errors to JSON-serializable format
+    # Pydantic v2 errors may contain non-serializable exception objects in 'ctx'
+    serializable_errors = []
+    for error in exc.errors():
+        err = dict(error)
+        # Convert ctx errors to string representations
+        if "ctx" in err and isinstance(err["ctx"], dict):
+            err["ctx"] = {
+                k: str(v) if not isinstance(v, (str, int, float, bool, list, dict, type(None))) else v
+                for k, v in err["ctx"].items()
+            }
+        serializable_errors.append(err)
+
     logger.warning(
         "Request validation failed",
         extra={
             "method": request.method,
             "path": request.url.path,
-            "errors": exc.errors(),
+            "errors": serializable_errors,
             "client_host": request.client.host if request.client else None
         }
     )
@@ -173,7 +186,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             "error": {
                 "code": "VALIDATION_ERROR",
                 "message": "Invalid request data. Please check your input.",
-                "details": exc.errors(),
+                "details": serializable_errors,
                 "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             }
         }
@@ -416,14 +429,67 @@ def check_langfuse_health() -> Dict[str, Any]:
         }
 
 
+def check_cloud_logging_health() -> Dict[str, Any]:
+    """Check cloud logging (Grafana Loki) configuration status.
+
+    Returns:
+        Dictionary with cloud logging status including enabled, provider, and configured.
+    """
+    import os
+
+    env = os.environ.get("ENV", "dev")
+    loki_url = os.environ.get("LOKI_URL", "")
+
+    if env != "prod":
+        return {
+            "enabled": False,
+            "provider": None,
+            "status": "disabled",
+            "note": "Cloud logging only active in production (ENV=prod)"
+        }
+
+    # Production mode
+    if loki_url and loki_url != "REPLACE_ME":
+        return {
+            "enabled": True,
+            "provider": "grafana_loki",
+            "status": "configured"
+        }
+    else:
+        return {
+            "enabled": True,
+            "provider": "grafana_loki",
+            "status": "not_configured",
+            "note": "LOKI_URL not set - logs not being shipped to Grafana Cloud"
+        }
+
+
 @app.on_event("startup")
 async def startup_event():
     """Application startup handler."""
     import asyncio
+    from api.config import is_mqtt_configured, validate_mqtt_config, HA_MQTT_BROKER
+
     logger.info("Annie Backend API starting up...")
     logger.info(f"Environment: {config.get('ENVIRONMENT', 'unknown')}")
     logger.info(f"Log level: {config.get('LOG_LEVEL', 'INFO')}")
     logger.info(f"MCP Server URL: {config.get('MCP_SERVER_URL', 'not configured')}")
+
+    # Epic 16: Log MQTT configuration status once at startup
+    if HA_MQTT_BROKER:
+        mqtt_issues = validate_mqtt_config()
+        if mqtt_issues:
+            logger.warning(
+                f"MQTT configuration issues: {', '.join(mqtt_issues)}. "
+                "MQTT subscriber may not work correctly."
+            )
+        else:
+            logger.info("Home Assistant MQTT subscriber configured and ready.")
+    else:
+        logger.info(
+            "Home Assistant MQTT not configured (HA_MQTT_BROKER empty). "
+            "MQTT subscriber will be skipped."
+        )
 
     # Initialize Langfuse client to ensure environment variables are set for decorators
     try:
@@ -489,7 +555,8 @@ async def full_health_check() -> JSONResponse:
         "llm_api": check_llm_api_health(),
         "agentic_memories": await check_agentic_memories_health(),
         "proactive_worker": await check_proactive_worker_health(),
-        "langfuse": check_langfuse_health()
+        "langfuse": check_langfuse_health(),
+        "cloud_logging": check_cloud_logging_health()
     }
 
     # Overall status is "ok" if at least the API itself is running

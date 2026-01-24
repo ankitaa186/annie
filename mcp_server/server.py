@@ -46,6 +46,9 @@ from mcp_server.tools import (
     web_search_tool,
     reddit_search_tool,
     web_crawl_tool,
+    home_assistant_query_tool,  # Epic 16 - Story 16.1
+    home_assistant_control_tool,  # Epic 16 - Story 16.2
+    send_voice_message_to_smart_home_tool,  # Epic 16 - Story 16.6
 )
 
 logger = get_logger(__name__)
@@ -115,6 +118,10 @@ class MCPServer:
         self.tool_registry.register(reddit_search_tool)
         # Web crawl tool (Epic 15 - Story 15.2)
         self.tool_registry.register(web_crawl_tool)
+        # Home Assistant tools (Epic 16 - Stories 16.1, 16.2, 16.6)
+        self.tool_registry.register(home_assistant_query_tool)
+        self.tool_registry.register(home_assistant_control_tool)
+        self.tool_registry.register(send_voice_message_to_smart_home_tool)
         logger.info(f"Registered {len(self.tool_registry.tools)} tools")
 
     async def handle_request(self, request: Dict[str, Any]) -> Dict[str, Any]:

@@ -36,3 +36,8 @@ arq>=0.25.0  # Background job queue (Story 13.7)
 yfinance>=0.2.0  # Stock price data for condition evaluators (Story 13.4)
 croniter>=1.3.0  # Cron expression parsing (Story 13.7)
 python-telegram-bot==20.7  # Telegram delivery (Story 13.9)
+
+# Document text extraction - ChatGPT fallback (Epic 18)
+pypdf>=4.0.0           # PDF text extraction
+python-docx>=1.1.0     # DOCX text extraction
+openpyxl>=3.1.0        # XLSX text extraction

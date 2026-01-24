@@ -11,27 +11,26 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    if: false  # Skip linting for now
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install ruff
-        run: pip install ruff
-
-      - name: Run linter
-        run: ruff check backend/ mcp_server/ telegram_bot/
-
-      - name: Check formatting
-        run: ruff format --check backend/ mcp_server/ telegram_bot/
+  # lint:
+  #   name: Lint
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout repository
+  #       uses: actions/checkout@v4
+  #
+  #     - name: Set up Python
+  #       uses: actions/setup-python@v5
+  #       with:
+  #         python-version: "3.12"
+  #
+  #     - name: Install ruff
+  #       run: pip install ruff
+  #
+  #     - name: Run linter
+  #       run: ruff check backend/ mcp_server/ telegram_bot/
+  #
+  #     - name: Check formatting
+  #       run: ruff format --check backend/ mcp_server/ telegram_bot/
 
   test:
     name: Run Tests
@@ -47,6 +46,9 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
 
       - name: Install dependencies
         run: make install
@@ -80,6 +82,7 @@ jobs:
 
   build:
     name: Build Docker Image
+    needs: test
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
     # prod for main branch pushes, dev for all PR builds

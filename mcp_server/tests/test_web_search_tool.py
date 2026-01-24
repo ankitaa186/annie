@@ -12,11 +12,13 @@ import pytest
 from unittest.mock import AsyncMock, Mock, patch
 import httpx
 
-from mcp_server.tools import (
+from mcp_server.tools.web_search import (
     web_search_tool_handler,
     web_search_tool,
     _tavily_search,
-    _duckduckgo_search
+    _duckduckgo_search,
+    _is_circuit_open,
+    _open_circuit
 )
 
 
@@ -184,7 +186,7 @@ class TestDuckDuckGoSearch:
             {"title": "DDG Result 2", "href": "https://ddg.com/2", "body": "DDG content 2"}
         ]
 
-        with patch('duckduckgo_search.DDGS') as mock_ddgs_class:
+        with patch('ddgs.DDGS') as mock_ddgs_class:
             mock_ddgs = Mock()
             mock_ddgs.text.return_value = mock_ddg_results
             mock_ddgs_class.return_value = mock_ddgs
@@ -203,7 +205,7 @@ class TestDuckDuckGoSearch:
     @pytest.mark.asyncio
     async def test_duckduckgo_search_failure(self):
         """Test DuckDuckGo search failure handling."""
-        with patch('duckduckgo_search.DDGS') as mock_ddgs_class:
+        with patch('ddgs.DDGS') as mock_ddgs_class:
             mock_ddgs_class.side_effect = Exception("DDG error")
 
             result = await _duckduckgo_search(query="test", max_results=5)
@@ -216,6 +218,14 @@ class TestDuckDuckGoSearch:
 
 class TestWebSearchToolHandler:
     """Test web_search_tool_handler function."""
+
+    @pytest.fixture(autouse=True)
+    def mock_circuit_breaker(self):
+        """Mock circuit breaker as closed for all tests."""
+        with patch('mcp_server.tools.web_search._is_circuit_open', new_callable=AsyncMock) as mock_is_open:
+            with patch('mcp_server.tools.web_search._open_circuit', new_callable=AsyncMock) as mock_open:
+                mock_is_open.return_value = False
+                yield {"is_open": mock_is_open, "open": mock_open}
 
     @pytest.fixture
     def mock_tavily_response(self):
@@ -276,7 +286,7 @@ class TestWebSearchToolHandler:
             with patch('mcp_server.tools.web_search.get_config') as mock_config:
                 mock_config.return_value = {"TAVILY_API_KEY": "test-key"}
 
-                with patch('duckduckgo_search.DDGS') as mock_ddgs_class:
+                with patch('ddgs.DDGS') as mock_ddgs_class:
                     mock_ddgs = Mock()
                     mock_ddgs.text.return_value = [
                         {"title": "DDG Result", "href": "https://ddg.com", "body": "DDG content"}
@@ -304,7 +314,7 @@ class TestWebSearchToolHandler:
             with patch('mcp_server.tools.web_search.get_config') as mock_config:
                 mock_config.return_value = {"TAVILY_API_KEY": "test-key"}
 
-                with patch('duckduckgo_search.DDGS') as mock_ddgs_class:
+                with patch('ddgs.DDGS') as mock_ddgs_class:
                     mock_ddgs = Mock()
                     mock_ddgs.text.return_value = []
                     mock_ddgs_class.return_value = mock_ddgs
@@ -326,7 +336,7 @@ class TestWebSearchToolHandler:
             with patch('mcp_server.tools.web_search.get_config') as mock_config:
                 mock_config.return_value = {"TAVILY_API_KEY": "test-key"}
 
-                with patch('duckduckgo_search.DDGS') as mock_ddgs_class:
+                with patch('ddgs.DDGS') as mock_ddgs_class:
                     mock_ddgs = Mock()
                     mock_ddgs.text.return_value = []
                     mock_ddgs_class.return_value = mock_ddgs
@@ -351,7 +361,7 @@ class TestWebSearchToolHandler:
             with patch('mcp_server.tools.web_search.get_config') as mock_config:
                 mock_config.return_value = {"TAVILY_API_KEY": "test-key"}
 
-                with patch('duckduckgo_search.DDGS') as mock_ddgs_class:
+                with patch('ddgs.DDGS') as mock_ddgs_class:
                     mock_ddgs = Mock()
                     mock_ddgs.text.return_value = []
                     mock_ddgs_class.return_value = mock_ddgs
@@ -527,7 +537,7 @@ class TestWebSearchToolHandler:
         with patch('mcp_server.tools.web_search.get_config') as mock_config:
             mock_config.return_value = {}  # No API key
 
-            with patch('duckduckgo_search.DDGS') as mock_ddgs_class:
+            with patch('ddgs.DDGS') as mock_ddgs_class:
                 mock_ddgs = Mock()
                 mock_ddgs.text.return_value = []
                 mock_ddgs_class.return_value = mock_ddgs
@@ -542,7 +552,7 @@ class TestWebSearchToolHandler:
         with patch('mcp_server.tools.web_search.get_config') as mock_config:
             mock_config.return_value = {"TAVILY_API_KEY": ""}  # Empty key
 
-            with patch('duckduckgo_search.DDGS') as mock_ddgs_class:
+            with patch('ddgs.DDGS') as mock_ddgs_class:
                 mock_ddgs = Mock()
                 mock_ddgs.text.return_value = []
                 mock_ddgs_class.return_value = mock_ddgs
@@ -646,3 +656,112 @@ class TestWebSearchToolSchema:
         desc = web_search_tool["description"]
         assert "Tavily" in desc
         assert "DuckDuckGo" in desc
+
+
+class TestDomainFiltering:
+    """Test domain filtering functionality."""
+
+    def test_extract_domain(self):
+        """Test domain extraction from URLs."""
+        from mcp_server.tools.web_search import _extract_domain
+
+        assert _extract_domain("https://www.example.com/page") == "example.com"
+        assert _extract_domain("https://docs.python.org/3/tutorial/") == "docs.python.org"
+        assert _extract_domain("http://example.com") == "example.com"
+        assert _extract_domain("") == ""
+        assert _extract_domain("invalid") == ""
+
+    def test_matches_domain_filter_include(self):
+        """Test include domain matching."""
+        from mcp_server.tools.web_search import _matches_domain_filter
+
+        # Exact match
+        assert _matches_domain_filter(
+            "https://python.org/page", ["python.org"], []
+        ) is True
+
+        # Subdomain match
+        assert _matches_domain_filter(
+            "https://docs.python.org/page", ["python.org"], []
+        ) is True
+
+        # No match
+        assert _matches_domain_filter(
+            "https://example.com/page", ["python.org"], []
+        ) is False
+
+    def test_matches_domain_filter_exclude(self):
+        """Test exclude domain matching."""
+        from mcp_server.tools.web_search import _matches_domain_filter
+
+        # Excluded domain
+        assert _matches_domain_filter(
+            "https://spam.com/page", [], ["spam.com"]
+        ) is False
+
+        # Excluded subdomain
+        assert _matches_domain_filter(
+            "https://sub.spam.com/page", [], ["spam.com"]
+        ) is False
+
+        # Not excluded
+        assert _matches_domain_filter(
+            "https://example.com/page", [], ["spam.com"]
+        ) is True
+
+    def test_filter_results_by_domain(self):
+        """Test result filtering."""
+        from mcp_server.tools.web_search import _filter_results_by_domain
+
+        results = [
+            {"url": "https://python.org/1", "title": "1"},
+            {"url": "https://spam.com/2", "title": "2"},
+            {"url": "https://docs.python.org/3", "title": "3"},
+            {"url": "https://example.com/4", "title": "4"},
+        ]
+
+        # Include filter
+        filtered = _filter_results_by_domain(results, ["python.org"], [], 10)
+        assert len(filtered) == 2
+        assert all("python.org" in r["url"] for r in filtered)
+
+        # Exclude filter
+        filtered = _filter_results_by_domain(results, [], ["spam.com"], 10)
+        assert len(filtered) == 3
+        assert not any("spam.com" in r["url"] for r in filtered)
+
+        # Max results limit
+        filtered = _filter_results_by_domain(results, [], [], 2)
+        assert len(filtered) == 2
+
+
+class TestQueryValidation:
+    """Test query validation."""
+
+    @pytest.mark.asyncio
+    async def test_empty_query_returns_error(self):
+        """Test empty string query returns error without calling providers."""
+        result = await web_search_tool_handler(query="")
+
+        assert result["status"] == "error"
+        assert result["error_code"] == "INVALID_QUERY"
+        assert "empty" in result["error_message"].lower()
+        assert result["results"] == []
+
+    @pytest.mark.asyncio
+    async def test_whitespace_only_query_returns_error(self):
+        """Test whitespace-only query returns error."""
+        result = await web_search_tool_handler(query="   ")
+
+        assert result["status"] == "error"
+        assert result["error_code"] == "INVALID_QUERY"
+
+    @pytest.mark.asyncio
+    async def test_none_query_returns_error(self):
+        """Test None query returns error."""
+        result = await web_search_tool_handler(query=None)
+
+        assert result["status"] == "error"
+        assert result["error_code"] == "INVALID_QUERY"
+
+

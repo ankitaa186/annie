@@ -17,6 +17,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from api.llm_client import LLMClient, LLMClientError
 from api.mcp_client import MCPClient, MCPClientError, MCPToolError, MCPNetworkError
+from api.models.file_attachment import FileAttachment, get_files_metadata
 from api.state import StateManager, StateError
 from api.status import StatusContext, emit_status
 from api.logging import get_logger
@@ -73,7 +74,8 @@ async def stream_generator(
     conversation_id: str,
     messages: List[Dict[str, Any]],
     request: Request,
-    state_manager: Optional[StateManager] = None
+    state_manager: Optional[StateManager] = None,
+    files: Optional[List[FileAttachment]] = None
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Generate SSE events from LLM streaming response with tool orchestration.
@@ -91,12 +93,14 @@ async def stream_generator(
     - Error handling for tool failures
     - Storing assistant response in Redis after completion
     - Status emission via StatusContext (e.g., "Annie is thinking...")
+    - Multimodal file processing (images, documents, spreadsheets)
 
     Args:
         conversation_id: Unique conversation identifier
         messages: List of chat messages to send to LLM
         request: FastAPI request object for disconnection detection
         state_manager: Optional StateManager for storing assistant response
+        files: Optional list of file attachments for multimodal processing
 
     Yields:
         SSE event dictionaries with event="message" and data containing:
@@ -202,12 +206,16 @@ async def stream_generator(
                 )
 
                 # Emit status: Starting LLM composition
-                emit_status("Composing response...", icon="🧠")
+                if files:
+                    emit_status("Analyzing your files...", icon="📎")
+                else:
+                    emit_status("Composing response...", icon="🧠")
 
                 async for event in llm_client.stream_chat_completion(
                     conversation_messages,
                     tools=tools,
-                    mcp_client=mcp_client
+                    mcp_client=mcp_client,
+                    files=files
                 ):
                     # Check for client disconnection
                     if await request.is_disconnected():
@@ -401,13 +409,17 @@ async def stream_generator(
                     )
 
                     # Emit status: Starting LLM composition
-                    emit_status("Composing response...", icon="🧠")
+                    if files:
+                        emit_status("Analyzing your files...", icon="📎")
+                    else:
+                        emit_status("Composing response...", icon="🧠")
 
                     # Stream tokens from LLM
                     async for event in llm_client.stream_chat_completion(
                         conversation_messages,
                         tools=tools,
-                        mcp_client=mcp_client
+                        mcp_client=mcp_client,
+                        files=files
                     ):
                         # Check for client disconnection
                         if await request.is_disconnected():
@@ -725,10 +737,13 @@ async def stream_generator(
                         }
                     )
                     # Emit status: Starting LLM composition (max iterations)
-                    emit_status("Composing response...", icon="🧠")
+                    if files:
+                        emit_status("Analyzing your files...", icon="📎")
+                    else:
+                        emit_status("Composing response...", icon="🧠")
 
                     # Stream final response anyway
-                    async for event in llm_client.stream_chat_completion(conversation_messages, tools=tools, mcp_client=mcp_client):
+                    async for event in llm_client.stream_chat_completion(conversation_messages, tools=tools, mcp_client=mcp_client, files=files):
                         if await request.is_disconnected():
                             break
 
@@ -1127,9 +1142,46 @@ async def stream_response(conversation_id: str, request: Request):
             }
         )
 
-        # Return SSE response with state manager passed to generator
+        # Load files from Redis cache (set by chat endpoint for multimodal processing)
+        files = None
+        try:
+            files_key = f"files:{conversation_id}"
+            files_data = await state_manager.redis_client.get(files_key)
+            if files_data:
+                import json
+                files_list = json.loads(files_data)
+                files = [FileAttachment(**f) for f in files_list]
+
+                # Log file metadata (not content)
+                files_meta = get_files_metadata(files)
+                logger.info(
+                    "Files loaded for multimodal processing",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "user_id": user_id,
+                        "file_count": files_meta["file_count"],
+                        "total_size_bytes": files_meta["total_size_bytes"],
+                        "mime_types": files_meta["mime_types"],
+                        "event": "files_loaded"
+                    }
+                )
+
+                # Delete files from Redis after loading (process-and-discard model)
+                await state_manager.redis_client.delete(files_key)
+
+        except Exception as e:
+            logger.warning(
+                f"Failed to load files for multimodal processing, continuing without: {str(e)}",
+                extra={
+                    "conversation_id": conversation_id,
+                    "user_id": user_id,
+                    "error_type": type(e).__name__
+                }
+            )
+
+        # Return SSE response with state manager and files passed to generator
         return EventSourceResponse(
-            stream_generator(conversation_id, messages, request, state_manager),
+            stream_generator(conversation_id, messages, request, state_manager, files),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",

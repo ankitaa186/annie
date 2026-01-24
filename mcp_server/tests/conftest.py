@@ -29,6 +29,10 @@ TEST_ENV_VARS = {
     "REDDIT_USER_AGENT": "annie-bot/1.0 test",
     # MCP Server Configuration
     "MCP_SERVER_PORT": "8002",
+    # Home Assistant Configuration (Epic 16)
+    "HA_URL": "http://homeassistant.local:8123",
+    "HA_ACCESS_TOKEN": "test-ha-access-token-12345",
+    "HA_TIMEOUT": "10",
 }
 
 # Set environment variables at module load time

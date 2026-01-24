@@ -33,7 +33,7 @@ pandas>=2.0.0  # Required by yfinance for data handling
 redis>=5.0.0
 
 # Web search tools (Epic 15 - Story 15.1)
-duckduckgo-search>=6.0.0
+ddgs>=8.0.0
 
 # Web crawling (Epic 15 - Story 15.2)
 crawl4ai>=0.3.0

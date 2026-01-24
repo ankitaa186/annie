@@ -609,13 +609,15 @@ class TestUpdateUserProfileToolSchema:
         assert "description" in field_prop
 
     def test_input_schema_value_property(self):
-        """Test value property definition (no type restriction for flexibility)."""
+        """Test value property definition (string type for Gemini compatibility)."""
         schema = update_user_profile_tool["inputSchema"]
         value_prop = schema["properties"]["value"]
-        # Should have description but no type (to allow any value type)
+        # Should have description and type
         assert "description" in value_prop
-        # Type should not be specified to allow string, number, boolean, array
-        assert "type" not in value_prop
+        # Type is string for Gemini compatibility; handler parses JSON for arrays/objects
+        assert value_prop["type"] == "string"
+        # Description should explain JSON format for complex values
+        assert "JSON" in value_prop["description"] or "json" in value_prop["description"].lower()
 
     def test_input_schema_reason_property(self):
         """Test reason property definition."""

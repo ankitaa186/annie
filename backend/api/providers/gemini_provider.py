@@ -194,13 +194,13 @@ class GeminiProvider(BaseProvider):
         )
 
     def _convert_messages_to_gemini_format(
-        self, messages: List[Dict[str, Any]]
+        self, messages: List[Dict[str, Any]], files: Optional[List] = None
     ) -> tuple[Optional[str], List[Dict[str, Any]]]:
         """
-        Convert OpenAI-format messages to Gemini format.
+        Convert OpenAI-format messages to Gemini format with optional file attachments.
 
         OpenAI format: [{"role": "user", "content": "..."}]
-        Gemini format: [{"role": "user", "parts": [{"text": "..."}]}]
+        Gemini format: [{"role": "user", "parts": [{"text": "..."}, {"inline_data": {...}}]}]
 
         Role mapping:
         - user → user
@@ -209,6 +209,7 @@ class GeminiProvider(BaseProvider):
 
         Args:
             messages: List of OpenAI-format messages
+            files: Optional list of FileAttachment objects for multimodal processing
 
         Returns:
             Tuple of (system_instruction, converted_messages)
@@ -216,6 +217,7 @@ class GeminiProvider(BaseProvider):
         system_instruction = None
         converted_messages = []
 
+        # Convert all messages (files will be attached to last user message at the end)
         for msg in messages:
             role = msg.get("role")
             content = msg.get("content", "")
@@ -224,9 +226,11 @@ class GeminiProvider(BaseProvider):
                 # Gemini doesn't have native system role - extract for system_instruction
                 system_instruction = content
             elif role == "user":
+                # Build parts array with text only (files added to last user message below)
+                parts = [{"text": content}]
                 converted_messages.append({
                     "role": "user",
-                    "parts": [{"text": content}]
+                    "parts": parts
                 })
             elif role == "assistant":
                 # Map assistant → model for Gemini
@@ -241,6 +245,30 @@ class GeminiProvider(BaseProvider):
                     "parts": [{"text": f"Tool result: {content}"}]
                 })
 
+        # Attach files to the LAST user message (current message, not history)
+        if files and converted_messages:
+            # Find the last user message and attach files to it
+            for i in range(len(converted_messages) - 1, -1, -1):
+                if converted_messages[i].get("role") == "user":
+                    for file in files:
+                        converted_messages[i]["parts"].append({
+                            "inline_data": {
+                                "mime_type": file.mime_type,
+                                "data": file.data_base64
+                            }
+                        })
+                    logger.info(
+                        "Files attached to last user message for Gemini",
+                        extra={
+                            "file_count": len(files),
+                            "mime_types": [f.mime_type for f in files],
+                            "total_size_bytes": sum(f.size_bytes for f in files),
+                            "message_index": i,
+                            "event": "gemini_multimodal_request"
+                        }
+                    )
+                    break
+
         return system_instruction, converted_messages
 
     async def stream_chat_completion(
@@ -250,15 +278,17 @@ class GeminiProvider(BaseProvider):
         **kwargs
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
-        Stream chat completion from Gemini 3 Pro with tool calling support.
+        Stream chat completion from Gemini 3 Pro with tool calling and multimodal support.
 
         Implements multi-turn function calling with thought_signature preservation (Story 9.3).
+        Supports multimodal inputs (images, documents, spreadsheets) via inline_data (Story 18.2).
 
         Args:
             messages: List of message dictionaries (OpenAI format)
             tools: Optional list of tools in OpenAI format for function calling
             **kwargs: Additional parameters:
                 - mcp_client: MCP client for tool execution (required if tools provided)
+                - files: Optional list of FileAttachment objects for multimodal processing
 
         Yields:
             Stream event dictionaries (OpenAI-compatible format):
@@ -273,10 +303,11 @@ class GeminiProvider(BaseProvider):
             RateLimitError: If rate limit is hit
         """
         start_time = time.time()
+        files = kwargs.get("files")  # Extract files from kwargs
 
         try:
-            # Convert messages to Gemini format
-            system_instruction, gemini_messages = self._convert_messages_to_gemini_format(messages)
+            # Convert messages to Gemini format with optional file attachments
+            system_instruction, gemini_messages = self._convert_messages_to_gemini_format(messages, files)
 
             # Convert tools to Gemini format if provided (Story 9.3)
             gemini_tools = None
@@ -292,7 +323,13 @@ class GeminiProvider(BaseProvider):
                     }
                 )
 
-            # Log request
+            # Log request with last user message for debugging
+            last_user_msg = None
+            for msg in reversed(messages):
+                if msg.get("role") == "user":
+                    last_user_msg = msg.get("content", "")[:200]
+                    break
+
             logger.info(
                 "Starting Gemini 3 Pro streaming request",
                 extra={
@@ -300,7 +337,11 @@ class GeminiProvider(BaseProvider):
                     "model": self.model_name,
                     "message_count": len(messages),
                     "has_system_instruction": system_instruction is not None,
-                    "tool_count": len(gemini_tools) if gemini_tools else 0
+                    "tool_count": len(gemini_tools) if gemini_tools else 0,
+                    "last_user_message": last_user_msg,
+                    "has_files": files is not None,
+                    "file_count": len(files) if files else 0,
+                    "event": "gemini_multimodal_stream" if files else "gemini_text_stream"
                 }
             )
 
@@ -320,7 +361,22 @@ class GeminiProvider(BaseProvider):
             # Initialize ChatSession with history (all messages except the last user message)
             # The last user message will be sent via send_message()
             history = gemini_messages[:-1] if len(gemini_messages) > 1 else []
-            last_user_message = gemini_messages[-1]["parts"][0]["text"] if gemini_messages else ""
+
+            # Extract the last user message parts for send_message()
+            # For multimodal requests, we need to send the full parts array (text + inline_data)
+            # For text-only, we can send just the text string
+            if gemini_messages:
+                last_parts = gemini_messages[-1].get("parts", [])
+                # Check if this is multimodal (has inline_data parts)
+                has_files = any("inline_data" in part for part in last_parts)
+                if has_files:
+                    # Send full parts array for multimodal
+                    last_user_message = last_parts
+                else:
+                    # Send just text for text-only (backward compatible)
+                    last_user_message = last_parts[0]["text"] if last_parts else ""
+            else:
+                last_user_message = ""
 
             # CRITICAL: Prepend system_instruction to history if provided
             # Gemini doesn't have native system role, so we inject it into first user message
@@ -336,7 +392,16 @@ class GeminiProvider(BaseProvider):
                         break
             elif system_instruction and not history:
                 # No history, prepend to last_user_message instead
-                last_user_message = f"{system_instruction}\n\n{last_user_message}"
+                # Handle both string (text-only) and list (multimodal) formats
+                if isinstance(last_user_message, list):
+                    # Multimodal: prepend to text part
+                    for part in last_user_message:
+                        if "text" in part:
+                            part["text"] = f"{system_instruction}\n\n{part['text']}"
+                            break
+                else:
+                    # Text-only: prepend to string
+                    last_user_message = f"{system_instruction}\n\n{last_user_message}"
                 logger.debug(
                     "Prepended system instruction to first user message",
                     extra={"provider": self.model_name}
@@ -378,9 +443,47 @@ class GeminiProvider(BaseProvider):
                     # Track ALL function calls in this iteration (parallel tool calling support)
                     function_calls = []  # List of {name, args} dicts
 
+                    # Debug: Track raw chunk data for MALFORMED_FUNCTION_CALL diagnosis
+                    raw_chunk_data = []  # Accumulate for debugging if needed
+
                     # Process chunks
                     # Note: thought_signatures are handled automatically by ChatSession (Story 9.3)
                     for chunk in response:
+                        # Debug: Capture raw chunk structure for diagnosing MALFORMED_FUNCTION_CALL
+                        try:
+                            chunk_info = {
+                                "has_candidates": bool(chunk.candidates),
+                                "candidate_count": len(chunk.candidates) if chunk.candidates else 0
+                            }
+                            if chunk.candidates and len(chunk.candidates) > 0:
+                                cand = chunk.candidates[0]
+                                chunk_info["finish_reason"] = str(cand.finish_reason) if cand.finish_reason else None
+                                chunk_info["finish_reason_value"] = int(cand.finish_reason) if cand.finish_reason else None
+                                chunk_info["has_content"] = bool(cand.content)
+                                if cand.content:
+                                    chunk_info["has_parts"] = bool(cand.content.parts)
+                                    chunk_info["part_count"] = len(cand.content.parts) if cand.content.parts else 0
+                                    # Capture part types and any function call info
+                                    part_details = []
+                                    if cand.content.parts:
+                                        for part in cand.content.parts:
+                                            part_info = {"has_text": hasattr(part, 'text') and bool(part.text)}
+                                            if hasattr(part, 'function_call') and part.function_call:
+                                                # Capture raw function call info before any conversion
+                                                part_info["has_function_call"] = True
+                                                part_info["function_name"] = getattr(part.function_call, 'name', 'UNKNOWN')
+                                                # Try to get raw args as string to avoid conversion errors
+                                                try:
+                                                    part_info["function_args_raw"] = str(part.function_call.args)[:500]
+                                                except Exception as args_err:
+                                                    part_info["function_args_error"] = str(args_err)
+                                            else:
+                                                part_info["has_function_call"] = False
+                                            part_details.append(part_info)
+                                    chunk_info["parts"] = part_details
+                            raw_chunk_data.append(chunk_info)
+                        except Exception as debug_err:
+                            raw_chunk_data.append({"debug_capture_error": str(debug_err)})
 
                         # Check for safety blocks
                         if hasattr(chunk, 'prompt_feedback') and chunk.prompt_feedback.block_reason:
@@ -794,13 +897,14 @@ class GeminiProvider(BaseProvider):
 
                         # CRITICAL: If no tokens were generated, send error to user
                         # This happens with finish_reason like THINKING_OVERFLOW (12),
-                        # BLOCKLIST (7), PROHIBITED_CONTENT (8), etc.
+                        # BLOCKLIST (7), PROHIBITED_CONTENT (8), MALFORMED_FUNCTION_CALL (10) etc.
                         if token_count == 0:
                             # Map common finish reasons to user-friendly messages
                             error_messages = {
                                 7: "I couldn't complete my response due to content restrictions.",
                                 8: "I couldn't complete my response due to content policy.",
                                 9: "I couldn't complete my response due to sensitive information detection.",
+                                10: "I had trouble processing that request. Let me try a different approach.",
                                 12: "I ran into a processing limit while thinking. Please try rephrasing or simplifying your request.",
                             }
 
@@ -808,6 +912,44 @@ class GeminiProvider(BaseProvider):
                                 fr_value,
                                 "I wasn't able to generate a response. Please try again or rephrase your request."
                             )
+
+                            # For MALFORMED_FUNCTION_CALL, log detailed diagnostic info
+                            if fr_value == 10:
+                                # Extract tool names for debugging
+                                tool_names = []
+                                if gemini_tools:
+                                    tool_names = [t.get("name", "UNKNOWN") for t in gemini_tools]
+
+                                # Find chunks that had function call attempts (even partial/malformed)
+                                func_call_chunks = [
+                                    c for c in raw_chunk_data
+                                    if c.get("parts") and any(
+                                        p.get("has_function_call") or p.get("function_args_error")
+                                        for p in c.get("parts", [])
+                                    )
+                                ]
+
+                                # Get last chunk which should have the finish_reason
+                                last_chunk = raw_chunk_data[-1] if raw_chunk_data else {}
+
+                                logger.error(
+                                    "MALFORMED_FUNCTION_CALL detected - Gemini failed to generate valid function call. "
+                                    "RAW CHUNK DATA LOGGED FOR DIAGNOSIS.",
+                                    extra={
+                                        "provider": self.model_name,
+                                        "tool_iteration": tool_iteration,
+                                        "message_count": len(messages),
+                                        "last_user_content": messages[-1].get("content", "")[:500] if messages else None,
+                                        "tool_count": len(gemini_tools) if gemini_tools else 0,
+                                        "tool_names": tool_names,
+                                        "chunk_count": len(raw_chunk_data),
+                                        "func_call_chunks": func_call_chunks,
+                                        "last_chunk": last_chunk,
+                                        "all_chunks_with_parts": [
+                                            c for c in raw_chunk_data if c.get("parts")
+                                        ]
+                                    }
+                                )
 
                             logger.error(
                                 "Empty response from Gemini - sending error to user",

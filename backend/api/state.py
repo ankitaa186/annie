@@ -6,8 +6,8 @@ Handles session creation, conversation history storage, and context building for
 
 Redis Key Patterns:
 - session:{user_id} -> Session data (JSON, TTL: 1 hour)
-- conversation:{conversation_id} -> Message list (JSON array, TTL: 30 min)
-- conversation_mapping:{conversation_id} -> user_id (String, TTL: 30 min) - Reverse lookup for memory tools
+- conversation:{conversation_id} -> Message list (JSON array, TTL: 1 hour)
+- conversation_mapping:{conversation_id} -> user_id (String, TTL: 1 hour) - Reverse lookup for memory tools
 """
 
 import asyncio
@@ -63,8 +63,8 @@ class StateManager:
 
     Features:
     - Session creation and management with TTL (1 hour)
-    - Conversation history storage with Redis Lists (TTL: 30 min)
-    - Context building for LLM with token limits (20 messages or 20k tokens)
+    - Conversation history storage with Redis Lists (TTL: 1 hour, aligned with session)
+    - Context building for LLM with token limits (40 messages or 20k tokens)
     - Graceful degradation when Redis unavailable
     - Performance monitoring with duration tracking
     - Connection pooling with redis.asyncio
@@ -78,8 +78,8 @@ class StateManager:
 
     # Configuration
     SESSION_TTL = 3600  # 1 hour in seconds
-    CONVERSATION_TTL = 1800  # 30 minutes in seconds
-    MAX_MESSAGES = 20  # Max messages for LLM context
+    CONVERSATION_TTL = 3600  # 1 hour in seconds (aligned with SESSION_TTL to prevent context loss)
+    MAX_MESSAGES = 40  # Max messages for LLM context
     MAX_TOKENS = 20000  # Max tokens for LLM context (~4 chars per token)
     CHARS_PER_TOKEN = 4  # Simple token estimation heuristic
 
@@ -497,7 +497,7 @@ class StateManager:
             # Append message to list
             await self.redis_client.rpush(key, json.dumps(message))
 
-            # Set TTL (only if key is new, won't override existing TTL)
+            # Refresh TTL on activity (resets TTL to full duration)
             await self.redis_client.expire(key, self.CONVERSATION_TTL)
 
             duration_ms = int((time.time() - start_time) * 1000)

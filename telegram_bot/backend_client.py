@@ -7,11 +7,16 @@ including message forwarding and streaming response handling.
 
 import asyncio
 import json
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, List, Optional
 import aiohttp
 
 from telegram_bot.config import get_config
 from telegram_bot.logger import get_logger
+
+# Import FileAttachment for type hints (avoid circular import)
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from telegram_bot.file_handler import FileAttachment
 
 logger = get_logger(__name__)
 
@@ -82,6 +87,7 @@ class BackendClient:
         user_id: int,
         message: str,
         message_type: str = "text",
+        files: Optional[List[dict]] = None,
         max_retries: int = 3
     ) -> dict:
         """
@@ -91,6 +97,7 @@ class BackendClient:
             user_id: Telegram user ID
             message: Message content
             message_type: Type of message ("text" or "voice")
+            files: Optional list of file attachments (as dicts from FileAttachment.to_dict())
             max_retries: Maximum number of retry attempts
 
         Returns:
@@ -110,6 +117,10 @@ class BackendClient:
             }
         }
 
+        # Add files if present
+        if files:
+            payload["files"] = files
+
         endpoint = f"{self.backend_url}/api/chat"
 
         for attempt in range(1, max_retries + 1):
@@ -120,6 +131,7 @@ class BackendClient:
                         "user_id": user_id,
                         "message_type": message_type,
                         "message_length": len(message),
+                        "files_count": len(files) if files else 0,
                         "attempt": attempt,
                         "endpoint": endpoint,
                         "event": "backend_request"

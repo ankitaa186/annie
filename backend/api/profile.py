@@ -178,7 +178,10 @@ class ProfileManager:
                     "preferences": {},
                     "goals": {},
                     "interests": {},
-                    "background": {}
+                    "background": {},
+                    "health": {},
+                    "personality": {},
+                    "values": {}
                 }
 
                 logger.info(
@@ -211,7 +214,10 @@ class ProfileManager:
                 "preferences": {},
                 "goals": {},
                 "interests": {},
-                "background": {}
+                "background": {},
+                "health": {},
+                "personality": {},
+                "values": {}
             }
 
     @observe(name="profile_refresh", as_type="trace")
@@ -247,7 +253,7 @@ class ProfileManager:
 
             # Check if tool call succeeded
             if result.get("status") == "success":
-                # Build profile object for caching
+                # Build profile object for caching (all 8 categories)
                 profile = {
                     "user_id": user_id,
                     "completeness": result.get("completeness", 0),
@@ -255,7 +261,10 @@ class ProfileManager:
                     "preferences": result.get("preferences", {}),
                     "goals": result.get("goals", {}),
                     "interests": result.get("interests", {}),
-                    "background": result.get("background", {})
+                    "background": result.get("background", {}),
+                    "health": result.get("health", {}),
+                    "personality": result.get("personality", {}),
+                    "values": result.get("values", {})
                 }
 
                 # Store in Redis with TTL
