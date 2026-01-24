@@ -445,7 +445,7 @@ async def process_photo(
         logger.error(
             "Photo processing failed",
             extra={
-                "filename": filename,
+                "file_name": filename,
                 "error": str(e),
                 "error_type": type(e).__name__,
                 "event": "photo_processing_failed"
@@ -517,7 +517,7 @@ async def process_document(
         logger.info(
             "Document processed successfully",
             extra={
-                "filename": filename,
+                "file_name": filename,
                 "mime_type": mime_type,
                 "size_bytes": len(file_bytes),
                 "event": "document_processed"
@@ -541,7 +541,7 @@ async def process_document(
         logger.error(
             "Document processing failed",
             extra={
-                "filename": filename,
+                "file_name": filename,
                 "error": str(e),
                 "error_type": type(e).__name__,
                 "event": "document_processing_failed"

@@ -112,8 +112,8 @@ class TestBuildMultimodalMessages:
         assert "[CSV data from data.csv]" in result[0]["content"][1]["text"]
         assert csv_content in result[0]["content"][1]["text"]
 
-    def test_files_attached_only_to_first_user_message(self, provider):
-        """Files should only be attached to the first user message."""
+    def test_files_attached_only_to_last_user_message(self, provider):
+        """Files should only be attached to the last user message (current message)."""
         messages = [
             {"role": "system", "content": "You are helpful."},
             {"role": "user", "content": "First message"},
@@ -135,15 +135,15 @@ class TestBuildMultimodalMessages:
         # System message unchanged
         assert result[0]["content"] == "You are helpful."
 
-        # First user message has content array with file
-        assert isinstance(result[1]["content"], list)
-        assert len(result[1]["content"]) == 2
+        # First user message unchanged (no files - they go to last)
+        assert result[1]["content"] == "First message"
 
         # Assistant message unchanged
         assert result[2]["content"] == "Response"
 
-        # Second user message unchanged (no files)
-        assert result[3]["content"] == "Second message"
+        # Last user message has content array with file
+        assert isinstance(result[3]["content"], list)
+        assert len(result[3]["content"]) == 2
 
     def test_multiple_files_in_single_message(self, provider):
         """Multiple files should all be included in first user message."""

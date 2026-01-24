@@ -714,7 +714,7 @@ class ChatGPTProvider(BaseProvider):
             except Exception as e:
                 logger.warning(
                     "Failed to decode text file",
-                    extra={"filename": file.filename, "error": str(e)}
+                    extra={"file_name": file.filename, "error": str(e)}
                 )
                 return None
 
@@ -729,7 +729,7 @@ class ChatGPTProvider(BaseProvider):
             except Exception as e:
                 logger.warning(
                     "Failed to decode CSV file",
-                    extra={"filename": file.filename, "error": str(e)}
+                    extra={"file_name": file.filename, "error": str(e)}
                 )
                 return None
 
@@ -767,7 +767,7 @@ class ChatGPTProvider(BaseProvider):
         logger.warning(
             "Unsupported file format for ChatGPT fallback",
             extra={
-                "filename": file.filename,
+                "file_name": file.filename,
                 "mime_type": mime_type,
                 "event": "chatgpt_unsupported_format"
             }
@@ -806,7 +806,7 @@ class ChatGPTProvider(BaseProvider):
             if not text_parts:
                 logger.warning(
                     "PDF appears to be image-based (no extractable text)",
-                    extra={"filename": file.filename, "page_count": len(reader.pages)}
+                    extra={"file_name": file.filename, "page_count": len(reader.pages)}
                 )
                 return f"[This PDF ({file.filename}) contains {len(reader.pages)} pages but no extractable text. It may be scanned/image-based.]"
 
@@ -815,7 +815,7 @@ class ChatGPTProvider(BaseProvider):
             logger.info(
                 "PDF text extraction successful",
                 extra={
-                    "filename": file.filename,
+                    "file_name": file.filename,
                     "page_count": len(reader.pages),
                     "text_length": len(full_text),
                     "event": "pdf_text_extracted"
@@ -829,14 +829,14 @@ class ChatGPTProvider(BaseProvider):
             if "password" in error_msg or "encrypted" in error_msg:
                 logger.warning(
                     "PDF is password-protected",
-                    extra={"filename": file.filename}
+                    extra={"file_name": file.filename}
                 )
                 return f"[This PDF ({file.filename}) is password-protected and cannot be read. Please provide an unlocked version.]"
 
             logger.error(
                 "PDF text extraction failed",
                 extra={
-                    "filename": file.filename,
+                    "file_name": file.filename,
                     "error": str(e),
                     "event": "pdf_extraction_failed"
                 }
@@ -882,14 +882,14 @@ class ChatGPTProvider(BaseProvider):
             if not full_text.strip():
                 logger.warning(
                     "DOCX appears empty",
-                    extra={"filename": file.filename}
+                    extra={"file_name": file.filename}
                 )
                 return f"[This document ({file.filename}) appears to be empty or contains only images.]"
 
             logger.info(
                 "DOCX text extraction successful",
                 extra={
-                    "filename": file.filename,
+                    "file_name": file.filename,
                     "paragraph_count": len(doc.paragraphs),
                     "table_count": len(doc.tables),
                     "text_length": len(full_text),
@@ -903,7 +903,7 @@ class ChatGPTProvider(BaseProvider):
             logger.error(
                 "DOCX text extraction failed",
                 extra={
-                    "filename": file.filename,
+                    "file_name": file.filename,
                     "error": str(e),
                     "event": "docx_extraction_failed"
                 }
@@ -952,14 +952,14 @@ class ChatGPTProvider(BaseProvider):
             if not full_text.strip():
                 logger.warning(
                     "XLSX appears empty",
-                    extra={"filename": file.filename}
+                    extra={"file_name": file.filename}
                 )
                 return f"[This spreadsheet ({file.filename}) appears to be empty.]"
 
             logger.info(
                 "XLSX text extraction successful",
                 extra={
-                    "filename": file.filename,
+                    "file_name": file.filename,
                     "sheet_count": len(wb.sheetnames),
                     "text_length": len(full_text),
                     "event": "xlsx_text_extracted"
@@ -972,7 +972,7 @@ class ChatGPTProvider(BaseProvider):
             logger.error(
                 "XLSX text extraction failed",
                 extra={
-                    "filename": file.filename,
+                    "file_name": file.filename,
                     "error": str(e),
                     "event": "xlsx_extraction_failed"
                 }

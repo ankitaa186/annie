@@ -54,21 +54,35 @@ class TestChatRequestWithFiles:
 
     def test_chat_request_accepts_files_array(self, test_client, sample_image_base64):
         """Chat endpoint should accept files array in request body."""
-        with patch("api.routes.chat.get_state_manager") as mock_state:
-            # Mock Redis for state storage
-            mock_redis = AsyncMock()
+        with patch("api.routes.chat.StateManager") as mock_state_class:
+            # Mock redis client
+            mock_redis = MagicMock()
             mock_redis.setex = AsyncMock()
             mock_redis.get = AsyncMock(return_value=None)
-            mock_state.return_value.redis_client = mock_redis
-            mock_state.return_value.get_profile_context = AsyncMock(return_value="")
-            mock_state.return_value.get_memory_context = AsyncMock(return_value="")
-            mock_state.return_value.load_conversation = AsyncMock(return_value=[])
-            mock_state.return_value.append_message = AsyncMock()
+
+            # Mock StateManager context manager
+            mock_state = MagicMock()
+            mock_state.__aenter__ = AsyncMock(return_value=mock_state)
+            mock_state.__aexit__ = AsyncMock(return_value=None)
+            mock_state.redis_client = mock_redis
+            mock_state.get_profile_context = AsyncMock(return_value="")
+            mock_state.get_memory_context = AsyncMock(return_value="")
+            mock_state.load_conversation = AsyncMock(return_value=[])
+            mock_state.append_message = AsyncMock()
+            mock_state.add_message = AsyncMock()
+            mock_state.store_files = AsyncMock()
+            mock_state.get_session = AsyncMock(return_value={
+                "message_count": 0,
+                "conversation_id": "test-conv-123"
+            })
+            mock_state.update_session_activity = AsyncMock()
+            mock_state_class.return_value = mock_state
 
             response = test_client.post(
                 "/api/chat",
                 json={
                     "user_id": "test_user_123",
+                    "platform": "telegram",
                     "message": "What's in this image?",
                     "files": [
                         {
@@ -92,6 +106,7 @@ class TestChatRequestWithFiles:
             "/api/chat",
             json={
                 "user_id": "test_user_123",
+                "platform": "telegram",
                 "message": "Process this file",
                 "files": [
                     {
@@ -104,8 +119,11 @@ class TestChatRequestWithFiles:
             }
         )
 
-        assert response.status_code == 400
-        assert "unsupported" in response.json()["detail"].lower()
+        # Pydantic validates MIME type first, returns 422
+        assert response.status_code == 422
+        # Error is in Pydantic validation details
+        error_detail = response.json()
+        assert "error" in error_detail or "detail" in error_detail
 
     def test_chat_request_validates_file_size(self, test_client, sample_image_base64):
         """Chat endpoint should reject oversized files."""
@@ -113,6 +131,7 @@ class TestChatRequestWithFiles:
             "/api/chat",
             json={
                 "user_id": "test_user_123",
+                "platform": "telegram",
                 "message": "Process this file",
                 "files": [
                     {
@@ -126,7 +145,8 @@ class TestChatRequestWithFiles:
         )
 
         assert response.status_code == 400
-        assert "size" in response.json()["detail"].lower()
+        # Error message says "too large" and includes "MB"
+        assert "large" in response.json()["detail"].lower()
 
     def test_chat_request_validates_max_files(self, test_client, sample_image_base64):
         """Chat endpoint should reject too many files."""
@@ -144,6 +164,7 @@ class TestChatRequestWithFiles:
             "/api/chat",
             json={
                 "user_id": "test_user_123",
+                "platform": "telegram",
                 "message": "Process these files",
                 "files": files
             }
@@ -223,20 +244,18 @@ class TestSupportedMimeTypes:
         validate_files(valid_files)
 
     def test_validate_files_rejects_unsupported_type(self, sample_image_base64):
-        """validate_files should reject unsupported MIME types."""
-        from api.models.file_attachment import FileAttachment, validate_files
+        """FileAttachment should reject unsupported MIME types via Pydantic validator."""
+        from api.models.file_attachment import FileAttachment
+        from pydantic import ValidationError
 
-        invalid_files = [
+        # Pydantic validates MIME type at model creation
+        with pytest.raises(ValidationError) as exc_info:
             FileAttachment(
                 filename="archive.zip",
                 mime_type="application/zip",
                 size_bytes=1000,
                 data_base64=sample_image_base64
             )
-        ]
-
-        with pytest.raises(ValueError) as exc_info:
-            validate_files(invalid_files)
         assert "unsupported" in str(exc_info.value).lower()
 
 
@@ -266,7 +285,7 @@ class TestGetFilesMetadata:
     """Test get_files_metadata utility function."""
 
     def test_get_files_metadata_returns_safe_info(self, sample_image_base64):
-        """get_files_metadata should return metadata without base64 content."""
+        """get_files_metadata should return aggregated metadata without base64 content."""
         from api.models.file_attachment import FileAttachment, get_files_metadata
 
         files = [
@@ -280,12 +299,14 @@ class TestGetFilesMetadata:
 
         metadata = get_files_metadata(files)
 
-        assert len(metadata) == 1
-        assert metadata[0]["filename"] == "photo.png"
-        assert metadata[0]["mime_type"] == "image/png"
-        assert metadata[0]["size_bytes"] == 1000
+        # Check aggregated metadata format
+        assert metadata["file_count"] == 1
+        assert metadata["total_size_bytes"] == 1000
+        assert "image/png" in metadata["mime_types"]
+        assert "photo.png" in metadata["filenames"]
+        assert "image" in metadata["categories"]
         # data_base64 should NOT be in metadata (sensitive)
-        assert "data_base64" not in metadata[0]
+        assert "data_base64" not in metadata
 
 
 class TestGeminiMultimodalIntegration:

@@ -496,9 +496,10 @@ class TestAcknowledgmentFormatting:
 
         ack = format_file_acknowledgment(files)
 
-        assert "📷" in ack
-        assert "screenshot.png" in ack
-        assert "Let me take a look" in ack
+        # Uses image icon and simple message (no filename per user feedback)
+        assert "📸" in ack or "📷" in ack  # Image icon
+        assert "File received" in ack
+        assert "analyzing" in ack
 
     def test_format_single_document(self):
         """Test acknowledgment for single document."""
@@ -508,8 +509,9 @@ class TestAcknowledgmentFormatting:
 
         ack = format_file_acknowledgment(files)
 
-        assert "📄" in ack
-        assert "report.pdf" in ack
+        assert "📄" in ack  # Document icon
+        assert "File received" in ack
+        assert "analyzing" in ack
 
     def test_format_multiple_files(self):
         """Test acknowledgment for multiple files."""
@@ -523,9 +525,7 @@ class TestAcknowledgmentFormatting:
 
         assert "📎" in ack
         assert "3 files" in ack
-        assert "photo.jpg" in ack
-        assert "doc.pdf" in ack
-        assert "data.csv" in ack
+        assert "analyzing" in ack
 
     def test_format_empty_files(self):
         """Test acknowledgment for empty file list."""
@@ -607,9 +607,9 @@ class TestPartialSuccessFormatting:
 
         ack = format_partial_success_acknowledgment(result)
 
-        # Should use regular acknowledgment format
-        assert "📷" in ack
-        assert "photo.jpg" in ack
+        # Should use regular acknowledgment format (no filenames, just icon + "analyzing")
+        assert "File received" in ack
+        assert "analyzing" in ack
         assert "❌" not in ack
 
     def test_all_failed_shows_error(self):
