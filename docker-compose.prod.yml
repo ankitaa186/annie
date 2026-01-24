@@ -13,38 +13,44 @@
 # Environment: Production only (ENV=prod)
 # See: docs/epics/epic-17-cloud-logging.md
 
+x-loki-options: &loki-options
+  loki-url: "${LOKI_URL}"
+  loki-retries: "5"
+  loki-batch-size: "1200"
+  loki-timeout: "5s"
+
 services:
   backend:
     logging:
       driver: loki
       options:
-        loki-url: "${LOKI_URL}"
+        <<: *loki-options
         loki-external-labels: "service=backend,env=prod,project=annie"
 
   mcp-server:
     logging:
       driver: loki
       options:
-        loki-url: "${LOKI_URL}"
+        <<: *loki-options
         loki-external-labels: "service=mcp-server,env=prod,project=annie"
 
   telegram-bot:
     logging:
       driver: loki
       options:
-        loki-url: "${LOKI_URL}"
+        <<: *loki-options
         loki-external-labels: "service=telegram-bot,env=prod,project=annie"
 
   proactive-worker:
     logging:
       driver: loki
       options:
-        loki-url: "${LOKI_URL}"
+        <<: *loki-options
         loki-external-labels: "service=proactive-worker,env=prod,project=annie"
 
   redis:
     logging:
       driver: loki
       options:
-        loki-url: "${LOKI_URL}"
+        <<: *loki-options
         loki-external-labels: "service=redis,env=prod,project=annie"
