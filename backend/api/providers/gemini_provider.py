@@ -304,6 +304,7 @@ class GeminiProvider(BaseProvider):
         """
         start_time = time.time()
         files = kwargs.get("files")  # Extract files from kwargs
+        user_id = kwargs.get("user_id")  # Extract user_id for tool argument injection
 
         try:
             # Convert messages to Gemini format with optional file attachments
@@ -793,7 +794,8 @@ class GeminiProvider(BaseProvider):
                             tool_result = await self._execute_tool_call(
                                 func_call["name"],
                                 func_call["args"],
-                                mcp_client
+                                mcp_client,
+                                user_id=user_id
                             )
 
                             # Check if tool execution succeeded or failed
@@ -1102,7 +1104,8 @@ class GeminiProvider(BaseProvider):
         self,
         tool_name: str,
         tool_arguments: Dict[str, Any],
-        mcp_client
+        mcp_client,
+        user_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Execute MCP tool and handle errors gracefully.
@@ -1111,6 +1114,7 @@ class GeminiProvider(BaseProvider):
             tool_name: Name of the tool to execute
             tool_arguments: Tool arguments
             mcp_client: MCP client instance
+            user_id: User ID to inject into tool arguments (overrides LLM-provided value)
 
         Returns:
             Tool execution result (or error response)
@@ -1118,6 +1122,22 @@ class GeminiProvider(BaseProvider):
         try:
             # Import MCPClient locally to avoid circular dependency
             from api.mcp_client import MCPClient, MCPNetworkError, MCPToolError
+
+            # Inject correct user_id to override any LLM-inferred value
+            # This prevents the LLM from using wrong user_ids (e.g., inferring "ankit" from profile name)
+            if user_id and "user_id" in tool_arguments:
+                original_user_id = tool_arguments.get("user_id")
+                if original_user_id != user_id:
+                    logger.warning(
+                        "Overriding LLM-provided user_id with correct value",
+                        extra={
+                            "provider": self.model_name,
+                            "tool_name": tool_name,
+                            "original_user_id": original_user_id,
+                            "correct_user_id": user_id
+                        }
+                    )
+                tool_arguments["user_id"] = user_id
 
             logger.info(
                 "Executing MCP tool for Gemini",

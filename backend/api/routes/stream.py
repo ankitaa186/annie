@@ -75,7 +75,8 @@ async def stream_generator(
     messages: List[Dict[str, Any]],
     request: Request,
     state_manager: Optional[StateManager] = None,
-    files: Optional[List[FileAttachment]] = None
+    files: Optional[List[FileAttachment]] = None,
+    user_id: Optional[str] = None
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Generate SSE events from LLM streaming response with tool orchestration.
@@ -101,6 +102,7 @@ async def stream_generator(
         request: FastAPI request object for disconnection detection
         state_manager: Optional StateManager for storing assistant response
         files: Optional list of file attachments for multimodal processing
+        user_id: Optional user ID to inject into tool calls (prevents LLM from using wrong IDs)
 
     Yields:
         SSE event dictionaries with event="message" and data containing:
@@ -215,7 +217,8 @@ async def stream_generator(
                     conversation_messages,
                     tools=tools,
                     mcp_client=mcp_client,
-                    files=files
+                    files=files,
+                    user_id=user_id
                 ):
                     # Check for client disconnection
                     if await request.is_disconnected():
@@ -419,7 +422,8 @@ async def stream_generator(
                         conversation_messages,
                         tools=tools,
                         mcp_client=mcp_client,
-                        files=files
+                        files=files,
+                        user_id=user_id
                     ):
                         # Check for client disconnection
                         if await request.is_disconnected():
@@ -564,6 +568,21 @@ async def stream_generator(
                         arguments = json.loads(arguments_str)
                     except json.JSONDecodeError:
                         arguments = {}
+
+                    # Inject correct user_id to override LLM-inferred value
+                    if user_id and "user_id" in arguments:
+                        original_user_id = arguments.get("user_id")
+                        if original_user_id != user_id:
+                            logger.warning(
+                                "Overriding LLM-provided user_id with correct value",
+                                extra={
+                                    "conversation_id": conversation_id,
+                                    "tool_name": function_name,
+                                    "original_user_id": original_user_id,
+                                    "correct_user_id": user_id
+                                }
+                            )
+                        arguments["user_id"] = user_id
 
                     logger.info(
                         "Executing tool",
@@ -743,7 +762,7 @@ async def stream_generator(
                         emit_status("Composing response...", icon="🧠")
 
                     # Stream final response anyway
-                    async for event in llm_client.stream_chat_completion(conversation_messages, tools=tools, mcp_client=mcp_client, files=files):
+                    async for event in llm_client.stream_chat_completion(conversation_messages, tools=tools, mcp_client=mcp_client, files=files, user_id=user_id):
                         if await request.is_disconnected():
                             break
 
@@ -1181,7 +1200,7 @@ async def stream_response(conversation_id: str, request: Request):
 
         # Return SSE response with state manager and files passed to generator
         return EventSourceResponse(
-            stream_generator(conversation_id, messages, request, state_manager, files),
+            stream_generator(conversation_id, messages, request, state_manager, files, user_id),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
