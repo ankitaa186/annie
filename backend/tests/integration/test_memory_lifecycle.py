@@ -149,17 +149,20 @@ class TestMockedLifecycle:
         """Test retrieve with mocked response."""
         mock_response = Mock()
         mock_response.status_code = 200
+        # Persona-aware POST response format
         mock_response.json.return_value = {
-            "results": [{"id": "mem_123", "content": "Test memory", "score": 0.95}],
-            "count": 1
+            "persona": {"selected": "identity", "confidence": 0.8},
+            "results": {
+                "memories": [{"id": "mem_123", "content": "Test memory", "score": 0.95}]
+            }
         }
 
         with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
-            # retrieve_memories uses GET, not POST
-            mock_client.get = AsyncMock(return_value=mock_response)
+            # retrieve_memories now uses POST for persona-aware retrieval
+            mock_client.post = AsyncMock(return_value=mock_response)
             mock_client_class.return_value = mock_client
 
             result = await retrieve_memories_tool_handler(
@@ -221,17 +224,20 @@ class TestMockedLifecycle:
         # Retrieve
         mock_retrieve_response = Mock()
         mock_retrieve_response.status_code = 200
+        # Persona-aware POST response format
         mock_retrieve_response.json.return_value = {
-            "results": [{"id": memory_id, "content": "Full lifecycle test", "score": 0.9}],
-            "count": 1
+            "persona": {"selected": "identity", "confidence": 0.8},
+            "results": {
+                "memories": [{"id": memory_id, "content": "Full lifecycle test", "score": 0.9}]
+            }
         }
 
         with patch('mcp_server.tools.memory.httpx.AsyncClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
-            # retrieve_memories uses GET, not POST
-            mock_client.get = AsyncMock(return_value=mock_retrieve_response)
+            # retrieve_memories now uses POST for persona-aware retrieval
+            mock_client.post = AsyncMock(return_value=mock_retrieve_response)
             mock_client_class.return_value = mock_client
 
             retrieve_result = await retrieve_memories_tool_handler(
