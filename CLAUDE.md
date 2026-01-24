@@ -685,3 +685,88 @@ Control Home Assistant entities.
   "action": "turn_on|turn_off|toggle|set_brightness|set_temperature|set_position|set_hvac_mode",
   "parameters": {"brightness": 200}
 }
+```
+
+---
+
+## File Context Sharing (Epic 18)
+
+Annie can receive and understand files (images, documents, spreadsheets) shared by users via Telegram, enabling multimodal analysis without manual copy-pasting.
+
+### Supported File Types
+
+| Category | MIME Types | Size Limit | Gemini Support | ChatGPT Support |
+|----------|------------|------------|----------------|-----------------|
+| **Images** | image/jpeg, image/png, image/gif, image/webp | 10MB | Native (inline_data) | Native (image_url) |
+| **Documents** | application/pdf, text/plain | 20MB | Native | Text extraction fallback |
+| **Word Docs** | application/vnd.openxmlformats-officedocument.wordprocessingml.document | 20MB | Native | Text extraction fallback |
+| **Spreadsheets** | text/csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet | 20MB | Native | Text extraction fallback |
+
+### Processing Model
+
+**Process-and-Discard**: Files exist only in memory during request lifecycle. No files are ever persisted to disk, Redis, or any database. File content (base64) is NEVER logged—only metadata (filename, mime_type, size).
+
+### Multi-File Support
+
+- Up to 10 files per message (Telegram media group)
+- Files downloaded in parallel
+- All files attached to single LLM request for cross-referencing
+
+### Provider Fallback Behavior
+
+| Scenario | Behavior |
+|----------|----------|
+| Gemini available | Files sent natively via `inline_data` |
+| Gemini unavailable, images | ChatGPT receives via `image_url` (native) |
+| Gemini unavailable, documents | ChatGPT receives extracted text (pypdf, python-docx, openpyxl) |
+| Both providers fail | Error message, conversation continues text-only |
+
+### FileAttachment Schema
+
+```python
+class FileAttachment(BaseModel):
+    filename: str      # Original filename (e.g., "portfolio.png")
+    mime_type: str     # MIME type (e.g., "image/png", "application/pdf")
+    size_bytes: int    # File size in bytes
+    data_base64: str   # Base64-encoded file content
+```
+
+### Chat Request with Files
+
+```
+POST /api/chat
+Content-Type: application/json
+
+{
+  "user_id": "telegram_12345",
+  "message": "What stocks do I own?",
+  "files": [
+    {
+      "filename": "portfolio.png",
+      "mime_type": "image/png",
+      "size_bytes": 245000,
+      "data_base64": "iVBORw0KGgoAAAANSUhEUgAA..."
+    }
+  ]
+}
+```
+
+### Error Responses
+
+| Error | HTTP Code | Response |
+|-------|-----------|----------|
+| Unsupported format | 400 | `{"detail": "Unsupported file type: application/zip"}` |
+| File too large | 400 | `{"detail": "File exceeds size limit: 25MB > 20MB max"}` |
+| Too many files | 422 | Pydantic validation error |
+
+### Key Implementation Files
+
+| File | Purpose |
+|------|---------|
+| `telegram_bot/file_handler.py` | File detection, download, validation, base64 encoding |
+| `telegram_bot/handlers/message.py` | Route file messages to handler |
+| `backend/api/models/file_attachment.py` | FileAttachment Pydantic model, validation |
+| `backend/api/routes/chat.py` | Accept files in ChatRequest, store in Redis |
+| `backend/api/routes/stream.py` | Load files, pass to LLM client |
+| `backend/api/providers/gemini_provider.py` | Build multimodal contents with `inline_data` |
+| `backend/api/providers/chatgpt_provider.py` | Build multimodal messages, text extraction fallback |

@@ -62,6 +62,7 @@ story_location: .bmad-ephemeral/stories
 # Epic 15: Extended MCP Tools - COMPLETED (6/6 stories) - 158 tests pass
 # Epic 16: Home Assistant Integration - IN PROGRESS (1/5 stories done)
 # Epic 17: Cloud Logging Integration - COMPLETED (6/6 stories done)
+# Epic 18: File Context Sharing - IN PROGRESS (0/6 stories drafted)
 # =============================================================================
 
 development_status:
@@ -268,3 +269,18 @@ development_status:
   17-5-grafana-alerting-configuration: done
   17-6-integration-testing-validation: done
   epic-17-retrospective: optional
+
+  # ============================================================================
+  # EPIC 18: File Context Sharing (CONTEXTED)
+  # Enable multimodal file uploads (images, PDFs, documents, spreadsheets)
+  # Leverages Gemini native multimodal processing with ChatGPT fallback
+  # Dependencies: Gemini API multimodal, Telegram Bot API file handling
+  # ============================================================================
+  epic-18: in-progress
+  18-1-telegram-bot-file-reception: ready-for-dev
+  18-2-backend-multimodal-support-gemini: ready-for-dev
+  18-3-backend-multimodal-support-chatgpt-fallback: ready-for-dev
+  18-4-user-feedback-acknowledgment-flow: ready-for-dev
+  18-5-error-handling-edge-cases: ready-for-dev
+  18-6-integration-testing-documentation: ready-for-dev
+  epic-18-retrospective: optional

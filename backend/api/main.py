@@ -157,12 +157,25 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     Provides detailed validation error information for debugging while
     maintaining security (no internal implementation details exposed).
     """
+    # Convert errors to JSON-serializable format
+    # Pydantic v2 errors may contain non-serializable exception objects in 'ctx'
+    serializable_errors = []
+    for error in exc.errors():
+        err = dict(error)
+        # Convert ctx errors to string representations
+        if "ctx" in err and isinstance(err["ctx"], dict):
+            err["ctx"] = {
+                k: str(v) if not isinstance(v, (str, int, float, bool, list, dict, type(None))) else v
+                for k, v in err["ctx"].items()
+            }
+        serializable_errors.append(err)
+
     logger.warning(
         "Request validation failed",
         extra={
             "method": request.method,
             "path": request.url.path,
-            "errors": exc.errors(),
+            "errors": serializable_errors,
             "client_host": request.client.host if request.client else None
         }
     )
@@ -173,7 +186,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             "error": {
                 "code": "VALIDATION_ERROR",
                 "message": "Invalid request data. Please check your input.",
-                "details": exc.errors(),
+                "details": serializable_errors,
                 "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             }
         }

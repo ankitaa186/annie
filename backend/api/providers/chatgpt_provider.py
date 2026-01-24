@@ -2,9 +2,15 @@
 ChatGPT-5 Provider
 
 Implementation of ChatGPT-5 (OpenAI API) provider with streaming support,
-function calling, and Langfuse tracing integration.
+function calling, multimodal support, and Langfuse tracing integration.
+
+Multimodal Support (Story 18.3):
+- Images: Native support via image_url with base64 data URLs
+- Documents (PDF, DOCX, XLSX): Text extraction fallback for non-Gemini providers
 """
 
+import base64
+import io
 import json
 import time
 from typing import Any, AsyncGenerator, Dict, List, Optional
@@ -128,13 +134,14 @@ class ChatGPTProvider(BaseProvider):
         **kwargs
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
-        Stream chat completion from ChatGPT-5 with tool calling support.
+        Stream chat completion from ChatGPT-5 with tool calling and multimodal support.
 
         Args:
             messages: List of message dictionaries
             tools: Optional list of tools in OpenAI format
             mcp_client: Optional MCP client for executing tool calls
-            **kwargs: Additional parameters (unused, for interface compatibility)
+            **kwargs: Additional parameters:
+                - files: Optional list of FileAttachment objects for multimodal processing
 
         Yields:
             Stream event dictionaries:
@@ -148,8 +155,15 @@ class ChatGPTProvider(BaseProvider):
             ProviderError: If provider call fails
             RateLimitError: If rate limit is hit
         """
-        # Track conversation for multi-turn tool calling
-        conversation_messages = list(messages)
+        # Extract files from kwargs for multimodal support (Story 18.3)
+        files = kwargs.get("files")
+
+        # Build multimodal messages if files provided
+        if files:
+            conversation_messages = self._build_multimodal_messages(list(messages), files)
+        else:
+            conversation_messages = list(messages)
+
         max_tool_iterations = 20
         iteration = 0
 
@@ -231,6 +245,13 @@ class ChatGPTProvider(BaseProvider):
                     extra={"provider": "chatgpt-5", "tool_count": len(tools)}
                 )
 
+            # Detect if this is a multimodal request (messages have content arrays)
+            has_multimodal = any(
+                isinstance(msg.get("content"), list)
+                for msg in messages
+                if msg.get("role") == "user"
+            )
+
             logger.info(
                 "Starting ChatGPT-5 streaming request",
                 extra={
@@ -238,7 +259,9 @@ class ChatGPTProvider(BaseProvider):
                     "model": self.MODEL_NAME,
                     "message_count": len(messages),
                     "timeout_seconds": self.streaming_timeout,
-                    "tool_count": len(tools) if tools else 0
+                    "tool_count": len(tools) if tools else 0,
+                    "has_multimodal": has_multimodal,
+                    "event": "chatgpt_multimodal_stream" if has_multimodal else "chatgpt_text_stream"
                 }
             )
 
@@ -596,3 +619,362 @@ class ChatGPTProvider(BaseProvider):
         if len(text) <= max_length:
             return text
         return text[:max_length - 3] + "..."
+
+    def _build_multimodal_messages(
+        self,
+        messages: List[Dict[str, Any]],
+        files: Optional[List] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Build ChatGPT messages with multimodal content (images and document text).
+
+        Story 18.3: ChatGPT fallback for multimodal support.
+        - Images: Native support via image_url with base64 data URL
+        - Documents (PDF, DOCX, TXT): Text extraction appended as text content
+        - Spreadsheets (XLSX, CSV): Text extraction appended as text content
+
+        Args:
+            messages: List of OpenAI-format messages
+            files: Optional list of FileAttachment objects
+
+        Returns:
+            List of messages with multimodal content structure
+        """
+        if not files:
+            return messages
+
+        # First pass: copy all messages unchanged
+        result = list(messages)
+
+        # Find the LAST user message and attach files to it
+        for i in range(len(result) - 1, -1, -1):
+            if result[i].get("role") == "user":
+                content_parts = []
+
+                # Add original text content
+                text_content = result[i].get("content", "")
+                if text_content:
+                    content_parts.append({"type": "text", "text": text_content})
+
+                # Process each file
+                for file in files:
+                    file_content = self._process_file_for_chatgpt(file)
+                    if file_content:
+                        content_parts.append(file_content)
+
+                # Replace message with multimodal content array
+                result[i] = {
+                    "role": "user",
+                    "content": content_parts
+                }
+
+                logger.info(
+                    "Files attached to last user message for ChatGPT",
+                    extra={
+                        "file_count": len(files),
+                        "mime_types": [f.mime_type for f in files],
+                        "total_size_bytes": sum(f.size_bytes for f in files),
+                        "message_index": i,
+                        "event": "chatgpt_multimodal_request"
+                    }
+                )
+                break  # Only attach to last user message
+
+        return result
+
+    def _process_file_for_chatgpt(self, file) -> Optional[Dict[str, Any]]:
+        """
+        Process a single file for ChatGPT content array.
+
+        Args:
+            file: FileAttachment object
+
+        Returns:
+            Content part dict for ChatGPT message content array, or None if unsupported
+        """
+        mime_type = file.mime_type
+
+        # Images: Native support via image_url
+        if mime_type.startswith("image/"):
+            return {
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:{mime_type};base64,{file.data_base64}"
+                }
+            }
+
+        # Text files: Direct inclusion
+        if mime_type == "text/plain":
+            try:
+                text = base64.b64decode(file.data_base64).decode("utf-8")
+                return {
+                    "type": "text",
+                    "text": f"[Content from {file.filename}]:\n{text}"
+                }
+            except Exception as e:
+                logger.warning(
+                    "Failed to decode text file",
+                    extra={"filename": file.filename, "error": str(e)}
+                )
+                return None
+
+        # CSV: Direct text inclusion
+        if mime_type == "text/csv":
+            try:
+                text = base64.b64decode(file.data_base64).decode("utf-8")
+                return {
+                    "type": "text",
+                    "text": f"[CSV data from {file.filename}]:\n{text}"
+                }
+            except Exception as e:
+                logger.warning(
+                    "Failed to decode CSV file",
+                    extra={"filename": file.filename, "error": str(e)}
+                )
+                return None
+
+        # PDF: Text extraction
+        if mime_type == "application/pdf":
+            text = self._extract_pdf_text(file)
+            if text:
+                return {
+                    "type": "text",
+                    "text": f"[Content extracted from {file.filename}]:\n{text}"
+                }
+            return None
+
+        # DOCX: Text extraction
+        if mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+            text = self._extract_docx_text(file)
+            if text:
+                return {
+                    "type": "text",
+                    "text": f"[Content extracted from {file.filename}]:\n{text}"
+                }
+            return None
+
+        # XLSX: Text extraction
+        if mime_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+            text = self._extract_xlsx_text(file)
+            if text:
+                return {
+                    "type": "text",
+                    "text": f"[Spreadsheet data from {file.filename}]:\n{text}"
+                }
+            return None
+
+        # Unsupported format
+        logger.warning(
+            "Unsupported file format for ChatGPT fallback",
+            extra={
+                "filename": file.filename,
+                "mime_type": mime_type,
+                "event": "chatgpt_unsupported_format"
+            }
+        )
+        return {
+            "type": "text",
+            "text": f"[Unable to process {file.filename} - format not supported for text extraction]"
+        }
+
+    def _extract_pdf_text(self, file) -> Optional[str]:
+        """
+        Extract text content from a PDF file.
+
+        Args:
+            file: FileAttachment with PDF data
+
+        Returns:
+            Extracted text or None if extraction fails
+        """
+        try:
+            from pypdf import PdfReader
+
+            # Decode base64 to bytes
+            pdf_bytes = base64.b64decode(file.data_base64)
+            pdf_buffer = io.BytesIO(pdf_bytes)
+
+            # Extract text from all pages
+            reader = PdfReader(pdf_buffer)
+            text_parts = []
+
+            for i, page in enumerate(reader.pages, start=1):
+                page_text = page.extract_text()
+                if page_text:
+                    text_parts.append(f"--- Page {i} ---\n{page_text}")
+
+            if not text_parts:
+                logger.warning(
+                    "PDF appears to be image-based (no extractable text)",
+                    extra={"filename": file.filename, "page_count": len(reader.pages)}
+                )
+                return f"[This PDF ({file.filename}) contains {len(reader.pages)} pages but no extractable text. It may be scanned/image-based.]"
+
+            full_text = "\n\n".join(text_parts)
+
+            logger.info(
+                "PDF text extraction successful",
+                extra={
+                    "filename": file.filename,
+                    "page_count": len(reader.pages),
+                    "text_length": len(full_text),
+                    "event": "pdf_text_extracted"
+                }
+            )
+
+            return full_text
+
+        except Exception as e:
+            error_msg = str(e).lower()
+            if "password" in error_msg or "encrypted" in error_msg:
+                logger.warning(
+                    "PDF is password-protected",
+                    extra={"filename": file.filename}
+                )
+                return f"[This PDF ({file.filename}) is password-protected and cannot be read. Please provide an unlocked version.]"
+
+            logger.error(
+                "PDF text extraction failed",
+                extra={
+                    "filename": file.filename,
+                    "error": str(e),
+                    "event": "pdf_extraction_failed"
+                }
+            )
+            return None
+
+    def _extract_docx_text(self, file) -> Optional[str]:
+        """
+        Extract text content from a DOCX file.
+
+        Args:
+            file: FileAttachment with DOCX data
+
+        Returns:
+            Extracted text or None if extraction fails
+        """
+        try:
+            from docx import Document
+
+            # Decode base64 to bytes
+            docx_bytes = base64.b64decode(file.data_base64)
+            docx_buffer = io.BytesIO(docx_bytes)
+
+            # Extract text from all paragraphs
+            doc = Document(docx_buffer)
+            text_parts = []
+
+            for para in doc.paragraphs:
+                if para.text.strip():
+                    text_parts.append(para.text)
+
+            # Also extract from tables
+            for table in doc.tables:
+                table_rows = []
+                for row in table.rows:
+                    row_cells = [cell.text.strip() for cell in row.cells]
+                    table_rows.append(" | ".join(row_cells))
+                if table_rows:
+                    text_parts.append("\n".join(table_rows))
+
+            full_text = "\n\n".join(text_parts)
+
+            if not full_text.strip():
+                logger.warning(
+                    "DOCX appears empty",
+                    extra={"filename": file.filename}
+                )
+                return f"[This document ({file.filename}) appears to be empty or contains only images.]"
+
+            logger.info(
+                "DOCX text extraction successful",
+                extra={
+                    "filename": file.filename,
+                    "paragraph_count": len(doc.paragraphs),
+                    "table_count": len(doc.tables),
+                    "text_length": len(full_text),
+                    "event": "docx_text_extracted"
+                }
+            )
+
+            return full_text
+
+        except Exception as e:
+            logger.error(
+                "DOCX text extraction failed",
+                extra={
+                    "filename": file.filename,
+                    "error": str(e),
+                    "event": "docx_extraction_failed"
+                }
+            )
+            return None
+
+    def _extract_xlsx_text(self, file) -> Optional[str]:
+        """
+        Extract text content from an XLSX file as tabular text.
+
+        Args:
+            file: FileAttachment with XLSX data
+
+        Returns:
+            Extracted text or None if extraction fails
+        """
+        try:
+            from openpyxl import load_workbook
+
+            # Decode base64 to bytes
+            xlsx_bytes = base64.b64decode(file.data_base64)
+            xlsx_buffer = io.BytesIO(xlsx_bytes)
+
+            # Load workbook
+            wb = load_workbook(xlsx_buffer, read_only=True, data_only=True)
+            text_parts = []
+
+            for sheet_name in wb.sheetnames:
+                sheet = wb[sheet_name]
+                rows = []
+
+                for row in sheet.iter_rows(values_only=True):
+                    # Convert row values to strings, handling None
+                    row_values = [str(cell) if cell is not None else "" for cell in row]
+                    # Skip entirely empty rows
+                    if any(v.strip() for v in row_values):
+                        rows.append(" | ".join(row_values))
+
+                if rows:
+                    text_parts.append(f"=== Sheet: {sheet_name} ===\n" + "\n".join(rows))
+
+            wb.close()
+
+            full_text = "\n\n".join(text_parts)
+
+            if not full_text.strip():
+                logger.warning(
+                    "XLSX appears empty",
+                    extra={"filename": file.filename}
+                )
+                return f"[This spreadsheet ({file.filename}) appears to be empty.]"
+
+            logger.info(
+                "XLSX text extraction successful",
+                extra={
+                    "filename": file.filename,
+                    "sheet_count": len(wb.sheetnames),
+                    "text_length": len(full_text),
+                    "event": "xlsx_text_extracted"
+                }
+            )
+
+            return full_text
+
+        except Exception as e:
+            logger.error(
+                "XLSX text extraction failed",
+                extra={
+                    "filename": file.filename,
+                    "error": str(e),
+                    "event": "xlsx_extraction_failed"
+                }
+            )
+            return None

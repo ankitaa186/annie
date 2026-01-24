@@ -194,13 +194,13 @@ class GeminiProvider(BaseProvider):
         )
 
     def _convert_messages_to_gemini_format(
-        self, messages: List[Dict[str, Any]]
+        self, messages: List[Dict[str, Any]], files: Optional[List] = None
     ) -> tuple[Optional[str], List[Dict[str, Any]]]:
         """
-        Convert OpenAI-format messages to Gemini format.
+        Convert OpenAI-format messages to Gemini format with optional file attachments.
 
         OpenAI format: [{"role": "user", "content": "..."}]
-        Gemini format: [{"role": "user", "parts": [{"text": "..."}]}]
+        Gemini format: [{"role": "user", "parts": [{"text": "..."}, {"inline_data": {...}}]}]
 
         Role mapping:
         - user → user
@@ -209,6 +209,7 @@ class GeminiProvider(BaseProvider):
 
         Args:
             messages: List of OpenAI-format messages
+            files: Optional list of FileAttachment objects for multimodal processing
 
         Returns:
             Tuple of (system_instruction, converted_messages)
@@ -216,6 +217,7 @@ class GeminiProvider(BaseProvider):
         system_instruction = None
         converted_messages = []
 
+        # Convert all messages (files will be attached to last user message at the end)
         for msg in messages:
             role = msg.get("role")
             content = msg.get("content", "")
@@ -224,9 +226,11 @@ class GeminiProvider(BaseProvider):
                 # Gemini doesn't have native system role - extract for system_instruction
                 system_instruction = content
             elif role == "user":
+                # Build parts array with text only (files added to last user message below)
+                parts = [{"text": content}]
                 converted_messages.append({
                     "role": "user",
-                    "parts": [{"text": content}]
+                    "parts": parts
                 })
             elif role == "assistant":
                 # Map assistant → model for Gemini
@@ -241,6 +245,30 @@ class GeminiProvider(BaseProvider):
                     "parts": [{"text": f"Tool result: {content}"}]
                 })
 
+        # Attach files to the LAST user message (current message, not history)
+        if files and converted_messages:
+            # Find the last user message and attach files to it
+            for i in range(len(converted_messages) - 1, -1, -1):
+                if converted_messages[i].get("role") == "user":
+                    for file in files:
+                        converted_messages[i]["parts"].append({
+                            "inline_data": {
+                                "mime_type": file.mime_type,
+                                "data": file.data_base64
+                            }
+                        })
+                    logger.info(
+                        "Files attached to last user message for Gemini",
+                        extra={
+                            "file_count": len(files),
+                            "mime_types": [f.mime_type for f in files],
+                            "total_size_bytes": sum(f.size_bytes for f in files),
+                            "message_index": i,
+                            "event": "gemini_multimodal_request"
+                        }
+                    )
+                    break
+
         return system_instruction, converted_messages
 
     async def stream_chat_completion(
@@ -250,15 +278,17 @@ class GeminiProvider(BaseProvider):
         **kwargs
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
-        Stream chat completion from Gemini 3 Pro with tool calling support.
+        Stream chat completion from Gemini 3 Pro with tool calling and multimodal support.
 
         Implements multi-turn function calling with thought_signature preservation (Story 9.3).
+        Supports multimodal inputs (images, documents, spreadsheets) via inline_data (Story 18.2).
 
         Args:
             messages: List of message dictionaries (OpenAI format)
             tools: Optional list of tools in OpenAI format for function calling
             **kwargs: Additional parameters:
                 - mcp_client: MCP client for tool execution (required if tools provided)
+                - files: Optional list of FileAttachment objects for multimodal processing
 
         Yields:
             Stream event dictionaries (OpenAI-compatible format):
@@ -273,10 +303,11 @@ class GeminiProvider(BaseProvider):
             RateLimitError: If rate limit is hit
         """
         start_time = time.time()
+        files = kwargs.get("files")  # Extract files from kwargs
 
         try:
-            # Convert messages to Gemini format
-            system_instruction, gemini_messages = self._convert_messages_to_gemini_format(messages)
+            # Convert messages to Gemini format with optional file attachments
+            system_instruction, gemini_messages = self._convert_messages_to_gemini_format(messages, files)
 
             # Convert tools to Gemini format if provided (Story 9.3)
             gemini_tools = None
@@ -307,7 +338,10 @@ class GeminiProvider(BaseProvider):
                     "message_count": len(messages),
                     "has_system_instruction": system_instruction is not None,
                     "tool_count": len(gemini_tools) if gemini_tools else 0,
-                    "last_user_message": last_user_msg
+                    "last_user_message": last_user_msg,
+                    "has_files": files is not None,
+                    "file_count": len(files) if files else 0,
+                    "event": "gemini_multimodal_stream" if files else "gemini_text_stream"
                 }
             )
 
@@ -327,7 +361,22 @@ class GeminiProvider(BaseProvider):
             # Initialize ChatSession with history (all messages except the last user message)
             # The last user message will be sent via send_message()
             history = gemini_messages[:-1] if len(gemini_messages) > 1 else []
-            last_user_message = gemini_messages[-1]["parts"][0]["text"] if gemini_messages else ""
+
+            # Extract the last user message parts for send_message()
+            # For multimodal requests, we need to send the full parts array (text + inline_data)
+            # For text-only, we can send just the text string
+            if gemini_messages:
+                last_parts = gemini_messages[-1].get("parts", [])
+                # Check if this is multimodal (has inline_data parts)
+                has_files = any("inline_data" in part for part in last_parts)
+                if has_files:
+                    # Send full parts array for multimodal
+                    last_user_message = last_parts
+                else:
+                    # Send just text for text-only (backward compatible)
+                    last_user_message = last_parts[0]["text"] if last_parts else ""
+            else:
+                last_user_message = ""
 
             # CRITICAL: Prepend system_instruction to history if provided
             # Gemini doesn't have native system role, so we inject it into first user message
@@ -343,7 +392,16 @@ class GeminiProvider(BaseProvider):
                         break
             elif system_instruction and not history:
                 # No history, prepend to last_user_message instead
-                last_user_message = f"{system_instruction}\n\n{last_user_message}"
+                # Handle both string (text-only) and list (multimodal) formats
+                if isinstance(last_user_message, list):
+                    # Multimodal: prepend to text part
+                    for part in last_user_message:
+                        if "text" in part:
+                            part["text"] = f"{system_instruction}\n\n{part['text']}"
+                            break
+                else:
+                    # Text-only: prepend to string
+                    last_user_message = f"{system_instruction}\n\n{last_user_message}"
                 logger.debug(
                     "Prepended system instruction to first user message",
                     extra={"provider": self.model_name}

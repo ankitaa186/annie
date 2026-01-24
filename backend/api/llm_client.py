@@ -12,6 +12,7 @@ import time
 from typing import Any, AsyncGenerator, Dict, List, Optional
 from api.config import get_config
 from api.logging import get_logger
+from api.models.file_attachment import FileAttachment, get_files_metadata
 from api.providers import (
     BaseProvider,
     GrokProvider,
@@ -322,7 +323,8 @@ class LLMClient:
         self,
         messages: List[Dict[str, Any]],
         tools: Optional[List[Dict[str, Any]]] = None,
-        mcp_client=None
+        mcp_client=None,
+        files: Optional[List[FileAttachment]] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Send streaming chat completion request with automatic provider failover.
@@ -335,6 +337,7 @@ class LLMClient:
                      Example: [{"role": "user", "content": "Hello"}]
             tools: Optional list of tools/functions in OpenAI format for function calling
             mcp_client: MCP client instance for tool execution (required if tools provided)
+            files: Optional list of file attachments for multimodal processing
 
         Yields:
             Stream event dictionaries:
@@ -364,6 +367,11 @@ class LLMClient:
             )
             skip_primary = True
 
+        # Log file metadata if present (never log content)
+        files_log = None
+        if files:
+            files_log = get_files_metadata(files)
+
         logger.info(
             "Starting streaming chat completion",
             extra={
@@ -372,14 +380,17 @@ class LLMClient:
                 "message_count": len(messages),
                 "tools_provided": len(tools) if tools else 0,
                 "mcp_client_provided": mcp_client is not None,
-                "primary_in_backoff": skip_primary
+                "primary_in_backoff": skip_primary,
+                "has_files": files is not None,
+                "files_metadata": files_log,
+                "event": "multimodal_stream" if files else "text_stream"
             }
         )
 
         # Try primary provider (unless in backoff)
         if not skip_primary:
             try:
-                async for event in self.provider.stream_chat_completion(messages, tools, mcp_client=mcp_client):
+                async for event in self.provider.stream_chat_completion(messages, tools, mcp_client=mcp_client, files=files):
                     yield event
                 return  # Successfully completed streaming
 
@@ -472,7 +483,7 @@ class LLMClient:
                 raise ValueError(f"Unknown fallback provider: {fallback_name}")
 
             async with fallback_provider:
-                async for event in fallback_provider.stream_chat_completion(messages, tools, mcp_client=mcp_client):
+                async for event in fallback_provider.stream_chat_completion(messages, tools, mcp_client=mcp_client, files=files):
                     yield event
 
             logger.info(

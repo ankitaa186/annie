@@ -18,6 +18,12 @@ from pydantic import BaseModel, Field
 from api.logging import get_logger
 from api.memory import MemoryManager
 from api.mcp_client import MCPClient, MCPClientError, MCPNetworkError, MCPToolError
+from api.models.file_attachment import (
+    FileAttachment,
+    MAX_FILES_PER_REQUEST,
+    validate_files,
+    get_files_metadata,
+)
 from api.proactive.activity_tracker import ActivityTracker
 from api.profile import ProfileManager
 from api.state import StateManager, StateError
@@ -211,6 +217,11 @@ class ChatRequest(BaseModel):
     platform: str = Field(..., description="Platform identifier (e.g., 'telegram')")
     message: str = Field(..., min_length=1, description="User message content")
     context: Optional[dict] = Field(default={}, description="Additional context metadata")
+    files: Optional[List[FileAttachment]] = Field(
+        default=None,
+        description="Optional list of file attachments for multimodal processing",
+        max_length=MAX_FILES_PER_REQUEST
+    )
 
 
 class ChatResponse(BaseModel):
@@ -278,13 +289,29 @@ async def create_chat(request: ChatRequest, background_tasks: BackgroundTasks):
     # Detect decision support request for memory retrieval
     needs_decision_support = is_decision_support_request(request.message)
 
+    # Log file metadata if present (never log file content)
+    files_metadata = None
+    if request.files:
+        files_metadata = get_files_metadata(request.files)
+
+        # Validate files
+        validation_errors = validate_files(request.files)
+        if validation_errors:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File validation failed: {'; '.join(validation_errors)}"
+            )
+
     logger.info(
         "Chat request received",
         extra={
             "user_id": request.user_id,
             "platform": request.platform,
             "message_length": len(request.message),
-            "needs_decision_support": needs_decision_support
+            "needs_decision_support": needs_decision_support,
+            "has_files": request.files is not None,
+            "files_metadata": files_metadata,
+            "event": "multimodal_request" if request.files else "text_request"
         }
     )
 
@@ -585,6 +612,28 @@ async def create_chat(request: ChatRequest, background_tasks: BackgroundTasks):
 
             # Build stream URL
             stream_url = f"/api/stream/{conversation_id}"
+
+            # Store files in Redis for stream endpoint access (if present)
+            # Files are stored temporarily and discarded after LLM response completes
+            if request.files:
+                files_key = f"files:{conversation_id}"
+                # Convert FileAttachment objects to dicts for JSON serialization
+                files_data = [f.model_dump() for f in request.files]
+                await state.redis_client.setex(
+                    files_key,
+                    300,  # 5 minutes TTL (same as other context caches)
+                    json.dumps(files_data)
+                )
+                logger.info(
+                    "Files stored for stream endpoint",
+                    extra={
+                        "user_id": request.user_id,
+                        "conversation_id": conversation_id,
+                        "file_count": len(request.files),
+                        "total_size_bytes": sum(f.size_bytes for f in request.files),
+                        "event": "files_stored"
+                    }
+                )
 
             # Trigger background memory storage on EVERY message (fire-and-forget)
             # This ensures comprehensive memory coverage for personalization
