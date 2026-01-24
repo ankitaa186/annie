@@ -673,23 +673,26 @@ async def retrieve_memories_tool_handler(
     user_id: str,
     query: str,
     limit: int = 100,
-    persona: str = None
+    persona: str = "identity"
 ) -> Dict[str, Any]:
     """
     Retrieve relevant memories from agentic-memories service for personalized decision support.
 
-    This tool retrieves past conversation memories based on semantic similarity to the query.
-    Use this when the user asks for advice, recommendations, or decisions to provide
-    personalized responses based on their history.
+    Uses persona-aware retrieval with weighted scoring based on the selected persona:
+    - identity: General context, who the person is (default)
+    - finance: Investing, money, budgeting (higher temporal + importance weights)
+    - health: Medical, wellness, fitness (balanced weights)
+    - relationships: Family, friends, social dynamics (higher emotional weight)
+    - creativity: Ideas, projects, brainstorming (higher semantic weight)
 
     Args:
         user_id: User identifier
         query: Search query describing the decision context
         limit: Maximum number of memories to retrieve (default: 100, range: 20-1000)
-        persona: Optional persona filter
+        persona: Persona context for weighted retrieval (default: "identity")
 
     Returns:
-        dict: Result with status, memory_count, and formatted memories for LLM context
+        dict: Result with status, memory_count, persona used, and formatted memories
     """
     start_time = time.time()
 
@@ -705,9 +708,15 @@ async def retrieve_memories_tool_handler(
         logger.warning(f"Invalid limit {limit}, clamping to range [20, 1000]")
         limit = max(20, min(1000, limit))
 
+    # Validate persona parameter
+    valid_personas = ["identity", "finance", "health", "relationships", "creativity"]
+    if persona not in valid_personas:
+        logger.warning(f"Invalid persona '{persona}', defaulting to 'identity'")
+        persona = "identity"
+
     try:
         logger.info(
-            "Retrieving memories via MCP tool",
+            "Retrieving memories via persona-aware MCP tool",
             extra={
                 "user_id": user_id,
                 "query": query,
@@ -716,25 +725,38 @@ async def retrieve_memories_tool_handler(
             }
         )
 
-        params = {
+        # Build POST request body for persona-aware retrieval
+        request_body = {
             "user_id": user_id,
             "query": query,
-            "limit": limit
+            "limit": limit,
+            "persona_context": {
+                "forced_persona": persona
+            },
+            "include_narrative": False,
+            "explain": False
         }
-        if persona:
-            params["persona"] = persona
 
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(
+            response = await client.post(
                 f"{memories_url}/v1/retrieve",
-                params=params
+                json=request_body,
+                headers={"Content-Type": "application/json"}
             )
 
             duration_ms = int((time.time() - start_time) * 1000)
 
             if response.status_code == 200:
                 result = response.json()
-                memories = result.get("results", [])
+
+                # Parse persona-aware response format
+                # Response: {"persona": {...}, "results": {"memories": [...], ...}}
+                persona_info = result.get("persona", {})
+                selected_persona = persona_info.get("selected", persona)
+                confidence = persona_info.get("confidence", 0.0)
+
+                results_obj = result.get("results", {})
+                memories = results_obj.get("memories", [])
 
                 if duration_ms > 300:
                     logger.warning(
@@ -744,16 +766,19 @@ async def retrieve_memories_tool_handler(
                             "query": query,
                             "duration_ms": duration_ms,
                             "memory_count": len(memories),
+                            "persona": selected_persona,
                             "exceeded_target": True
                         }
                     )
                 else:
                     logger.info(
-                        "Memories retrieved successfully via MCP tool",
+                        "Memories retrieved successfully via persona-aware MCP tool",
                         extra={
                             "user_id": user_id,
                             "query": query,
                             "memory_count": len(memories),
+                            "persona": selected_persona,
+                            "confidence": confidence,
                             "duration_ms": duration_ms
                         }
                     )
@@ -762,6 +787,7 @@ async def retrieve_memories_tool_handler(
                     return {
                         "status": "success",
                         "memory_count": 0,
+                        "persona": selected_persona,
                         "memories": [],
                         "message": "No past decision history found for this query. Recommendations will be based on general knowledge."
                     }
@@ -785,8 +811,9 @@ async def retrieve_memories_tool_handler(
                 return {
                     "status": "success",
                     "memory_count": len(memories),
+                    "persona": selected_persona,
                     "memories": formatted_memories,
-                    "message": f"Retrieved {len(memories)} relevant memories to personalize recommendations."
+                    "message": f"Retrieved {len(memories)} relevant memories using '{selected_persona}' persona."
                 }
 
             else:
@@ -859,7 +886,18 @@ async def retrieve_memories_tool_handler(
 
 retrieve_memories_tool = {
     "name": "retrieve_memories",
-    "description": "Retrieve relevant memories from agentic-memories service for personalized decision support. Use this tool when the user asks for advice, recommendations, or decisions (e.g., 'should I invest in X?', 'what do you recommend?', 'help me decide'). The tool retrieves past conversation memories based on semantic similarity to provide personalized responses.",
+    "description": """Retrieve relevant memories from agentic-memories service for personalized decision support.
+
+Use this tool when the user asks for advice, recommendations, or decisions.
+Memories are retrieved with persona-aware weighting based on the selected persona.
+
+PERSONA SELECTION GUIDE - Choose based on conversation topic:
+- "identity" (default): General context, who the person is, background info
+- "finance": Investing, stocks, money, budgeting (prioritizes recent decisions and high-importance memories)
+- "health": Medical conditions, wellness, fitness, diet (balanced across all factors)
+- "relationships": Family, friends, social dynamics (prioritizes emotionally significant memories)
+- "creativity": Ideas, projects, brainstorming (prioritizes conceptual and thematic connections)
+""",
     "inputSchema": {
         "type": "object",
         "properties": {
@@ -877,6 +915,12 @@ retrieve_memories_tool = {
                 "default": 100,
                 "minimum": 20,
                 "maximum": 1000
+            },
+            "persona": {
+                "type": "string",
+                "description": "Persona context for weighted retrieval. Choose based on conversation topic.",
+                "enum": ["identity", "finance", "health", "relationships", "creativity"],
+                "default": "identity"
             }
         },
         "required": ["user_id", "query"]
