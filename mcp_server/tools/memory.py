@@ -673,7 +673,7 @@ async def retrieve_memories_tool_handler(
     user_id: str,
     query: str,
     limit: int = 100,
-    persona: str = "identity"
+    persona: str = "friend"
 ) -> Dict[str, Any]:
     """
     Retrieve relevant memories from agentic-memories service for personalized decision support.
@@ -891,12 +891,26 @@ retrieve_memories_tool = {
 Use this tool when the user asks for advice, recommendations, or decisions.
 Memories are retrieved with persona-aware weighting based on the selected persona.
 
-PERSONA SELECTION GUIDE - Choose based on conversation topic:
-- "identity" (default): General context, who the person is, background info
-- "finance": Investing, stocks, money, budgeting (prioritizes recent decisions and high-importance memories)
-- "health": Medical conditions, wellness, fitness, diet (balanced across all factors)
-- "relationships": Family, friends, social dynamics (prioritizes emotionally significant memories)
-- "creativity": Ideas, projects, brainstorming (prioritizes conceptual and thematic connections)
+PERSONA SELECTION GUIDE - Choose based on your current mode of interaction:
+
+ANNIE COMPANION PERSONAS (preferred):
+- "partner": Intimate emotional support, deep listening, pattern recognition, mirror work
+  (highest emotional weight - use when user is vulnerable, needs deep understanding)
+- "guide": Decisions, goals, accountability, life coaching, transformation
+  (high importance weight - use for "should I", "help me decide", goal-setting)
+- "strategist": Financial advice, investments, portfolio, wealth planning
+  (highest importance + temporal weight - use for stocks, money, financial planning)
+- "expert": Technical knowledge, DIY, cooking, smart home, how-to
+  (highest semantic weight - use for building, making, technical questions)
+- "friend": Casual companionship, everyday chat, light emotional support
+  (balanced warm - use for casual conversation, daily check-ins)
+
+LEGACY PERSONAS (still available):
+- "identity": General context, who the person is, background info
+- "finance": Investing, stocks, money (similar to strategist)
+- "health": Medical, wellness, fitness (balanced weights)
+- "relationships": Family, friends, social (similar to partner)
+- "creativity": Ideas, projects (similar to expert)
 """,
     "inputSchema": {
         "type": "object",
@@ -918,9 +932,9 @@ PERSONA SELECTION GUIDE - Choose based on conversation topic:
             },
             "persona": {
                 "type": "string",
-                "description": "Persona context for weighted retrieval. Choose based on conversation topic.",
-                "enum": ["identity", "finance", "health", "relationships", "creativity"],
-                "default": "identity"
+                "description": "Persona context for weighted retrieval. Choose based on your current mode of interaction.",
+                "enum": ["partner", "guide", "strategist", "expert", "friend", "identity", "finance", "health", "relationships", "creativity"],
+                "default": "friend"
             }
         },
         "required": ["user_id", "query"]
