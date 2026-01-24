@@ -82,6 +82,7 @@ jobs:
 
   build:
     name: Build Docker Image
+    needs: test
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
     # prod for main branch pushes, dev for all PR builds
