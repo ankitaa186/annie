@@ -21,6 +21,7 @@ from api.models.file_attachment import FileAttachment, get_files_metadata
 from api.state import StateManager, StateError
 from api.status import StatusContext, emit_status
 from api.logging import get_logger
+from api.utils import inject_user_id
 
 try:
     from langfuse.decorators import observe, langfuse_context
@@ -570,19 +571,10 @@ async def stream_generator(
                         arguments = {}
 
                     # Inject correct user_id to override LLM-inferred value
-                    if user_id and "user_id" in arguments:
-                        original_user_id = arguments.get("user_id")
-                        if original_user_id != user_id:
-                            logger.warning(
-                                "Overriding LLM-provided user_id with correct value",
-                                extra={
-                                    "conversation_id": conversation_id,
-                                    "tool_name": function_name,
-                                    "original_user_id": original_user_id,
-                                    "correct_user_id": user_id
-                                }
-                            )
-                        arguments["user_id"] = user_id
+                    inject_user_id(
+                        arguments, user_id, logger,
+                        {"conversation_id": conversation_id, "tool_name": function_name}
+                    )
 
                     logger.info(
                         "Executing tool",

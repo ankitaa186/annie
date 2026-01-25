@@ -17,6 +17,7 @@ from api.providers.grok_provider import ProviderError, RateLimitError
 from api.providers.gemini_tool_adapter import GeminiToolAdapter
 from api.observability.tracing import get_current_trace
 from api.observability.cost import calculate_llm_cost
+from api.utils import inject_user_id
 
 logger = get_logger(__name__)
 
@@ -1124,20 +1125,10 @@ class GeminiProvider(BaseProvider):
             from api.mcp_client import MCPClient, MCPNetworkError, MCPToolError
 
             # Inject correct user_id to override any LLM-inferred value
-            # This prevents the LLM from using wrong user_ids (e.g., inferring "ankit" from profile name)
-            if user_id and "user_id" in tool_arguments:
-                original_user_id = tool_arguments.get("user_id")
-                if original_user_id != user_id:
-                    logger.warning(
-                        "Overriding LLM-provided user_id with correct value",
-                        extra={
-                            "provider": self.model_name,
-                            "tool_name": tool_name,
-                            "original_user_id": original_user_id,
-                            "correct_user_id": user_id
-                        }
-                    )
-                tool_arguments["user_id"] = user_id
+            inject_user_id(
+                tool_arguments, user_id, logger,
+                {"provider": self.model_name, "tool_name": tool_name}
+            )
 
             logger.info(
                 "Executing MCP tool for Gemini",
