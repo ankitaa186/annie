@@ -157,6 +157,8 @@ class ChatGPTProvider(BaseProvider):
         """
         # Extract files from kwargs for multimodal support (Story 18.3)
         files = kwargs.get("files")
+        # Extract user_id for tool argument injection (prevents LLM from using wrong IDs)
+        user_id = kwargs.get("user_id")
 
         # Build multimodal messages if files provided
         if files:
@@ -171,7 +173,7 @@ class ChatGPTProvider(BaseProvider):
             iteration += 1
 
             async for event in self._stream_single_completion(
-                conversation_messages, tools, mcp_client
+                conversation_messages, tools, mcp_client, user_id
             ):
                 if event.get("type") == "tool_calls_pending":
                     # Tool calls need to be executed, then continue loop
@@ -217,6 +219,7 @@ class ChatGPTProvider(BaseProvider):
         messages: List[Dict[str, Any]],
         tools: Optional[List[Dict[str, Any]]] = None,
         mcp_client: Optional[Any] = None,
+        user_id: Optional[str] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Stream a single completion (may result in tool calls or final response).
@@ -433,6 +436,19 @@ class ChatGPTProvider(BaseProvider):
                                             # Execute tool if MCP client available
                                             if mcp_client:
                                                 try:
+                                                    # Inject correct user_id to override LLM-inferred value
+                                                    if user_id and "user_id" in args:
+                                                        if args.get("user_id") != user_id:
+                                                            logger.warning(
+                                                                "Overriding LLM-provided user_id with correct value",
+                                                                extra={
+                                                                    "provider": "chatgpt-5",
+                                                                    "tool_name": tool_name,
+                                                                    "original_user_id": args.get("user_id"),
+                                                                    "correct_user_id": user_id
+                                                                }
+                                                            )
+                                                        args["user_id"] = user_id
                                                     result = await mcp_client.call_tool(tool_name, args)
                                                     result_str = json.dumps(result) if isinstance(result, (dict, list)) else str(result)
 

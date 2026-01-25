@@ -324,7 +324,8 @@ class LLMClient:
         messages: List[Dict[str, Any]],
         tools: Optional[List[Dict[str, Any]]] = None,
         mcp_client=None,
-        files: Optional[List[FileAttachment]] = None
+        files: Optional[List[FileAttachment]] = None,
+        user_id: Optional[str] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Send streaming chat completion request with automatic provider failover.
@@ -338,6 +339,7 @@ class LLMClient:
             tools: Optional list of tools/functions in OpenAI format for function calling
             mcp_client: MCP client instance for tool execution (required if tools provided)
             files: Optional list of file attachments for multimodal processing
+            user_id: Optional user ID to inject into tool calls (prevents LLM from using wrong IDs)
 
         Yields:
             Stream event dictionaries:
@@ -390,7 +392,7 @@ class LLMClient:
         # Try primary provider (unless in backoff)
         if not skip_primary:
             try:
-                async for event in self.provider.stream_chat_completion(messages, tools, mcp_client=mcp_client, files=files):
+                async for event in self.provider.stream_chat_completion(messages, tools, mcp_client=mcp_client, files=files, user_id=user_id):
                     yield event
                 return  # Successfully completed streaming
 
@@ -483,7 +485,7 @@ class LLMClient:
                 raise ValueError(f"Unknown fallback provider: {fallback_name}")
 
             async with fallback_provider:
-                async for event in fallback_provider.stream_chat_completion(messages, tools, mcp_client=mcp_client, files=files):
+                async for event in fallback_provider.stream_chat_completion(messages, tools, mcp_client=mcp_client, files=files, user_id=user_id):
                     yield event
 
             logger.info(
