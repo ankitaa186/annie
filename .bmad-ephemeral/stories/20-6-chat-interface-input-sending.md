@@ -1,6 +1,6 @@
 # Story 20.6: Chat Interface - Input & Sending
 
-Status: drafted
+Status: ready-for-dev
 
 ## Story
 
@@ -237,6 +237,8 @@ const sendMessage = async () => {
 ## Dev Agent Record
 
 ### Context Reference
+
+- .bmad-ephemeral/stories/20-6-chat-interface-input-sending.context.xml
 
 ### Agent Model Used
 

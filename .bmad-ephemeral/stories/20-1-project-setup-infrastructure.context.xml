@@ -1,0 +1,242 @@
+<story-context id="bmad/bmm/workflows/4-implementation/story-context/template" v="1.0">
+  <metadata>
+    <epicId>20</epicId>
+    <storyId>20.1</storyId>
+    <title>Project Setup &amp; Infrastructure</title>
+    <status>drafted</status>
+    <generatedAt>2026-01-26</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>.bmad-ephemeral/stories/20-1-project-setup-infrastructure.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>developer</asA>
+    <iWant>to set up a Vite + React project with shadcn/ui and Docker integration</iWant>
+    <soThat>the web UI has a solid foundation for building Annie's responsive interface</soThat>
+    <tasks>
+      <task id="1" goal="Initialize Vite + React project" ac="1, 2">
+        <subtask>1.1 Run `npm create vite@latest web -- --template react-ts`</subtask>
+        <subtask>1.2 Configure `tsconfig.json` with strict mode and path aliases</subtask>
+        <subtask>1.3 Add `@/` path alias for clean imports</subtask>
+        <subtask>1.4 Verify TypeScript compilation works</subtask>
+      </task>
+      <task id="2" goal="Configure Tailwind CSS" ac="3">
+        <subtask>2.1 Install tailwindcss, postcss, autoprefixer</subtask>
+        <subtask>2.2 Create `tailwind.config.js` with Annie theme colors</subtask>
+        <subtask>2.3 Create `postcss.config.js`</subtask>
+        <subtask>2.4 Add Tailwind directives to `index.css`</subtask>
+        <subtask>2.5 Verify Tailwind classes work in a test component</subtask>
+      </task>
+      <task id="3" goal="Install and configure shadcn/ui" ac="4">
+        <subtask>3.1 Run `npx shadcn@latest init` with custom settings</subtask>
+        <subtask>3.2 Configure `components.json` for Tailwind</subtask>
+        <subtask>3.3 Add base shadcn/ui components (Button, Card, Input)</subtask>
+        <subtask>3.4 Create `lib/utils.ts` with `cn()` utility</subtask>
+        <subtask>3.5 Verify shadcn components render correctly</subtask>
+      </task>
+      <task id="4" goal="Set up linting and formatting" ac="5">
+        <subtask>4.1 Install ESLint with React and TypeScript plugins</subtask>
+        <subtask>4.2 Create `.eslintrc.cjs` configuration</subtask>
+        <subtask>4.3 Install Prettier</subtask>
+        <subtask>4.4 Create `.prettierrc` configuration</subtask>
+        <subtask>4.5 Add lint and format scripts to package.json</subtask>
+        <subtask>4.6 Verify `npm run lint` passes</subtask>
+      </task>
+      <task id="5" goal="Create Docker configuration" ac="6, 7, 11">
+        <subtask>5.1 Create `web/Dockerfile` with multi-stage build</subtask>
+        <subtask>5.2 Create `web/nginx.conf` for SPA routing</subtask>
+        <subtask>5.3 Add web service to `docker-compose.yml`</subtask>
+        <subtask>5.4 Configure proper networking (annie-network)</subtask>
+        <subtask>5.5 Verify `docker compose build web` succeeds</subtask>
+      </task>
+      <task id="6" goal="Configure environment variables" ac="8">
+        <subtask>6.1 Create `.env.example` for web service</subtask>
+        <subtask>6.2 Configure Vite to expose VITE_* variables</subtask>
+        <subtask>6.3 Create `src/lib/config.ts` for runtime config</subtask>
+        <subtask>6.4 Document required environment variables</subtask>
+      </task>
+      <task id="7" goal="Verify development and production builds" ac="9, 10, 12">
+        <subtask>7.1 Run `npm run dev` and verify port 3000</subtask>
+        <subtask>7.2 Run `npm run build` and verify dist output</subtask>
+        <subtask>7.3 Test production build with `npm run preview`</subtask>
+        <subtask>7.4 Create basic App shell with placeholder</subtask>
+      </task>
+      <task id="8" goal="Test Docker deployment">
+        <subtask>8.1 Build and run container locally</subtask>
+        <subtask>8.2 Verify nginx serves SPA correctly</subtask>
+        <subtask>8.3 Test SPA routing (refresh on deep route)</subtask>
+      </task>
+    </tasks>
+  </story>
+
+  <acceptanceCriteria>
+    <criterion id="AC1">Vite + React 18 project bootstrapped in `web/` directory</criterion>
+    <criterion id="AC2">TypeScript configuration with strict mode enabled</criterion>
+    <criterion id="AC3">Tailwind CSS properly configured and working</criterion>
+    <criterion id="AC4">shadcn/ui component library installed and configured</criterion>
+    <criterion id="AC5">ESLint + Prettier configuration with consistent code style</criterion>
+    <criterion id="AC6">Dockerfile for containerized deployment using nginx</criterion>
+    <criterion id="AC7">Docker Compose service definition added to main compose file</criterion>
+    <criterion id="AC8">Environment variables configuration (VITE_API_URL, etc.)</criterion>
+    <criterion id="AC9">Development server runs on port 3000</criterion>
+    <criterion id="AC10">Production build completes successfully without errors</criterion>
+    <criterion id="AC11">Nginx config for SPA routing (fallback to index.html)</criterion>
+    <criterion id="AC12">Basic app shell renders with placeholder content</criterion>
+  </acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc>
+        <path>.bmad-ephemeral/tech-contexts/epic-20-tech-context.md</path>
+        <title>Epic 20: Annie Web UI - Technical Context</title>
+        <section>3.1 Directory Structure, 5.1 NPM Packages</section>
+        <snippet>Comprehensive technical context for Epic 20 including directory structure, component architecture, NPM dependencies, and integration points with existing backend.</snippet>
+      </doc>
+      <doc>
+        <path>docs/epics/epic-20-web-ui.md</path>
+        <title>Epic: Annie Web UI</title>
+        <section>Story 20.1: Project Setup &amp; Infrastructure</section>
+        <snippet>Core epic requirements for responsive web application including Vite + React + shadcn/ui stack, Docker integration, and infrastructure setup for Annie's web interface.</snippet>
+      </doc>
+      <doc>
+        <path>docs/brainstorming-web-ui-2026-01-25.md</path>
+        <title>Brainstorming Session Results - Annie Web UI</title>
+        <section>Technology Stack decisions</section>
+        <snippet>Brainstorming results explaining why Vite + React was chosen over Next.js (simplicity, no SSR needed for SPA), and shadcn/ui over assistant-ui (unique identity vs generic chat feel).</snippet>
+      </doc>
+      <doc>
+        <path>CLAUDE.md</path>
+        <title>CLAUDE.md - Project Instructions</title>
+        <section>Architecture, Development Commands, Docker Compose Services</section>
+        <snippet>Core project documentation explaining Annie's microservices architecture, Docker Compose orchestration, development commands (make start, make logs), and service communication patterns.</snippet>
+      </doc>
+    </docs>
+
+    <code>
+      <artifact>
+        <path>docker-compose.yml</path>
+        <kind>orchestration</kind>
+        <symbol>services.backend, services.mcp-server, services.telegram-bot, services.redis</symbol>
+        <lines>1-210</lines>
+        <reason>Existing Docker Compose configuration that needs modification to add web service. Contains networking configuration (annie-network), health checks patterns, and environment variable setup to follow.</reason>
+      </artifact>
+      <artifact>
+        <path>backend/api/main.py</path>
+        <kind>backend-entry</kind>
+        <symbol>FastAPI app, CORS middleware, health endpoints</symbol>
+        <lines>1-100</lines>
+        <reason>Shows FastAPI application structure including CORS configuration that web UI will need to work with. Health endpoints pattern for reference.</reason>
+      </artifact>
+      <artifact>
+        <path>backend/api/routes/chat.py</path>
+        <kind>api-endpoint</kind>
+        <symbol>POST /api/chat, ChatRequest, ChatResponse</symbol>
+        <lines>214-288</lines>
+        <reason>Chat endpoint that web UI will call. Request/response models define the API contract for sending messages.</reason>
+      </artifact>
+      <artifact>
+        <path>backend/api/routes/stream.py</path>
+        <kind>api-endpoint</kind>
+        <symbol>GET /api/stream/{conversation_id}, SSE events</symbol>
+        <lines>931-1000</lines>
+        <reason>SSE streaming endpoint that web UI will connect to for real-time responses. Defines event types: status, token, tool_call, tool_result, done, error.</reason>
+      </artifact>
+    </code>
+
+    <dependencies>
+      <npm name="web">
+        <dependency name="react" version="^18.2.0" />
+        <dependency name="react-dom" version="^18.2.0" />
+        <dependency name="react-router-dom" version="^6.20.0" />
+        <dependency name="zustand" version="^4.4.0" />
+        <dependency name="@radix-ui/react-dialog" version="^1.0.0" />
+        <dependency name="@radix-ui/react-dropdown-menu" version="^2.0.0" />
+        <dependency name="@radix-ui/react-scroll-area" version="^1.0.0" />
+        <dependency name="@radix-ui/react-tooltip" version="^1.0.0" />
+        <dependency name="clsx" version="^2.0.0" />
+        <dependency name="tailwind-merge" version="^2.0.0" />
+        <dependency name="lucide-react" version="^0.294.0" />
+        <devDependency name="vite" version="^5.0.0" />
+        <devDependency name="@vitejs/plugin-react" version="^4.2.0" />
+        <devDependency name="typescript" version="^5.3.0" />
+        <devDependency name="tailwindcss" version="^3.3.0" />
+        <devDependency name="autoprefixer" version="^10.4.0" />
+        <devDependency name="postcss" version="^8.4.0" />
+        <devDependency name="@types/react" version="^18.2.0" />
+        <devDependency name="@types/react-dom" version="^18.2.0" />
+        <devDependency name="eslint" version="^8.55.0" />
+        <devDependency name="prettier" version="^3.1.0" />
+      </npm>
+      <docker>
+        <base-image>node:20-alpine</base-image>
+        <build-stage>builder</build-stage>
+        <runtime-image>nginx:alpine</runtime-image>
+        <port>80</port>
+      </docker>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint category="architecture">New `web/` directory at project root alongside `backend/`, `mcp_server/`, `telegram_bot/`</constraint>
+    <constraint category="architecture">Docker service name: `web` (maps to port 3000 in dev, 80 in prod via nginx)</constraint>
+    <constraint category="architecture">Must connect to annie-network for backend API access</constraint>
+    <constraint category="architecture">Depends on: `backend` service for API proxying</constraint>
+    <constraint category="tooling">Use Vite ^5.0.0 with React 18 and TypeScript 5.3+</constraint>
+    <constraint category="tooling">shadcn/ui for component library (not assistant-ui)</constraint>
+    <constraint category="tooling">Tailwind CSS ^3.3.0 for styling</constraint>
+    <constraint category="performance">No strict performance targets - Annie is a thinking machine. Focus on functionality.</constraint>
+    <constraint category="docker">Multi-stage Dockerfile: node:20-alpine for build, nginx:alpine for production</constraint>
+    <constraint category="docker">Nginx SPA routing: try_files $uri $uri/ /index.html</constraint>
+    <constraint category="docker">API proxy: /api routes to http://backend:8000</constraint>
+    <constraint category="patterns">Follow existing Docker Compose patterns: health checks, restart policies, volume mounts, environment variables</constraint>
+    <constraint category="patterns">Follow existing project structure conventions for consistency</constraint>
+  </constraints>
+
+  <interfaces>
+    <interface>
+      <name>POST /api/chat</name>
+      <kind>REST endpoint</kind>
+      <signature>POST /api/chat { user_id: string, platform: string, message: string, context?: object, files?: FileAttachment[] } => { conversation_id: string, status: string, stream_url: string, timestamp: string }</signature>
+      <path>backend/api/routes/chat.py</path>
+    </interface>
+    <interface>
+      <name>GET /api/stream/{conversation_id}</name>
+      <kind>SSE endpoint</kind>
+      <signature>GET /api/stream/{conversation_id} => EventSource(status | token | tool_call | tool_result | done | error)</signature>
+      <path>backend/api/routes/stream.py</path>
+    </interface>
+    <interface>
+      <name>GET /health/full</name>
+      <kind>REST endpoint</kind>
+      <signature>GET /health/full => { status: string, components: { mcp_server, redis, llm_api, agentic_memories, langfuse }, timestamp: string }</signature>
+      <path>backend/api/main.py</path>
+    </interface>
+    <interface>
+      <name>Docker Compose Web Service</name>
+      <kind>orchestration</kind>
+      <signature>services.web: build: ./web, ports: ["3000:80"], depends_on: [backend], networks: [annie-network]</signature>
+      <path>docker-compose.yml</path>
+    </interface>
+  </interfaces>
+
+  <tests>
+    <standards>
+      The Annie project uses pytest for backend testing. For the web frontend, no testing framework is specified yet. Story 20.1 focuses on project setup and infrastructure - actual UI testing comes in later stories (Story 20.15). The main testing for this story is verification via Docker build success and manual checks.
+    </standards>
+    <locations>
+      <location>web/tests/ (to be created - E2E tests in Story 20.15)</location>
+      <location>Manual verification: `npm run dev`, `npm run build`, `docker compose build web`</location>
+    </locations>
+    <ideas>
+      <idea ac="AC1, AC2">Verify TypeScript compilation: `npm run build` completes without type errors</idea>
+      <idea ac="AC3">Verify Tailwind: Create test component with Tailwind classes, confirm styles apply</idea>
+      <idea ac="AC4">Verify shadcn/ui: Import and render Button component, confirm styling works</idea>
+      <idea ac="AC5">Verify linting: `npm run lint` passes with no errors</idea>
+      <idea ac="AC6, AC7">Verify Docker: `docker compose build web` succeeds</idea>
+      <idea ac="AC9">Verify dev server: `npm run dev` starts on port 3000</idea>
+      <idea ac="AC10">Verify production build: `npm run build` creates dist/ output</idea>
+      <idea ac="AC11">Verify SPA routing: Start container, refresh on /test path, should not 404</idea>
+      <idea ac="AC12">Verify app shell: Basic React app renders placeholder content</idea>
+    </ideas>
+  </tests>
+</story-context>

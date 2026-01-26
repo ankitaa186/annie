@@ -1,6 +1,6 @@
 # Story 20.8: Thinking & Tool Call Display
 
-Status: drafted
+Status: ready-for-dev
 
 ## Story
 
@@ -259,6 +259,8 @@ interface ToolState {
 ## Dev Agent Record
 
 ### Context Reference
+
+- .bmad-ephemeral/stories/20-8-thinking-tool-call-display.context.xml
 
 ### Agent Model Used
 

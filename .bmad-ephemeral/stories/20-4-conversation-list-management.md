@@ -1,6 +1,6 @@
 # Story 20.4: Conversation List & Management
 
-Status: drafted
+Status: ready-for-dev
 
 ## Story
 
@@ -183,6 +183,8 @@ Sidebar
 ## Dev Agent Record
 
 ### Context Reference
+
+- .bmad-ephemeral/stories/20-4-conversation-list-management.context.xml
 
 ### Agent Model Used
 

@@ -1,0 +1,207 @@
+<story-context id="bmad/bmm/workflows/4-implementation/story-context/template" v="1.0">
+  <metadata>
+    <epicId>20</epicId>
+    <storyId>7</storyId>
+    <title>SSE Streaming Integration</title>
+    <status>drafted</status>
+    <generatedAt>2026-01-26</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>.bmad-ephemeral/stories/20-7-sse-streaming-integration.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>user</asA>
+    <iWant>to see Annie's response stream in real-time as she generates it</iWant>
+    <soThat>I get immediate feedback and can follow her thinking process</soThat>
+    <tasks>
+      <task id="1" name="Create SSE stream client" ac="1,10">
+        <subtask id="1.1">Create web/src/lib/api/streamClient.ts</subtask>
+        <subtask id="1.2">Implement EventSource connection</subtask>
+        <subtask id="1.3">Add auto-reconnect with exponential backoff</subtask>
+        <subtask id="1.4">Handle connection errors</subtask>
+      </task>
+      <task id="2" name="Create useStream hook" ac="1,2,7,8,10,11">
+        <subtask id="2.1">Create web/src/lib/hooks/useStream.ts</subtask>
+        <subtask id="2.2">Manage EventSource lifecycle</subtask>
+        <subtask id="2.3">Parse incoming SSE events</subtask>
+        <subtask id="2.4">Update streaming message state</subtask>
+        <subtask id="2.5">Handle done event - finalize message</subtask>
+        <subtask id="2.6">Handle error event</subtask>
+        <subtask id="2.7">Implement abort functionality</subtask>
+      </task>
+      <task id="3" name="Create StreamingMessage component" ac="2,9">
+        <subtask id="3.1">Create web/src/components/chat/StreamingMessage.tsx</subtask>
+        <subtask id="3.2">Display streaming content with cursor</subtask>
+        <subtask id="3.3">Show typing indicator before first token</subtask>
+        <subtask id="3.4">Animate cursor while streaming</subtask>
+      </task>
+      <task id="4" name="Handle event types" ac="3,4,5,6">
+        <subtask id="4.1">Parse message events - append to content</subtask>
+        <subtask id="4.2">Parse status events - update Annie state</subtask>
+        <subtask id="4.3">Parse tool_call events - delegate to tool display</subtask>
+        <subtask id="4.4">Parse tool_result events - delegate to tool display</subtask>
+      </task>
+      <task id="5" name="Implement cancel functionality" ac="11">
+        <subtask id="5.1">Add cancel button to streaming UI</subtask>
+        <subtask id="5.2">Implement AbortController for SSE</subtask>
+        <subtask id="5.3">Finalize partial message on cancel</subtask>
+      </task>
+      <task id="6" name="Implement error handling" ac="8,12">
+        <subtask id="6.1">Show error toast for stream errors</subtask>
+        <subtask id="6.2">Add retry button</subtask>
+        <subtask id="6.3">Handle specific error codes</subtask>
+      </task>
+      <task id="7" name="Update Zustand store">
+        <subtask id="7.1">Add streamingMessage state</subtask>
+        <subtask id="7.2">Add annieState (idle, thinking, speaking, tool_calling)</subtask>
+        <subtask id="7.3">Create setStreamingMessage action</subtask>
+        <subtask id="7.4">Create setAnnieState action</subtask>
+      </task>
+      <task id="8" name="Integrate with ChatPage">
+        <subtask id="8.1">Connect useStream to message send flow</subtask>
+        <subtask id="8.2">Show StreamingMessage in thread</subtask>
+        <subtask id="8.3">Finalize message when done</subtask>
+      </task>
+    </tasks>
+  </story>
+
+  <acceptanceCriteria>
+    <criterion id="AC1">Connect to /api/stream/{conversation_id} SSE endpoint after sending message</criterion>
+    <criterion id="AC2">Display tokens as they arrive (character-by-character streaming)</criterion>
+    <criterion id="AC3">Handle message event type - text content tokens</criterion>
+    <criterion id="AC4">Handle status event type - thinking/working indicator</criterion>
+    <criterion id="AC5">Handle tool_call event type - tool being invoked (delegate to Story 20.8)</criterion>
+    <criterion id="AC6">Handle tool_result event type - tool execution result (delegate to Story 20.8)</criterion>
+    <criterion id="AC7">Handle done event type - stream complete, finalize message</criterion>
+    <criterion id="AC8">Handle error event type - show error with user-friendly message</criterion>
+    <criterion id="AC9">Typing indicator shown while waiting for first token</criterion>
+    <criterion id="AC10">Graceful reconnection on disconnect with exponential backoff</criterion>
+    <criterion id="AC11">Cancel button to abort ongoing stream</criterion>
+    <criterion id="AC12">Error handling with retry option</criterion>
+  </acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc path="docs/epics/epic-20-web-ui.md" title="Epic 20: Annie Web UI" section="Story 20.7: SSE Streaming Integration">
+        Implements real-time streaming of Annie's responses via Server-Sent Events. Defines files useStream.ts, streamClient.ts, and StreamingMessage.tsx.
+      </doc>
+      <doc path=".bmad-ephemeral/tech-contexts/epic-20-tech-context.md" title="Epic 20 Technical Context" section="Section 3.3 SSE Event Handling">
+        Maps SSE event types to UI handlers: status->ThinkingIndicator, token->StreamingMessage, tool_call->ToolCallCard, done->finalize message, error->error toast.
+      </doc>
+      <doc path="docs/03-technical/API_SPECIFICATIONS.md" title="API Specifications" section="SSE Stream Endpoint">
+        GET /api/v1/stream/{conversation_id} returns SSE events with types: token, tool_call, tool_result, done, error. Requires Accept: text/event-stream header.
+      </doc>
+      <doc path="CLAUDE.md" title="Project Overview" section="Backend API">
+        GET /api/stream/{conversation_id} streams LLM responses via SSE. Headers: Cache-Control: no-cache, X-Accel-Buffering: no.
+      </doc>
+    </docs>
+    <code>
+      <file path="backend/api/routes/stream.py" kind="route_handler" symbol="stream_response" lines="931-1230" reason="Backend SSE endpoint that web UI will connect to. Returns EventSourceResponse with events: status, token, tool_call, tool_result, done, error."/>
+      <file path="backend/api/routes/stream.py" kind="utility" symbol="format_status_frame" lines="50-70" reason="Formats status messages as SSE events. Web UI must parse this JSON structure."/>
+      <file path="backend/api/routes/stream.py" kind="generator" symbol="stream_generator" lines="73-911" reason="Core streaming generator yielding SSE events. Defines event structure web UI must handle."/>
+      <file path="backend/api/routes/chat.py" kind="route_handler" symbol="create_chat" lines="235-685" reason="Chat endpoint that returns stream_url for SSE connection. ChatResponse model defines interface."/>
+      <file path="backend/api/routes/chat.py" kind="model" symbol="ChatRequest" lines="214-224" reason="Request model for POST /api/chat - user_id, platform, message, context, files."/>
+      <file path="backend/api/routes/chat.py" kind="model" symbol="ChatResponse" lines="227-232" reason="Response model with conversation_id, status, stream_url, timestamp."/>
+      <file path="web/src/lib/api/streamClient.ts" kind="client" symbol="streamClient" lines="new" reason="NEW FILE: SSE client with EventSource connection and auto-reconnect logic."/>
+      <file path="web/src/lib/hooks/useStream.ts" kind="hook" symbol="useStream" lines="new" reason="NEW FILE: React hook managing EventSource lifecycle, event parsing, state updates."/>
+      <file path="web/src/components/chat/StreamingMessage.tsx" kind="component" symbol="StreamingMessage" lines="new" reason="NEW FILE: Component displaying streaming content with animated cursor."/>
+      <file path="web/src/lib/stores/appStore.ts" kind="store" symbol="AppState" lines="new" reason="NEW FILE: Zustand store with streamingMessage, annieState, setStreamingMessage, setAnnieState."/>
+    </code>
+    <dependencies>
+      <ecosystem name="npm" note="Web UI dependencies (to be created in web/package.json)">
+        <package name="react" version="^18.2.0"/>
+        <package name="react-dom" version="^18.2.0"/>
+        <package name="zustand" version="^4.4.0"/>
+        <package name="lucide-react" version="^0.294.0"/>
+        <package name="clsx" version="^2.0.0"/>
+        <package name="tailwind-merge" version="^2.0.0"/>
+      </ecosystem>
+      <ecosystem name="npm-dev" note="Web UI dev dependencies">
+        <package name="vite" version="^5.0.0"/>
+        <package name="@vitejs/plugin-react" version="^4.2.0"/>
+        <package name="typescript" version="^5.3.0"/>
+        <package name="tailwindcss" version="^3.3.0"/>
+        <package name="@types/react" version="^18.2.0"/>
+        <package name="@types/react-dom" version="^18.2.0"/>
+      </ecosystem>
+      <ecosystem name="python" note="Backend dependencies (existing in backend/requirements.txt)">
+        <package name="fastapi" version=">=0.104.0"/>
+        <package name="sse-starlette" version=">=1.6.5"/>
+        <package name="uvicorn" version=">=0.24.0"/>
+        <package name="redis" version=">=5.0.0"/>
+      </ecosystem>
+      <ecosystem name="browser-api" note="Native browser APIs">
+        <api name="EventSource" note="SSE client - no polyfill needed for modern browsers"/>
+        <api name="AbortController" note="For cancel functionality"/>
+      </ecosystem>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint type="pattern">Use EventSource API for SSE connections - no WebSocket or polling</constraint>
+    <constraint type="pattern">Zustand for state management - lightweight, simple mental model</constraint>
+    <constraint type="pattern">All SSE events wrapped in {event: "message", data: JSON.stringify({type, ...})}</constraint>
+    <constraint type="layer">Tool call/result display delegated to Story 20.8 - only emit events here</constraint>
+    <constraint type="testing">Use Jest with mock EventSource for hook testing</constraint>
+    <constraint type="style">shadcn/ui + Tailwind CSS for UI components</constraint>
+    <constraint type="reconnection">Exponential backoff: 1s initial, 30s max, reset on successful connection</constraint>
+    <constraint type="performance">No strict performance targets - Annie is a thinking machine</constraint>
+    <constraint type="accessibility">WCAG 2.1 Level AA - proper ARIA labels on streaming content</constraint>
+  </constraints>
+  <interfaces>
+    <interface name="SSE Endpoint" kind="REST/SSE" signature="GET /api/stream/{conversation_id}" path="backend/api/routes/stream.py">
+      Returns text/event-stream with Cache-Control: no-cache, X-Accel-Buffering: no headers.
+    </interface>
+    <interface name="SSE Event - Status" kind="JSON" signature='{"type": "status", "message": string}'>
+      Status update from backend (e.g., "Annie is thinking...")
+    </interface>
+    <interface name="SSE Event - Token" kind="JSON" signature='{"type": "token", "content": string}'>
+      Text content chunk from LLM streaming response
+    </interface>
+    <interface name="SSE Event - Tool Call" kind="JSON" signature='{"type": "tool_call", "name": string, "args": object}'>
+      Tool invocation event (delegate display to Story 20.8)
+    </interface>
+    <interface name="SSE Event - Tool Result" kind="JSON" signature='{"type": "tool_result", "name": string, "result": object}'>
+      Tool execution result (delegate display to Story 20.8)
+    </interface>
+    <interface name="SSE Event - Done" kind="JSON" signature='{"type": "done", "tokens_used": {"prompt": number, "completion": number}}'>
+      Stream completion event - finalize message and close connection
+    </interface>
+    <interface name="SSE Event - Error" kind="JSON" signature='{"type": "error", "message": string, "code": string}'>
+      Error event with user-friendly message and error code
+    </interface>
+    <interface name="Zustand Store - Stream State" kind="TypeScript" signature="streamingMessage: string | null; annieState: 'idle' | 'thinking' | 'speaking' | 'tool_calling'">
+      State slice for streaming functionality
+    </interface>
+  </interfaces>
+  <tests>
+    <standards>
+      Use Jest with React Testing Library for component tests. For hooks, use @testing-library/react-hooks with mock EventSource.
+      Integration tests should use real SSE connections to test backend. E2E tests use Playwright.
+      Test pyramid: 60% unit, 30% integration, 10% E2E. Target 80%+ code coverage.
+    </standards>
+    <locations>
+      <location>web/src/lib/hooks/__tests__/useStream.test.ts</location>
+      <location>web/src/lib/api/__tests__/streamClient.test.ts</location>
+      <location>web/src/components/chat/__tests__/StreamingMessage.test.tsx</location>
+      <location>web/tests/integration/streaming.test.ts</location>
+      <location>web/tests/e2e/chat-streaming.spec.ts</location>
+    </locations>
+    <ideas>
+      <idea ac="AC1">Test EventSource connects to /api/stream/{conversation_id} on message send</idea>
+      <idea ac="AC2">Test token events append to streamingMessage state character by character</idea>
+      <idea ac="AC3">Test message event type updates streaming content</idea>
+      <idea ac="AC4">Test status event type updates annieState to 'thinking'</idea>
+      <idea ac="AC5,AC6">Test tool_call and tool_result events are emitted (display tested in Story 20.8)</idea>
+      <idea ac="AC7">Test done event finalizes message, clears streamingMessage, sets annieState='idle'</idea>
+      <idea ac="AC8">Test error event shows user-friendly message via toast/alert</idea>
+      <idea ac="AC9">Test typing indicator shown when connected but no tokens received yet</idea>
+      <idea ac="AC10">Test auto-reconnect with exponential backoff (1s, 2s, 4s... max 30s)</idea>
+      <idea ac="AC11">Test cancel button closes EventSource and finalizes partial message</idea>
+      <idea ac="AC12">Test retry button re-initiates connection after error</idea>
+      <idea>Test EventSource cleanup on component unmount</idea>
+      <idea>Test multiple rapid messages don't create duplicate connections</idea>
+      <idea>Test connection state transitions: idle -> connecting -> connected -> streaming -> done</idea>
+    </ideas>
+  </tests>
+</story-context>

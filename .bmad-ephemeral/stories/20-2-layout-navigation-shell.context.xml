@@ -1,0 +1,258 @@
+<story-context id=".bmad/bmm/workflows/4-implementation/story-context/template" v="1.0">
+  <metadata>
+    <epicId>20</epicId>
+    <storyId>2</storyId>
+    <title>Layout &amp; Navigation Shell</title>
+    <status>drafted</status>
+    <generatedAt>2026-01-26</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>.bmad-ephemeral/stories/20-2-layout-navigation-shell.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>user</asA>
+    <iWant>a responsive two-column layout with header, sidebar, and main content area</iWant>
+    <soThat>I can navigate Annie's interface intuitively across desktop and mobile devices</soThat>
+    <tasks>
+      <task id="1" description="Create Layout component structure (AC: 1, 2, 3)">
+        <subtask id="1.1">Create `web/src/components/layout/Layout.tsx`</subtask>
+        <subtask id="1.2">Implement responsive grid/flex layout</subtask>
+        <subtask id="1.3">Add breakpoint-based layout switching</subtask>
+        <subtask id="1.4">Create layout context for sidebar state</subtask>
+      </task>
+      <task id="2" description="Build Header component (AC: 4, 5, 6)">
+        <subtask id="2.1">Create `web/src/components/layout/Header.tsx`</subtask>
+        <subtask id="2.2">Add Annie logo/name with styling</subtask>
+        <subtask id="2.3">Add placeholder slots for health indicators</subtask>
+        <subtask id="2.4">Add placeholder slot for LLM indicator</subtask>
+        <subtask id="2.5">Add hamburger menu button for mobile</subtask>
+      </task>
+      <task id="3" description="Build Sidebar component (AC: 7, 8, 9, 10)">
+        <subtask id="3.1">Create `web/src/components/layout/Sidebar.tsx`</subtask>
+        <subtask id="3.2">Add conversation list container area</subtask>
+        <subtask id="3.3">Implement "New Conversation" button</subtask>
+        <subtask id="3.4">Add Memory Browser link (disabled, V2 badge)</subtask>
+        <subtask id="3.5">Add Tools link (disabled, V3 badge)</subtask>
+        <subtask id="3.6">Implement collapse/expand animation</subtask>
+      </task>
+      <task id="4" description="Build MainContent component (AC: 11)">
+        <subtask id="4.1">Create `web/src/components/layout/MainContent.tsx`</subtask>
+        <subtask id="4.2">Add chat area placeholder</subtask>
+        <subtask id="4.3">Ensure proper scrolling behavior</subtask>
+      </task>
+      <task id="5" description="Implement dark mode (AC: 12)">
+        <subtask id="5.1">Configure Tailwind dark mode (class strategy)</subtask>
+        <subtask id="5.2">Add system preference detection</subtask>
+        <subtask id="5.3">Apply dark mode styles to all components</subtask>
+        <subtask id="5.4">Store preference in localStorage</subtask>
+      </task>
+      <task id="6" description="Add animations and transitions (AC: 13)">
+        <subtask id="6.1">Sidebar slide animation</subtask>
+        <subtask id="6.2">Layout transition on breakpoint change</subtask>
+        <subtask id="6.3">Button hover/active states</subtask>
+        <subtask id="6.4">Respect `prefers-reduced-motion`</subtask>
+      </task>
+      <task id="7" description="Implement accessibility (AC: 14, 15)">
+        <subtask id="7.1">Add ARIA labels to navigation elements</subtask>
+        <subtask id="7.2">Implement keyboard navigation</subtask>
+        <subtask id="7.3">Add focus indicators</subtask>
+        <subtask id="7.4">Test with screen reader</subtask>
+      </task>
+      <task id="8" description="Create ChatPage and routing">
+        <subtask id="8.1">Create `web/src/pages/ChatPage.tsx`</subtask>
+        <subtask id="8.2">Set up React Router</subtask>
+        <subtask id="8.3">Configure default route to ChatPage</subtask>
+      </task>
+    </tasks>
+  </story>
+
+  <acceptanceCriteria>
+    <criterion id="AC1">Responsive two-column layout (sidebar + main content) on desktop (>1024px)</criterion>
+    <criterion id="AC2">Sidebar collapses to hamburger menu on mobile (&lt;768px)</criterion>
+    <criterion id="AC3">Collapsed sidebar shows icons only on tablet (768-1024px)</criterion>
+    <criterion id="AC4">Header displays Annie logo/name on the left</criterion>
+    <criterion id="AC5">Header shows health status indicators (placeholder for Story 20.3)</criterion>
+    <criterion id="AC6">Header shows current LLM indicator (placeholder for Story 20.3)</criterion>
+    <criterion id="AC7">Sidebar contains conversation list area (placeholder for Story 20.4)</criterion>
+    <criterion id="AC8">Sidebar has "New Conversation" button with + icon</criterion>
+    <criterion id="AC9">Sidebar has Memory Browser link (V2 placeholder, disabled)</criterion>
+    <criterion id="AC10">Sidebar has Tools link (V3 placeholder, disabled)</criterion>
+    <criterion id="AC11">Main content area renders chat interface (placeholder for Story 20.5)</criterion>
+    <criterion id="AC12">Dark mode support following system preference</criterion>
+    <criterion id="AC13">Smooth transitions and animations between layout states</criterion>
+    <criterion id="AC14">Proper ARIA labels for accessibility</criterion>
+    <criterion id="AC15">Keyboard navigation support (Tab, Enter, Escape)</criterion>
+  </acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc>
+        <path>docs/epics/epic-20-web-ui.md</path>
+        <title>Epic 20: Annie Web UI</title>
+        <section>Story 20.2: Layout &amp; Navigation Shell</section>
+        <snippet>Implement the core responsive layout with header, sidebar, and main content area. Responsive breakpoints: &lt;768px single column hamburger, 768-1024px collapsed sidebar (icons only), >1024px full two-column layout.</snippet>
+      </doc>
+      <doc>
+        <path>.bmad-ephemeral/tech-contexts/epic-20-tech-context.md</path>
+        <title>Epic 20 Technical Context</title>
+        <section>Section 3.1 - Directory Structure</section>
+        <snippet>Web UI directory structure: web/src/components/layout/ contains Header.tsx, Sidebar.tsx, MainContent.tsx, Layout.tsx. Technology stack: Vite + React 18, shadcn/ui + Tailwind CSS, Zustand for state.</snippet>
+      </doc>
+      <doc>
+        <path>.bmad-ephemeral/tech-contexts/epic-20-tech-context.md</path>
+        <title>Epic 20 Technical Context</title>
+        <section>Section 3.2.1 - Zustand Store</section>
+        <snippet>AppState includes sidebarOpen: boolean, sidebarCollapsed: boolean (tablet view), darkMode: 'system' | 'light' | 'dark', toggleSidebar/setSidebarCollapsed/setDarkMode actions.</snippet>
+      </doc>
+      <doc>
+        <path>docs/02-architecture/ARCHITECTURE_PLAN.md</path>
+        <title>Architecture Plan</title>
+        <section>Backend API Service</section>
+        <snippet>Key endpoints: POST /api/chat, GET /api/stream/{conversation_id} (SSE), GET /health. Web UI will integrate with these existing backend endpoints.</snippet>
+      </doc>
+      <doc>
+        <path>docs/03-technical/TESTING_STRATEGY.md</path>
+        <title>Testing Strategy</title>
+        <section>Test Types - Unit Tests</section>
+        <snippet>Unit tests: Fast (&lt;1s), no external dependencies, use mocks. Target 90%+ coverage for core components. Integration tests: 1-5s, real services where possible.</snippet>
+      </doc>
+      <doc>
+        <path>CLAUDE.md</path>
+        <title>Project Instructions</title>
+        <section>Architecture - Service Communication Flow</section>
+        <snippet>Web UI communicates with Backend API via HTTP/SSE. Backend handles chat logic, LLM integration, MCP tool execution. Redis for state management.</snippet>
+      </doc>
+      <doc>
+        <path>docs/epics/epic-20-web-ui.md</path>
+        <title>Epic 20: Annie Web UI</title>
+        <section>Section 9.2 - Color Palette</section>
+        <snippet>Color palette - Light: Background #FFFFFF, Sidebar #F5F5F5, Accent #7C3AED. Dark: Background #0F0F0F, Sidebar #1A1A1A, Accent #A78BFA.</snippet>
+      </doc>
+      <doc>
+        <path>docs/epics/epic-20-web-ui.md</path>
+        <title>Epic 20: Annie Web UI</title>
+        <section>Section 2.1 - Technology Stack</section>
+        <snippet>Framework: Vite + React 18 (simple, fast builds). UI Components: shadcn/ui + Tailwind CSS. State: Zustand. Deployment: Docker + Nginx for SPA routing.</snippet>
+      </doc>
+    </docs>
+
+    <code>
+      <file>
+        <path>backend/api/routes/chat.py</path>
+        <kind>route</kind>
+        <symbol>ChatResponse</symbol>
+        <lines>227-232</lines>
+        <reason>Response model showing conversation_id, status, stream_url, timestamp - Web UI will receive this from POST /api/chat</reason>
+      </file>
+      <file>
+        <path>backend/api/routes/stream.py</path>
+        <kind>route</kind>
+        <symbol>stream_response</symbol>
+        <lines>931-1230</lines>
+        <reason>SSE streaming endpoint /api/stream/{conversation_id} - Web UI will connect to this for real-time response streaming</reason>
+      </file>
+      <file>
+        <path>backend/api/main.py</path>
+        <kind>entrypoint</kind>
+        <symbol>app</symbol>
+        <lines>1-50</lines>
+        <reason>FastAPI application setup - includes health endpoint at /health that Web UI will poll for status indicators</reason>
+      </file>
+      <file>
+        <path>docker-compose.yml</path>
+        <kind>config</kind>
+        <symbol>services</symbol>
+        <lines>1-210</lines>
+        <reason>Existing Docker Compose configuration - Web service will be added here following same patterns (healthcheck, networks, restart policy)</reason>
+      </file>
+    </code>
+
+    <dependencies>
+      <ecosystem name="npm">
+        <package name="react" version="^18.2.0" />
+        <package name="react-dom" version="^18.2.0" />
+        <package name="react-router-dom" version="^6.20.0" />
+        <package name="zustand" version="^4.4.0" />
+        <package name="@radix-ui/react-dialog" version="^1.0.0" />
+        <package name="@radix-ui/react-dropdown-menu" version="^2.0.0" />
+        <package name="@radix-ui/react-scroll-area" version="^1.0.0" />
+        <package name="@radix-ui/react-tooltip" version="^1.0.0" />
+        <package name="clsx" version="^2.0.0" />
+        <package name="tailwind-merge" version="^2.0.0" />
+        <package name="lucide-react" version="^0.294.0" />
+      </ecosystem>
+      <ecosystem name="npm-dev">
+        <package name="vite" version="^5.0.0" />
+        <package name="@vitejs/plugin-react" version="^4.2.0" />
+        <package name="typescript" version="^5.3.0" />
+        <package name="tailwindcss" version="^3.3.0" />
+        <package name="autoprefixer" version="^10.4.0" />
+        <package name="postcss" version="^8.4.0" />
+        <package name="@types/react" version="^18.2.0" />
+        <package name="@types/react-dom" version="^18.2.0" />
+      </ecosystem>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint type="pattern">Use Vite + React 18 with TypeScript - no Next.js SSR complexity needed for SPA</constraint>
+    <constraint type="pattern">Use shadcn/ui components with Tailwind CSS for consistent styling and full control</constraint>
+    <constraint type="pattern">State management via Zustand with simple mental model - no Redux complexity</constraint>
+    <constraint type="pattern">Tailwind dark mode with 'class' strategy for system preference detection</constraint>
+    <constraint type="pattern">Follow existing Docker Compose patterns: healthcheck, restart: unless-stopped, named networks</constraint>
+    <constraint type="accessibility">WCAG 2.1 Level AA compliance required</constraint>
+    <constraint type="accessibility">Support prefers-reduced-motion media query for animations</constraint>
+    <constraint type="performance">First Contentful Paint &lt;3s, Time to Interactive &lt;5s (relaxed targets)</constraint>
+    <constraint type="responsive">Breakpoints: mobile &lt;768px, tablet 768-1024px, desktop >1024px</constraint>
+    <constraint type="structure">Files go in web/src/components/layout/ directory</constraint>
+    <constraint type="structure">Zustand store in web/src/lib/stores/appStore.ts</constraint>
+    <constraint type="testing">Jest + React Testing Library for component tests</constraint>
+  </constraints>
+
+  <interfaces>
+    <interface>
+      <name>AppState (Zustand)</name>
+      <kind>store</kind>
+      <signature>interface AppState { sidebarOpen: boolean; sidebarCollapsed: boolean; darkMode: 'system' | 'light' | 'dark'; toggleSidebar: () => void; setSidebarCollapsed: (collapsed: boolean) => void; setDarkMode: (mode: 'system' | 'light' | 'dark') => void; }</signature>
+      <path>web/src/lib/stores/appStore.ts (to be created)</path>
+    </interface>
+    <interface>
+      <name>Health Endpoint</name>
+      <kind>REST endpoint</kind>
+      <signature>GET /health/full -> { status: "ok", components: { backend, mcp_server, redis, llm_api, agentic_memories, langfuse } }</signature>
+      <path>backend/api/main.py</path>
+    </interface>
+    <interface>
+      <name>Layout Component Props</name>
+      <kind>React component</kind>
+      <signature>interface LayoutProps { children: React.ReactNode; }</signature>
+      <path>web/src/components/layout/Layout.tsx (to be created)</path>
+    </interface>
+  </interfaces>
+
+  <tests>
+    <standards>
+      Use Jest + React Testing Library for component unit tests. Follow AAA pattern (Arrange-Act-Assert).
+      Mock external dependencies. Target 80%+ coverage for layout components.
+      Test responsive behavior using matchMedia mocks. Test accessibility with jest-axe.
+      Use @testing-library/user-event for interaction tests.
+    </standards>
+    <locations>
+      <location>web/src/components/layout/__tests__/</location>
+      <location>web/src/__tests__/</location>
+    </locations>
+    <ideas>
+      <idea ac="AC1,AC2,AC3">Test Layout component renders correct structure at each breakpoint (mock matchMedia)</idea>
+      <idea ac="AC2">Test hamburger menu toggle shows/hides sidebar on mobile</idea>
+      <idea ac="AC3">Test sidebar shows icons only on tablet breakpoint</idea>
+      <idea ac="AC4">Test Header renders Annie logo/name</idea>
+      <idea ac="AC5,AC6">Test Header has placeholder slots for health and LLM indicators</idea>
+      <idea ac="AC7,AC8">Test Sidebar has conversation list area and New Conversation button</idea>
+      <idea ac="AC9,AC10">Test disabled Memory Browser and Tools links with V2/V3 badges</idea>
+      <idea ac="AC12">Test dark mode toggle and system preference detection</idea>
+      <idea ac="AC13">Test animations respect prefers-reduced-motion</idea>
+      <idea ac="AC14,AC15">Test ARIA labels and keyboard navigation (Tab, Enter, Escape)</idea>
+      <idea ac="AC15">Test focus management when sidebar opens/closes</idea>
+    </ideas>
+  </tests>
+</story-context>

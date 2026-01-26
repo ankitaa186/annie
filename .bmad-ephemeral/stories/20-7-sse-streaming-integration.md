@@ -1,6 +1,6 @@
 # Story 20.7: SSE Streaming Integration
 
-Status: drafted
+Status: ready-for-dev
 
 ## Story
 
@@ -248,6 +248,8 @@ interface StreamState {
 ## Dev Agent Record
 
 ### Context Reference
+
+- .bmad-ephemeral/stories/20-7-sse-streaming-integration.context.xml
 
 ### Agent Model Used
 

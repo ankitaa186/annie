@@ -1,6 +1,6 @@
 # Story 20.15: Integration Testing & Polish
 
-Status: drafted
+Status: ready-for-dev
 
 ## Story
 
@@ -276,6 +276,8 @@ export function MessageSkeleton() {
 ## Dev Agent Record
 
 ### Context Reference
+
+- .bmad-ephemeral/stories/20-15-integration-testing-polish.context.xml
 
 ### Agent Model Used
 

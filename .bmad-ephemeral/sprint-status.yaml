@@ -312,17 +312,17 @@ development_status:
   # ============================================================================
   epic-20: contexted
   # V1 Stories (Core Experience)
-  20-1-project-setup-infrastructure: drafted
-  20-2-layout-navigation-shell: drafted
-  20-3-health-status-system-indicators: drafted
-  20-4-conversation-list-management: drafted
-  20-5-chat-interface-message-display: drafted
-  20-6-chat-interface-input-sending: drafted
-  20-7-sse-streaming-integration: drafted
+  20-1-project-setup-infrastructure: ready-for-dev
+  20-2-layout-navigation-shell: ready-for-dev
+  20-3-health-status-system-indicators: ready-for-dev
+  20-4-conversation-list-management: ready-for-dev
+  20-5-chat-interface-message-display: ready-for-dev
+  20-6-chat-interface-input-sending: ready-for-dev
+  20-7-sse-streaming-integration: ready-for-dev
   20-8-thinking-tool-call-display: drafted
-  20-13-cloudflare-access-integration: drafted
-  20-14-backend-api-extensions: drafted
-  20-15-integration-testing-polish: drafted
+  20-13-cloudflare-access-integration: ready-for-dev
+  20-14-backend-api-extensions: ready-for-dev
+  20-15-integration-testing-polish: ready-for-dev
   # V2 Stories (Voice, Avatar, Advanced)
   20-9-voice-input-speech-to-text: drafted
   20-10-voice-output-text-to-speech: drafted

@@ -1,6 +1,6 @@
 # Story 20.1: Project Setup & Infrastructure
 
-Status: drafted
+Status: ready-for-dev
 
 ## Story
 
@@ -199,7 +199,7 @@ server {
 
 ### Context Reference
 
-<!-- Path(s) to story context XML will be added here by context workflow -->
+- .bmad-ephemeral/stories/20-1-project-setup-infrastructure.context.xml
 
 ### Agent Model Used
 

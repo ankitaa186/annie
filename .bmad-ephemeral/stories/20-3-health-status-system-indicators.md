@@ -1,6 +1,6 @@
 # Story 20.3: Health Status & System Indicators
 
-Status: drafted
+Status: ready-for-dev
 
 ## Story
 
@@ -180,6 +180,8 @@ web/src/
 ## Dev Agent Record
 
 ### Context Reference
+
+- .bmad-ephemeral/stories/20-3-health-status-system-indicators.context.xml
 
 ### Agent Model Used
 

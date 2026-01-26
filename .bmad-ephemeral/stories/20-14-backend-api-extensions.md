@@ -1,6 +1,6 @@
 # Story 20.14: Backend API Extensions
 
-Status: drafted
+Status: ready-for-dev
 
 ## Story
 
@@ -241,7 +241,7 @@ app.add_middleware(
 
 ### Context Reference
 
-<!-- Path(s) to story context XML will be added here by context workflow -->
+- .bmad-ephemeral/stories/20-14-backend-api-extensions.context.xml
 
 ### Agent Model Used
 

@@ -1,6 +1,6 @@
 # Story 20.13: Cloudflare Access Integration
 
-Status: drafted
+Status: ready-for-dev
 
 ## Story
 
@@ -204,7 +204,7 @@ def test_unknown_email_rejected():
 
 ### Context Reference
 
-<!-- Path(s) to story context XML will be added here by context workflow -->
+- `.bmad-ephemeral/stories/20-13-cloudflare-access-integration.context.xml`
 
 ### Agent Model Used
 

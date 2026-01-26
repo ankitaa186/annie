@@ -1,6 +1,6 @@
 # Story 20.5: Chat Interface - Message Display
 
-Status: drafted
+Status: ready-for-dev
 
 ## Story
 
@@ -208,6 +208,7 @@ useEffect(() => {
 ## Dev Agent Record
 
 ### Context Reference
+- .bmad-ephemeral/stories/20-5-chat-interface-message-display.context.xml
 
 ### Agent Model Used
 

@@ -1,6 +1,6 @@
 # Story 20.2: Layout & Navigation Shell
 
-Status: drafted
+Status: ready-for-dev
 
 ## Story
 
@@ -184,6 +184,8 @@ useEffect(() => {
 ## Dev Agent Record
 
 ### Context Reference
+
+- .bmad-ephemeral/stories/20-2-layout-navigation-shell.context.xml
 
 ### Agent Model Used
 

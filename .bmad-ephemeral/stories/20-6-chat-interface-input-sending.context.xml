@@ -1,0 +1,241 @@
+<story-context id=".bmad/bmm/workflows/4-implementation/story-context/template" v="1.0">
+  <metadata>
+    <epicId>20</epicId>
+    <storyId>6</storyId>
+    <title>Chat Interface - Input & Sending</title>
+    <status>drafted</status>
+    <generatedAt>2026-01-26</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>.bmad-ephemeral/stories/20-6-chat-interface-input-sending.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>user</asA>
+    <iWant>to type messages and upload files in a comfortable input area</iWant>
+    <soThat>I can communicate with Annie through text and share documents/images for analysis</soThat>
+    <tasks>
+      <task id="1" name="Create InputArea component" acs="1,2,3,9,10">
+        <subtask id="1.1">Create `web/src/components/chat/InputArea.tsx`</subtask>
+        <subtask id="1.2">Implement auto-expanding textarea</subtask>
+        <subtask id="1.3">Add send button with enabled/disabled state</subtask>
+        <subtask id="1.4">Handle Enter/Shift+Enter key events</subtask>
+        <subtask id="1.5">Show loading state during send</subtask>
+        <subtask id="1.6">Disable input while Annie responds</subtask>
+      </task>
+      <task id="2" name="Create FileUpload component" acs="4,5,6">
+        <subtask id="2.1">Create `web/src/components/chat/FileUpload.tsx`</subtask>
+        <subtask id="2.2">Add file input with hidden trigger</subtask>
+        <subtask id="2.3">Implement drag-and-drop zone</subtask>
+        <subtask id="2.4">Show file previews (thumbnails for images)</subtask>
+        <subtask id="2.5">Allow removing files before send</subtask>
+        <subtask id="2.6">Limit to 10 files max</subtask>
+      </task>
+      <task id="3" name="Implement file validation" acs="7,8">
+        <subtask id="3.1">Create file validation utilities</subtask>
+        <subtask id="3.2">Validate MIME types against allowed list</subtask>
+        <subtask id="3.3">Validate file sizes (10MB images, 20MB documents)</subtask>
+        <subtask id="3.4">Show user-friendly error toasts</subtask>
+      </task>
+      <task id="4" name="Create useChat hook" acs="9">
+        <subtask id="4.1">Create `web/src/lib/hooks/useChat.ts`</subtask>
+        <subtask id="4.2">Implement sendMessage function</subtask>
+        <subtask id="4.3">Handle POST to /api/chat with files</subtask>
+        <subtask id="4.4">Update Zustand store with sent message</subtask>
+        <subtask id="4.5">Trigger SSE stream connection</subtask>
+      </task>
+      <task id="5" name="Implement clipboard paste" acs="12">
+        <subtask id="5.1">Listen for paste events</subtask>
+        <subtask id="5.2">Extract images from clipboard</subtask>
+        <subtask id="5.3">Add to file list for upload</subtask>
+      </task>
+      <task id="6" name="Add character count" acs="11">
+        <subtask id="6.1">Display character count for messages >500 chars</subtask>
+        <subtask id="6.2">Show warning at 4000 chars</subtask>
+        <subtask id="6.3">Prevent send at 8000 chars (optional limit)</subtask>
+      </task>
+      <task id="7" name="Integrate with ChatPage">
+        <subtask id="7.1">Add InputArea below MessageThread</subtask>
+        <subtask id="7.2">Connect to useChat hook</subtask>
+        <subtask id="7.3">Wire up to Zustand store</subtask>
+      </task>
+    </tasks>
+  </story>
+
+  <acceptanceCriteria>
+    <criterion id="1">Auto-expanding textarea that grows with content (max 6 lines, then scroll)</criterion>
+    <criterion id="2">Send button enabled only when input is not empty</criterion>
+    <criterion id="3">Send on Enter key, Shift+Enter for newline</criterion>
+    <criterion id="4">File upload button with click and drag-and-drop support</criterion>
+    <criterion id="5">File preview shown before sending</criterion>
+    <criterion id="6">Multiple file support (up to 10 files per message)</criterion>
+    <criterion id="7">File type validation (images, PDFs, docs, spreadsheets)</criterion>
+    <criterion id="8">File size validation with user-friendly error messages</criterion>
+    <criterion id="9">Loading/sending state with disabled input</criterion>
+    <criterion id="10">Input disabled while Annie is responding</criterion>
+    <criterion id="11">Character count indicator for long messages (optional)</criterion>
+    <criterion id="12">Paste image from clipboard support</criterion>
+  </acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc>
+        <path>docs/epics/epic-20-web-ui.md</path>
+        <title>Epic 20: Annie Web UI</title>
+        <section>Story 20.6: Chat Interface - Input & Sending</section>
+        <snippet>Implement the message input area with text, file upload, and send functionality. Auto-expanding textarea (max 6 lines), send on Enter, Shift+Enter for newline, file upload with drag-and-drop, file type/size validation.</snippet>
+      </doc>
+      <doc>
+        <path>.bmad-ephemeral/tech-contexts/epic-20-tech-context.md</path>
+        <title>Epic 20 Technical Context</title>
+        <section>3.2 Key Components - Zustand Store</section>
+        <snippet>Defines AppState interface with conversations, messages, streamingMessage, sidebarOpen, annieState ('idle'|'thinking'|'speaking'|'tool_calling'), and action methods including addMessage and setStreamingMessage.</snippet>
+      </doc>
+      <doc>
+        <path>CLAUDE.md</path>
+        <title>Project Instructions</title>
+        <section>File Context Sharing (Epic 18)</section>
+        <snippet>FileAttachment schema includes filename, mime_type, size_bytes, data_base64. Supported types: images (10MB), documents/spreadsheets (20MB). Up to 10 files per message. Process-and-discard model - no persistence.</snippet>
+      </doc>
+    </docs>
+    <code>
+      <file>
+        <path>backend/api/models/file_attachment.py</path>
+        <kind>model</kind>
+        <symbol>FileAttachment, SUPPORTED_MIME_TYPES, FILE_SIZE_LIMITS, validate_files</symbol>
+        <lines>22-143</lines>
+        <reason>Defines supported MIME types (image/jpeg, image/png, image/gif, image/webp, application/pdf, text/plain, text/csv, xlsx, docx), size limits (10MB images, 20MB docs), and MAX_FILES_PER_REQUEST=10. Use for client-side validation mirroring.</reason>
+      </file>
+      <file>
+        <path>backend/api/routes/chat.py</path>
+        <kind>route</kind>
+        <symbol>ChatRequest, ChatResponse, create_chat</symbol>
+        <lines>214-232</lines>
+        <reason>ChatRequest model shows expected request format: user_id, platform, message, context, files (Optional[List[FileAttachment]]). Response includes conversation_id and stream_url for SSE.</reason>
+      </file>
+      <file>
+        <path>backend/api/routes/stream.py</path>
+        <kind>route</kind>
+        <symbol>stream_response, stream_generator</symbol>
+        <lines>931-1230</lines>
+        <reason>SSE endpoint at /api/stream/{conversation_id}. Events: status, token, tool_call, tool_result, done, error. Stream format for client consumption.</reason>
+      </file>
+    </code>
+    <dependencies>
+      <frontend comment="Per Epic 20 Tech Context - NPM packages for web/">
+        <package name="react" version="^18.2.0" />
+        <package name="react-dom" version="^18.2.0" />
+        <package name="zustand" version="^4.4.0" />
+        <package name="lucide-react" version="^0.294.0" comment="Icons for file upload, send button" />
+        <package name="clsx" version="^2.0.0" />
+        <package name="tailwind-merge" version="^2.0.0" />
+        <package name="@radix-ui/react-tooltip" version="^1.0.0" comment="Tooltips for file preview" />
+      </frontend>
+      <backend comment="Existing backend dependencies - no changes required">
+        <package name="fastapi" version=">=0.104.0" />
+        <package name="sse-starlette" version=">=1.6.5" />
+      </backend>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint source="Epic 20 Tech Context">Technology stack: Vite + React 18, shadcn/ui + Tailwind CSS, Zustand for state</constraint>
+    <constraint source="Epic 20 Tech Context">No SSR needed - SPA architecture with Vite</constraint>
+    <constraint source="CLAUDE.md">Files are process-and-discard - never persisted to disk or database</constraint>
+    <constraint source="CLAUDE.md">File content (base64) is NEVER logged - only metadata (filename, mime_type, size)</constraint>
+    <constraint source="backend/api/models/file_attachment.py">MAX_FILES_PER_REQUEST = 10</constraint>
+    <constraint source="backend/api/models/file_attachment.py">Image size limit: 10MB, Document size limit: 20MB</constraint>
+    <constraint source="Story Dev Notes">Send on Enter key, Shift+Enter for newline</constraint>
+    <constraint source="Story Dev Notes">Auto-expanding textarea max 6 lines, then scroll</constraint>
+    <constraint source="Epic 20 Architecture">POST /api/chat accepts JSON body, not multipart/form-data for files (base64 encoded)</constraint>
+  </constraints>
+
+  <interfaces>
+    <interface name="POST /api/chat" kind="REST endpoint">
+      <signature>POST /api/chat</signature>
+      <request>
+        {
+          "user_id": "string (required)",
+          "platform": "string (required) - 'web' for web UI",
+          "message": "string (required, min_length=1)",
+          "context": "object (optional, default={})",
+          "files": "FileAttachment[] (optional, max=10)"
+        }
+      </request>
+      <response>
+        {
+          "conversation_id": "string",
+          "status": "'streaming'",
+          "stream_url": "'/api/stream/{conversation_id}'",
+          "timestamp": "ISO 8601 string"
+        }
+      </response>
+      <path>backend/api/routes/chat.py</path>
+    </interface>
+    <interface name="FileAttachment" kind="data model">
+      <signature>
+        interface FileAttachment {
+          filename: string;
+          mime_type: string;
+          size_bytes: number;
+          data_base64: string;
+        }
+      </signature>
+      <path>backend/api/models/file_attachment.py</path>
+    </interface>
+    <interface name="AppState" kind="Zustand store">
+      <signature>
+        interface AppState {
+          conversations: Conversation[];
+          activeConversationId: string | null;
+          messages: Record&lt;string, Message[]&gt;;
+          streamingMessage: string | null;
+          annieState: 'idle' | 'thinking' | 'speaking' | 'tool_calling';
+          // Actions
+          addMessage: (conversationId: string, message: Message) => void;
+          setStreamingMessage: (content: string | null) => void;
+          setAnnieState: (state: AppState['annieState']) => void;
+        }
+      </signature>
+      <path>web/src/lib/stores/appStore.ts (to be created)</path>
+    </interface>
+    <interface name="useChat hook" kind="React hook">
+      <signature>
+        function useChat(): {
+          sendMessage: (message: string, files?: File[]) => Promise&lt;void&gt;;
+          isSending: boolean;
+          error: string | null;
+        }
+      </signature>
+      <path>web/src/lib/hooks/useChat.ts (to be created)</path>
+    </interface>
+  </interfaces>
+
+  <tests>
+    <standards>
+      Unit tests with Jest + React Testing Library for components. Test file validation utilities separately.
+      Integration tests for useChat hook with mocked fetch. E2E tests with Playwright for full send flow.
+      Per Epic 20 Tech Context: Components tested with Jest, hooks tested with mock EventSource.
+    </standards>
+    <locations>
+      <location>web/src/components/chat/__tests__/InputArea.test.tsx</location>
+      <location>web/src/components/chat/__tests__/FileUpload.test.tsx</location>
+      <location>web/src/lib/hooks/__tests__/useChat.test.ts</location>
+      <location>web/src/lib/utils/__tests__/fileValidation.test.ts</location>
+      <location>web/tests/e2e/chat.spec.ts</location>
+    </locations>
+    <ideas>
+      <idea ac="1">Test textarea expands to 6 lines then shows scrollbar</idea>
+      <idea ac="2">Test send button disabled when input empty, enabled when not empty</idea>
+      <idea ac="3">Test Enter sends message, Shift+Enter inserts newline</idea>
+      <idea ac="4">Test file button click opens file picker, drag-drop adds files</idea>
+      <idea ac="5">Test image files show thumbnail preview, documents show icon</idea>
+      <idea ac="6">Test 11th file rejected with error message</idea>
+      <idea ac="7">Test invalid MIME type rejected with specific error</idea>
+      <idea ac="8">Test oversized file rejected with human-readable size error</idea>
+      <idea ac="9">Test input disabled during send, loading spinner visible</idea>
+      <idea ac="10">Test input disabled while annieState !== 'idle'</idea>
+      <idea ac="11">Test character count appears at 500+ chars, warning at 4000</idea>
+      <idea ac="12">Test Ctrl+V/Cmd+V with image in clipboard adds to file list</idea>
+    </ideas>
+  </tests>
+</story-context>
