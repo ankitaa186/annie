@@ -64,7 +64,7 @@ story_location: .bmad-ephemeral/stories
 # Epic 17: Cloud Logging Integration - COMPLETED (6/6 stories done)
 # Epic 18: File Context Sharing - COMPLETED (6/6 stories)
 # Epic 19: Adaptive Context & Persona - BACKLOG (0/8 stories)
-# Epic 20: Annie Web UI - BACKLOG (0/18 stories, 11 V1 + 7 V2)
+# Epic 20: Annie Web UI - CONTEXTED (0/18 stories, 11 V1 + 7 V2)
 # =============================================================================
 
 development_status:
@@ -304,31 +304,31 @@ development_status:
   epic-19-retrospective: optional
 
   # ============================================================================
-  # EPIC 20: Annie Web UI (BACKLOG)
+  # EPIC 20: Annie Web UI (CONTEXTED)
   # Responsive web application with Vite + React + shadcn/ui
   # V1: Core chat experience (~9 days)
   # V2: Voice I/O, avatar, advanced features
   # Dependencies: Backend API, Cloudflare Access, Epic 18 (File Context)
   # ============================================================================
-  epic-20: backlog
+  epic-20: contexted
   # V1 Stories (Core Experience)
-  20-1-project-setup-infrastructure: backlog
-  20-2-layout-navigation-shell: backlog
-  20-3-health-status-system-indicators: backlog
-  20-4-conversation-list-management: backlog
-  20-5-chat-interface-message-display: backlog
-  20-6-chat-interface-input-sending: backlog
-  20-7-sse-streaming-integration: backlog
-  20-8-thinking-tool-call-display: backlog
-  20-13-cloudflare-access-integration: backlog
-  20-14-backend-api-extensions: backlog
-  20-15-integration-testing-polish: backlog
+  20-1-project-setup-infrastructure: drafted
+  20-2-layout-navigation-shell: drafted
+  20-3-health-status-system-indicators: drafted
+  20-4-conversation-list-management: drafted
+  20-5-chat-interface-message-display: drafted
+  20-6-chat-interface-input-sending: drafted
+  20-7-sse-streaming-integration: drafted
+  20-8-thinking-tool-call-display: drafted
+  20-13-cloudflare-access-integration: drafted
+  20-14-backend-api-extensions: drafted
+  20-15-integration-testing-polish: drafted
   # V2 Stories (Voice, Avatar, Advanced)
-  20-9-voice-input-speech-to-text: backlog
-  20-10-voice-output-text-to-speech: backlog
-  20-11-animated-annie-avatar: backlog
-  20-12-mobile-responsiveness-pwa: backlog
-  20-16-memory-browser-debug-admin: backlog
-  20-17-tool-calling-ui-debug-admin: backlog
-  20-18-proactive-trigger-notifications: backlog
+  20-9-voice-input-speech-to-text: drafted
+  20-10-voice-output-text-to-speech: drafted
+  20-11-animated-annie-avatar: drafted
+  20-12-mobile-responsiveness-pwa: drafted
+  20-16-memory-browser-debug-admin: drafted
+  20-17-tool-calling-ui-debug-admin: drafted
+  20-18-proactive-trigger-notifications: drafted
   epic-20-retrospective: optional
