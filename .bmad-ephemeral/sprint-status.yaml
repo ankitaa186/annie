@@ -319,7 +319,7 @@ development_status:
   20-5-chat-interface-message-display: ready-for-dev
   20-6-chat-interface-input-sending: ready-for-dev
   20-7-sse-streaming-integration: ready-for-dev
-  20-8-thinking-tool-call-display: drafted
+  20-8-thinking-tool-call-display: ready-for-dev
   20-13-cloudflare-access-integration: ready-for-dev
   20-14-backend-api-extensions: ready-for-dev
   20-15-integration-testing-polish: ready-for-dev
