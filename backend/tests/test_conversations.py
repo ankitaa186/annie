@@ -126,9 +126,9 @@ class TestStateManagerConversations:
         state = StateManager(redis_client=mock_redis)
         state._is_healthy = True
 
-        result = await state.create_conversation("user_123", "Test Chat")
+        result = await state.create_conversation("user_123", title="Test Chat")
 
-        assert result["id"].startswith("conv_")
+        assert result["conversation_id"].startswith("conv_")
         assert result["title"] == "Test Chat"
         assert "created_at" in result
 
@@ -147,7 +147,7 @@ class TestStateManagerConversations:
 
         result = await state.create_conversation("user_123")
 
-        assert "Conversation" in result["title"]
+        assert result["title"] == "New Chat"
 
     @pytest.mark.asyncio
     async def test_list_conversations_empty(self, mock_redis):

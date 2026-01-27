@@ -10,6 +10,7 @@ import {
   useActiveConversationId,
   useMessages,
   useStreamingMessage,
+  useStreamingConversationId,
   useIsLoadingHistory,
   useIsStreaming,
   useAnnieState,
@@ -24,6 +25,7 @@ import {
  */
 export function ChatPage() {
   const { conversationId } = useParams<{ conversationId?: string }>();
+  console.log('[ChatPage] Rendering, conversationId:', conversationId);
   const navigate = useNavigate();
   const prevConversationIdRef = useRef<string | null>(null);
 
@@ -39,22 +41,46 @@ export function ChatPage() {
   // Wrap sendMessage to connect to stream after sending
   const sendMessage = useCallback(
     async (message: string, files?: File[]) => {
+      console.log('[ChatPage] sendMessage called, URL conversationId:', conversationId);
       const newConversationId = await sendChatMessage(message, files);
+      console.log('[ChatPage] sendChatMessage returned:', newConversationId);
       // Navigate to the conversation URL so the useEffect sync doesn't reset
       navigate(`/chat/${newConversationId}`, { replace: true });
       // Connect to SSE stream to receive Annie's response
+      console.log('[ChatPage] Connecting stream to:', newConversationId);
       connectStream(newConversationId);
       return newConversationId;
     },
-    [sendChatMessage, connectStream, navigate]
+    [sendChatMessage, connectStream, navigate, conversationId]
   );
 
   // Store state
   const activeConversationId = useActiveConversationId();
   const messages = useMessages(activeConversationId);
   const streamingMessage = useStreamingMessage();
+  const streamingConversationId = useStreamingConversationId();
   const isLoadingHistory = useIsLoadingHistory();
   const isStreaming = useIsStreaming();
+
+  // Only show streaming indicators if the streaming belongs to THIS conversation
+  const isStreamingForThisConversation = isStreaming && streamingConversationId === activeConversationId;
+  const streamingMessageForThisConversation = streamingConversationId === activeConversationId ? streamingMessage : null;
+
+  // What activeTool is actually being passed to MessageThread
+  const activeToolForThisConversation = isStreamingForThisConversation ? activeTool : null;
+
+  console.log('[ChatPage] Streaming state check:', {
+    urlConversationId: conversationId,
+    activeConversationId,
+    streamingConversationId,
+    isStreaming,
+    isStreamingForThisConversation,
+    streamingMessageLength: streamingMessage?.length || 0,
+    streamingMessageForThisLength: streamingMessageForThisConversation?.length || 0,
+    idsMatch: streamingConversationId === activeConversationId,
+    activeTool: activeTool ? activeTool.name : null,
+    activeToolForThis: activeToolForThisConversation ? activeToolForThisConversation.name : null,
+  });
   const annieState = useAnnieState();
 
   // Store actions
@@ -79,11 +105,11 @@ export function ChatPage() {
     }
   }, [conversationId, fetchMessages]);
 
-  // Disable input while sending or streaming response
-  const inputDisabled = isSending || isStreaming || streamIsActive;
+  // Disable input while sending or streaming response (for this conversation)
+  const inputDisabled = isSending || isStreamingForThisConversation || streamIsActive;
 
   // Dynamic placeholder based on state
-  const placeholder = isStreaming
+  const placeholder = isStreamingForThisConversation
     ? 'Annie is responding...'
     : 'Type a message...';
 
@@ -94,11 +120,11 @@ export function ChatPage() {
     >
       <MessageThread
         messages={messages}
-        streamingMessage={streamingMessage}
+        streamingMessage={streamingMessageForThisConversation}
         isLoading={isLoadingHistory}
-        isStreaming={isStreaming}
+        isStreaming={isStreamingForThisConversation}
         annieState={annieState}
-        activeTool={activeTool}
+        activeTool={activeToolForThisConversation}
         className="flex-1"
       />
 

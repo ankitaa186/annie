@@ -4,6 +4,7 @@ import { Plus, Brain, Wrench } from 'lucide-react';
 import { useSidebarCollapsed, useAppStore, useActiveConversationId } from '@/lib/stores/appStore';
 import { useIsMobile, usePrefersReducedMotion } from '@/hooks/useMediaQuery';
 import { useConversations } from '@/lib/hooks/useConversations';
+import { useSession } from '@/lib/hooks/useSession';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
@@ -43,6 +44,9 @@ export function Sidebar() {
     renameConversation,
   } = useConversations();
 
+  // Use session hook for switching conversations
+  const { switchConversation } = useSession();
+
   // Show full content on mobile (overlay) or desktop, collapsed on tablet
   const showFullContent = isMobile || !isCollapsed;
 
@@ -71,17 +75,19 @@ export function Sidebar() {
    * Handle selecting a conversation
    */
   const handleSelectConversation = useCallback(
-    (id: string) => {
+    async (id: string) => {
+      // Update session's current conversation on backend
+      await switchConversation(id);
+
       // Navigate to the conversation URL
       navigate(`/chat/${id}`);
-      setActiveConversation(id);
 
       // Close sidebar on mobile after selecting conversation
       if (isMobile) {
         setSidebarOpen(false);
       }
     },
-    [navigate, setActiveConversation, isMobile, setSidebarOpen]
+    [switchConversation, navigate, isMobile, setSidebarOpen]
   );
 
   /**

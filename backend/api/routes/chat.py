@@ -214,8 +214,12 @@ async def refresh_profile_background(user_id: str):
 class ChatRequest(BaseModel):
     """Request model for chat endpoint."""
     user_id: str = Field(..., description="Unique user identifier")
-    platform: str = Field(..., description="Platform identifier (e.g., 'telegram')")
+    platform: str = Field(..., description="Platform identifier (e.g., 'telegram', 'web')")
     message: str = Field(..., min_length=1, description="User message content")
+    conversation_id: Optional[str] = Field(
+        default=None,
+        description="Optional conversation ID to resume a specific conversation (Web UI)"
+    )
     context: Optional[dict] = Field(default={}, description="Additional context metadata")
     files: Optional[List[FileAttachment]] = Field(
         default=None,
@@ -360,51 +364,63 @@ async def create_chat(
             # Get or create session
             session = await state.get_session(request.user_id)
 
-            if not session:
-                # Create new session
-                session = await state.create_session(request.user_id, request.platform)
+            # If conversation_id provided (Web UI), validate and switch to it
+            if request.conversation_id:
+                resumed = await state.resume_conversation(
+                    user_id=request.user_id,
+                    conversation_id=request.conversation_id,
+                    platform=request.platform
+                )
+                if resumed:
+                    session = resumed
+                    logger.info(
+                        "Switched to requested conversation",
+                        extra={
+                            "user_id": request.user_id,
+                            "conversation_id": request.conversation_id,
+                            "platform": request.platform
+                        }
+                    )
+                else:
+                    logger.warning(
+                        "Could not switch to requested conversation",
+                        extra={
+                            "user_id": request.user_id,
+                            "requested_conversation_id": request.conversation_id
+                        }
+                    )
 
-                # Also create conversation metadata so it appears in conversation list (Epic 20 Web UI)
-                # This ensures the conversation is tracked in conversations:{user_id} sorted set
+            # Determine if we need a new conversation
+            needs_new_conversation = (
+                not session or  # No session at all
+                not session.get("conversation_id")  # Session exists but no conversation
+            )
+
+            if needs_new_conversation:
+                # Create new conversation with title from first message
                 conversation_title = request.message[:50] + ("..." if len(request.message) > 50 else "")
-                conversation_id = session["conversation_id"]
-
-                now = datetime.now(timezone.utc)
-                now_iso = now.isoformat().replace("+00:00", "Z")
-                now_timestamp = now.timestamp()
-
-                # Store conversation metadata using session's conversation_id
-                meta_key = f"conversation:{conversation_id}:meta"
-                conversations_key = f"conversations:{request.user_id}"
-
-                pipe = state.redis_client.pipeline()
-                pipe.hset(meta_key, mapping={
-                    "user_id": request.user_id,
-                    "title": conversation_title,
-                    "created_at": now_iso,
-                    "updated_at": now_iso
-                })
-                pipe.expire(meta_key, state.CONVERSATION_META_TTL)
-                pipe.zadd(conversations_key, {conversation_id: now_timestamp})
-                pipe.expire(conversations_key, state.CONVERSATION_META_TTL)
-                await pipe.execute()
-
+                session = await state.create_conversation(
+                    user_id=request.user_id,
+                    platform=request.platform,
+                    title=conversation_title
+                )
                 logger.info(
-                    "New session created with conversation metadata",
+                    "New conversation created",
                     extra={
                         "user_id": request.user_id,
-                        "conversation_id": conversation_id,
-                        "title": conversation_title
+                        "conversation_id": session["conversation_id"],
+                        "title": conversation_title,
+                        "platform": request.platform
                     }
                 )
             else:
-                # Update existing session activity
+                # Use existing session's conversation
                 await state.update_session_activity(request.user_id)
                 logger.info(
-                    "Existing session updated",
+                    "Using existing conversation",
                     extra={
                         "user_id": request.user_id,
-                        "conversation_id": session["conversation_id"]
+                        "conversation_id": session.get("conversation_id")
                     }
                 )
 

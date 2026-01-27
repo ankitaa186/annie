@@ -305,6 +305,7 @@ async def create_conversation(
         async with StateManager() as state:
             result = await state.create_conversation(
                 user_id=user_id,
+                platform="web",
                 title=title
             )
 
@@ -314,7 +315,7 @@ async def create_conversation(
                 "Conversation created successfully",
                 extra={
                     "user_id": user_id,
-                    "conversation_id": result["id"],
+                    "conversation_id": result["conversation_id"],
                     "title": result["title"],
                     "duration_ms": duration_ms,
                     "event": "conversations_create_success"
@@ -322,7 +323,7 @@ async def create_conversation(
             )
 
             return CreateConversationResponse(
-                id=result["id"],
+                id=result["conversation_id"],
                 title=result["title"],
                 created_at=datetime.fromisoformat(
                     result["created_at"].replace("Z", "+00:00")

@@ -1,11 +1,5 @@
-import {
-  memo,
-  useRef,
-  useEffect,
-  useCallback,
-  forwardRef,
-} from 'react';
-import { useVirtualizer } from '@tanstack/react-virtual';
+import { memo, useRef, forwardRef } from 'react';
+import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { Bot } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { UserMessage } from './UserMessage';
@@ -192,9 +186,9 @@ const MessageRow = forwardRef<HTMLDivElement, { message: Message }>(
  * MessageThread - Main chat message display component
  *
  * Features:
- * - Virtual scrolling for performance with 100+ messages
+ * - Virtual scrolling for performance with 100+ messages (react-virtuoso)
  * - Auto-scroll to bottom on new messages
- * - Smooth scroll behavior
+ * - Starts at bottom of conversation
  * - Loading skeleton while fetching history
  * - Empty state for new conversations
  * - Typing indicator while streaming
@@ -205,82 +199,11 @@ export const MessageThread = memo(function MessageThread({
   streamingMessage,
   isLoading,
   isStreaming,
-  annieState: _annieState, // Reserved for future use
+  annieState: _annieState,
   activeTool,
   className,
 }: MessageThreadProps) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const prevMessageCountRef = useRef(messages.length);
-  const shouldScrollRef = useRef(true);
-
-  // Virtual scrolling setup
-  const virtualizer = useVirtualizer({
-    count: messages.length,
-    getScrollElement: () => scrollRef.current,
-    estimateSize: () => 100, // Estimated message height
-    overscan: 5, // Render 5 extra items outside viewport
-    getItemKey: (index) => messages[index]?.id ?? `msg-${index}`,
-  });
-
-  const virtualItems = virtualizer.getVirtualItems();
-
-  // Check if user is near the bottom (within 150px)
-  const checkIfNearBottom = useCallback(() => {
-    const scrollElement = scrollRef.current;
-    if (!scrollElement) return true;
-
-    const { scrollTop, scrollHeight, clientHeight } = scrollElement;
-    return scrollHeight - scrollTop - clientHeight < 150;
-  }, []);
-
-  // Scroll to bottom with smooth behavior
-  const scrollToBottom = useCallback((smooth = true) => {
-    const scrollElement = scrollRef.current;
-    if (!scrollElement) return;
-
-    scrollElement.scrollTo({
-      top: scrollElement.scrollHeight,
-      behavior: smooth ? 'smooth' : 'auto',
-    });
-  }, []);
-
-  // Track scroll position to determine if we should auto-scroll
-  const handleScroll = useCallback(() => {
-    shouldScrollRef.current = checkIfNearBottom();
-  }, [checkIfNearBottom]);
-
-  // Auto-scroll when new messages arrive (only if user is near bottom)
-  useEffect(() => {
-    if (messages.length > prevMessageCountRef.current) {
-      if (shouldScrollRef.current) {
-        // Use requestAnimationFrame to ensure DOM has updated
-        requestAnimationFrame(() => {
-          scrollToBottom(true);
-        });
-      }
-    }
-    prevMessageCountRef.current = messages.length;
-  }, [messages.length, scrollToBottom]);
-
-  // Auto-scroll when streaming starts/updates
-  useEffect(() => {
-    if (streamingMessage && shouldScrollRef.current) {
-      requestAnimationFrame(() => {
-        scrollToBottom(false);
-      });
-    }
-  }, [streamingMessage, scrollToBottom]);
-
-  // Initial scroll to bottom when messages first load
-  useEffect(() => {
-    if (!isLoading && messages.length > 0) {
-      // Instant scroll on initial load
-      scrollToBottom(false);
-    }
-  }, [isLoading, messages.length, scrollToBottom]);
-
-  // Calculate total height for virtual list
-  const totalSize = virtualizer.getTotalSize();
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
 
   // Show loading state
   if (isLoading) {
@@ -300,73 +223,56 @@ export const MessageThread = memo(function MessageThread({
     );
   }
 
-  return (
-    <div
-      ref={scrollRef}
-      className={cn(
-        'flex h-full flex-col overflow-y-auto scroll-smooth',
-        className
-      )}
-      onScroll={handleScroll}
-      role="log"
-      aria-label="Conversation messages"
-      aria-live="polite"
-    >
-      {/* Virtual list container */}
-      <div
-        style={{
-          height: `${totalSize}px`,
-          width: '100%',
-          position: 'relative',
-        }}
-      >
-        {virtualItems.map((virtualRow) => {
-          const message = messages[virtualRow.index];
-          if (!message) return null;
-          return (
-            <div
-              key={virtualRow.key}
-              data-index={virtualRow.index}
-              ref={virtualizer.measureElement}
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: '100%',
-                transform: `translateY(${virtualRow.start}px)`,
-              }}
-            >
-              <MessageRow message={message} />
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Tool call card (shown when Annie is using a tool) */}
-      {activeTool && (
+  // Render streaming content (typing indicator, tool card, or streaming message)
+  const renderStreamingContent = () => {
+    if (activeTool) {
+      return (
         <div className="px-4 py-2">
           <div className="ml-11 max-w-[80%]">
             <ToolCallCard tool={activeTool} />
           </div>
         </div>
-      )}
+      );
+    }
 
-      {/* Streaming message (outside virtual list, always at bottom) */}
-      {streamingMessage && (
+    if (streamingMessage) {
+      return (
         <div className="py-2">
           <StreamingMessage content={streamingMessage} />
         </div>
-      )}
+      );
+    }
 
-      {/* Typing indicator when streaming but no content yet */}
-      {isStreaming && !streamingMessage && !activeTool && (
+    if (isStreaming) {
+      return (
         <div className="py-2">
           <TypingIndicator />
         </div>
-      )}
+      );
+    }
 
-      {/* Bottom padding for comfortable reading */}
-      <div className="h-4 flex-shrink-0" aria-hidden="true" />
+    return null;
+  };
+
+  return (
+    <div
+      className={cn('flex h-full flex-col overflow-hidden', className)}
+      role="log"
+      aria-label="Conversation messages"
+      aria-live="polite"
+    >
+      <Virtuoso
+        ref={virtuosoRef}
+        data={messages}
+        initialTopMostItemIndex={messages.length - 1}
+        followOutput="auto"
+        alignToBottom
+        itemContent={(_index, message) => <MessageRow message={message} />}
+        components={{
+          Footer: () => renderStreamingContent(),
+        }}
+        className="h-full"
+      />
     </div>
   );
 });

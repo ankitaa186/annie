@@ -19,7 +19,7 @@ from fastapi.exceptions import RequestValidationError
 from api.config import get_config
 from api.logging import get_logger
 from api.mcp_client import MCPClient, MCPClientError
-from api.routes import chat, stream, conversations
+from api.routes import chat, stream, conversations, session
 from api.middleware.cloudflare_auth import cloudflare_auth_middleware
 from api.middleware.rate_limiter import rate_limit_middleware
 
@@ -58,6 +58,7 @@ app = FastAPI(
 app.include_router(chat.router)
 app.include_router(stream.router)
 app.include_router(conversations.router)
+app.include_router(session.router)
 
 # Add CORS middleware
 # Configured for web UI domain and local development
