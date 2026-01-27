@@ -898,14 +898,35 @@ home_assistant_control_tool = {
             },
             "parameters": {
                 "type": "object",
-                "description": (
-                    "Action parameters. Examples: "
-                    "{\"brightness\": 200} for set_brightness, "
-                    "{\"temperature\": 72} for set_temperature, "
-                    "{\"hvac_mode\": \"heat\"} for set_hvac_mode, "
-                    "{\"position\": 50} for set_position."
-                ),
-                "additionalProperties": True
+                "description": "Action parameters based on the action type",
+                "properties": {
+                    "brightness": {
+                        "type": "integer",
+                        "description": "Light brightness level (0-255) for set_brightness action"
+                    },
+                    "temperature": {
+                        "type": "number",
+                        "description": "Target temperature for set_temperature action"
+                    },
+                    "hvac_mode": {
+                        "type": "string",
+                        "enum": ["heat", "cool", "auto", "off", "heat_cool", "fan_only", "dry"],
+                        "description": "HVAC mode for set_hvac_mode action"
+                    },
+                    "position": {
+                        "type": "integer",
+                        "description": "Cover/blind position (0-100) for set_position action"
+                    },
+                    "color_temp": {
+                        "type": "integer",
+                        "description": "Color temperature in mireds for lights"
+                    },
+                    "rgb_color": {
+                        "type": "array",
+                        "description": "RGB color as [r, g, b] array for lights",
+                        "items": {"type": "integer"}
+                    }
+                }
             }
         },
         "required": ["entity_id", "action"]

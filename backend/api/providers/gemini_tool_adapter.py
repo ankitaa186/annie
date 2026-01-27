@@ -42,6 +42,69 @@ class GeminiToolAdapter:
         """Initialize Gemini Tool Adapter."""
         logger.debug("Gemini Tool Adapter initialized")
 
+    def _find_empty_objects(
+        self,
+        schema: Dict[str, Any],
+        path: str = ""
+    ) -> List[str]:
+        """
+        Recursively find OBJECT types without properties defined.
+
+        These cause MALFORMED_FUNCTION_CALL errors because Gemini doesn't
+        know what fields are valid for the object.
+
+        Args:
+            schema: The schema to check
+            path: Current path for error reporting
+
+        Returns:
+            List of paths to empty object definitions
+        """
+        issues = []
+
+        if isinstance(schema, dict):
+            # Check if this is an object type with no properties
+            if schema.get("type") in ("OBJECT", "object"):
+                props = schema.get("properties", {})
+                # Only flag nested objects, not top-level inputSchema
+                if not props and path and "properties" in path:
+                    issues.append(path)
+
+            # Recurse into nested structures
+            for key, value in schema.items():
+                new_path = f"{path}.{key}" if path else key
+                issues.extend(self._find_empty_objects(value, new_path))
+
+        elif isinstance(schema, list):
+            for i, item in enumerate(schema):
+                issues.extend(self._find_empty_objects(item, f"{path}[{i}]"))
+
+        return issues
+
+    def _validate_tool_schema(self, tool_name: str, gemini_schema: Dict[str, Any]) -> None:
+        """
+        Validate a converted Gemini tool schema for common issues.
+
+        Logs warnings for schemas that may cause MALFORMED_FUNCTION_CALL errors.
+
+        Args:
+            tool_name: Name of the tool for logging
+            gemini_schema: The converted Gemini schema to validate
+        """
+        # Check for empty objects
+        empty_objects = self._find_empty_objects(gemini_schema)
+
+        if empty_objects:
+            logger.warning(
+                "Tool schema has OBJECT types without properties - may cause MALFORMED_FUNCTION_CALL",
+                extra={
+                    "tool_name": tool_name,
+                    "empty_object_paths": empty_objects,
+                    "issue": "EMPTY_OBJECT_SCHEMA",
+                    "recommendation": "Add 'properties' to define valid fields for these objects"
+                }
+            )
+
     def convert_openai_to_gemini_schema(self, openai_tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Convert OpenAI tool schemas to Gemini function_declarations format.
@@ -99,6 +162,9 @@ class GeminiToolAdapter:
                 # Convert parameters if present
                 if "parameters" in func:
                     gemini_func["parameters"] = self._convert_parameters_to_gemini(func["parameters"])
+
+                # Validate schema for potential issues
+                self._validate_tool_schema(func["name"], gemini_func)
 
                 gemini_tools.append(gemini_func)
 
