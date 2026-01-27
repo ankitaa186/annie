@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Request
 from pydantic import BaseModel, Field
 
 from api.logging import get_logger
@@ -234,7 +234,11 @@ class ChatResponse(BaseModel):
 
 @router.post("/chat", response_model=ChatResponse)
 @observe(name="chat_request", as_type="trace")
-async def create_chat(request: ChatRequest, background_tasks: BackgroundTasks):
+async def create_chat(
+    request: ChatRequest,
+    background_tasks: BackgroundTasks,
+    http_request: Request
+):
     """
     Process incoming chat message and initiate streaming response.
 
@@ -286,6 +290,27 @@ async def create_chat(request: ChatRequest, background_tasks: BackgroundTasks):
             "timestamp": "2025-11-11T10:00:00Z"
         }
     """
+    # Override user_id from auth middleware if available (web UI flow)
+    # This ensures the authenticated user_id is used instead of client-provided one
+    if hasattr(http_request.state, 'user_id') and http_request.state.user_id:
+        if request.user_id != http_request.state.user_id:
+            logger.info(
+                "Overriding client user_id with authenticated user_id",
+                extra={
+                    "client_user_id": request.user_id,
+                    "auth_user_id": http_request.state.user_id,
+                    "event": "user_id_override"
+                }
+            )
+        # Create a new request object with the correct user_id
+        request = ChatRequest(
+            user_id=http_request.state.user_id,
+            platform=request.platform,
+            message=request.message,
+            context=request.context,
+            files=request.files
+        )
+
     # Detect decision support request for memory retrieval
     needs_decision_support = is_decision_support_request(request.message)
 
@@ -338,11 +363,38 @@ async def create_chat(request: ChatRequest, background_tasks: BackgroundTasks):
             if not session:
                 # Create new session
                 session = await state.create_session(request.user_id, request.platform)
+
+                # Also create conversation metadata so it appears in conversation list (Epic 20 Web UI)
+                # This ensures the conversation is tracked in conversations:{user_id} sorted set
+                conversation_title = request.message[:50] + ("..." if len(request.message) > 50 else "")
+                conversation_id = session["conversation_id"]
+
+                now = datetime.now(timezone.utc)
+                now_iso = now.isoformat().replace("+00:00", "Z")
+                now_timestamp = now.timestamp()
+
+                # Store conversation metadata using session's conversation_id
+                meta_key = f"conversation:{conversation_id}:meta"
+                conversations_key = f"conversations:{request.user_id}"
+
+                pipe = state.redis_client.pipeline()
+                pipe.hset(meta_key, mapping={
+                    "user_id": request.user_id,
+                    "title": conversation_title,
+                    "created_at": now_iso,
+                    "updated_at": now_iso
+                })
+                pipe.expire(meta_key, state.CONVERSATION_META_TTL)
+                pipe.zadd(conversations_key, {conversation_id: now_timestamp})
+                pipe.expire(conversations_key, state.CONVERSATION_META_TTL)
+                await pipe.execute()
+
                 logger.info(
-                    "New session created",
+                    "New session created with conversation metadata",
                     extra={
                         "user_id": request.user_id,
-                        "conversation_id": session["conversation_id"]
+                        "conversation_id": conversation_id,
+                        "title": conversation_title
                     }
                 )
             else:

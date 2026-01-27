@@ -1,6 +1,6 @@
 # Story 20.5: Chat Interface - Message Display
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -25,47 +25,47 @@ so that I can read our exchanges with proper styling, markdown rendering, and fi
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Create MessageThread component (AC: 1, 10, 11, 12)
-  - [ ] 1.1 Create `web/src/components/chat/MessageThread.tsx`
-  - [ ] 1.2 Implement auto-scroll to bottom
-  - [ ] 1.3 Add smooth scroll behavior
-  - [ ] 1.4 Implement virtual scrolling for performance
-  - [ ] 1.5 Add loading skeleton for history fetch
+- [x] Task 1: Create MessageThread component (AC: 1, 10, 11, 12)
+  - [x] 1.1 Create `web/src/components/chat/MessageThread.tsx`
+  - [x] 1.2 Implement auto-scroll to bottom
+  - [x] 1.3 Add smooth scroll behavior
+  - [x] 1.4 Implement virtual scrolling for performance
+  - [x] 1.5 Add loading skeleton for history fetch
 
-- [ ] Task 2: Create UserMessage component (AC: 2)
-  - [ ] 2.1 Create `web/src/components/chat/UserMessage.tsx`
-  - [ ] 2.2 Right-align with user-specific styling
-  - [ ] 2.3 Apply distinct background color
+- [x] Task 2: Create UserMessage component (AC: 2)
+  - [x] 2.1 Create `web/src/components/chat/UserMessage.tsx`
+  - [x] 2.2 Right-align with user-specific styling
+  - [x] 2.3 Apply distinct background color
 
-- [ ] Task 3: Create AnnieMessage component (AC: 3)
-  - [ ] 3.1 Create `web/src/components/chat/AnnieMessage.tsx`
-  - [ ] 3.2 Left-align with Annie styling
-  - [ ] 3.3 Add avatar placeholder (for Story 20.11)
+- [x] Task 3: Create AnnieMessage component (AC: 3)
+  - [x] 3.1 Create `web/src/components/chat/AnnieMessage.tsx`
+  - [x] 3.2 Left-align with Annie styling
+  - [x] 3.3 Add avatar placeholder (for Story 20.11)
 
-- [ ] Task 4: Create MessageContent component (AC: 4, 5, 6)
-  - [ ] 4.1 Create `web/src/components/chat/MessageContent.tsx`
-  - [ ] 4.2 Integrate react-markdown for rendering
-  - [ ] 4.3 Configure code block syntax highlighting
-  - [ ] 4.4 Configure links to open in new tab
-  - [ ] 4.5 Style tables with borders
-  - [ ] 4.6 Style lists properly
+- [x] Task 4: Create MessageContent component (AC: 4, 5, 6)
+  - [x] 4.1 Create `web/src/components/chat/MessageContent.tsx`
+  - [x] 4.2 Integrate react-markdown for rendering
+  - [x] 4.3 Configure code block syntax highlighting
+  - [x] 4.4 Configure links to open in new tab
+  - [x] 4.5 Style tables with borders
+  - [x] 4.6 Style lists properly
 
-- [ ] Task 5: Create FileAttachment component (AC: 7)
-  - [ ] 5.1 Create `web/src/components/chat/FileAttachment.tsx`
-  - [ ] 5.2 Display images inline with click-to-expand
-  - [ ] 5.3 Display documents as file cards
-  - [ ] 5.4 Show filename, size, type icon
+- [x] Task 5: Create FileAttachment component (AC: 7)
+  - [x] 5.1 Create `web/src/components/chat/FileAttachment.tsx`
+  - [x] 5.2 Display images inline with click-to-expand
+  - [x] 5.3 Display documents as file cards
+  - [x] 5.4 Show filename, size, type icon
 
-- [ ] Task 6: Add message interactions (AC: 8, 9)
-  - [ ] 6.1 Show timestamp on hover
-  - [ ] 6.2 Add copy button on hover
-  - [ ] 6.3 Implement copy to clipboard
-  - [ ] 6.4 Show brief "Copied!" feedback
+- [x] Task 6: Add message interactions (AC: 8, 9)
+  - [x] 6.1 Show timestamp on hover
+  - [x] 6.2 Add copy button on hover
+  - [x] 6.3 Implement copy to clipboard
+  - [x] 6.4 Show brief "Copied!" feedback
 
-- [ ] Task 7: Integrate with ChatPage
-  - [ ] 7.1 Replace MainContent placeholder with MessageThread
-  - [ ] 7.2 Connect to messages from Zustand store
-  - [ ] 7.3 Load history for active conversation
+- [x] Task 7: Integrate with ChatPage
+  - [x] 7.1 Replace MainContent placeholder with MessageThread
+  - [x] 7.2 Connect to messages from Zustand store
+  - [x] 7.3 Load history for active conversation
 
 ## Dev Notes
 
@@ -211,9 +211,48 @@ useEffect(() => {
 - .bmad-ephemeral/stories/20-5-chat-interface-message-display.context.xml
 
 ### Agent Model Used
+Claude Opus 4.5 (claude-opus-4-5-20251101)
 
 ### Debug Log References
+Implementation plan:
+1. Added dependencies to package.json (react-markdown, remark-gfm, react-syntax-highlighter, @tanstack/react-virtual)
+2. Created types for Message and FileAttachment in web/src/types/index.ts
+3. Updated Zustand store with message state (messages, streamingMessage, isLoadingHistory, isStreaming)
+4. Created MessageContent component with markdown rendering and syntax highlighting
+5. Created FileAttachment component with image preview and document cards
+6. Created UserMessage component with right-alignment and hover interactions
+7. Created AnnieMessage component with avatar placeholder and left-alignment
+8. Created MessageThread component with virtual scrolling and auto-scroll
+9. Updated ChatPage to integrate MessageThread and connect to store
+10. Added CSS utilities for prose styling and smooth scroll
 
 ### Completion Notes List
+- Implemented all 7 tasks covering 12 acceptance criteria
+- MessageThread uses @tanstack/react-virtual for performance with 100+ messages
+- Auto-scroll only triggers when user is near bottom (within 150px)
+- Streaming message shown with blinking cursor indicator
+- Empty state shown when no messages in conversation
+- Loading skeleton shown during history fetch
+- Copy functionality with 2-second "Copied!" feedback
+- All links open in new tab with rel="noopener noreferrer" for security
+- Full markdown support: headers, bold, italic, code, lists, tables, blockquotes
+- Syntax highlighting uses oneDark theme from react-syntax-highlighter
+- Avatar uses Bot icon as placeholder for Story 20.11
+- Dark mode fully supported via Tailwind CSS classes
+- WCAG 2.1 AA accessibility with ARIA labels and keyboard navigation
 
 ### File List
+- web/package.json (modified - added dependencies)
+- web/src/types/index.ts (created - Message, FileAttachment, Conversation types)
+- web/src/lib/stores/appStore.ts (modified - added message state and actions)
+- web/src/components/chat/MessageContent.tsx (created)
+- web/src/components/chat/FileAttachment.tsx (created)
+- web/src/components/chat/UserMessage.tsx (created)
+- web/src/components/chat/AnnieMessage.tsx (created)
+- web/src/components/chat/MessageThread.tsx (created)
+- web/src/components/chat/index.ts (created)
+- web/src/pages/ChatPage.tsx (modified - integrated MessageThread)
+- web/src/index.css (modified - added prose styling)
+
+### Change Log
+- 2026-01-26: Story 20-5 implementation complete - all acceptance criteria met

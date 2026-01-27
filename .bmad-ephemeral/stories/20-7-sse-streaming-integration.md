@@ -1,6 +1,6 @@
 # Story 20.7: SSE Streaming Integration
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -25,53 +25,53 @@ so that I get immediate feedback and can follow her thinking process.
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Create SSE stream client (AC: 1, 10)
-  - [ ] 1.1 Create `web/src/lib/api/streamClient.ts`
-  - [ ] 1.2 Implement EventSource connection
-  - [ ] 1.3 Add auto-reconnect with exponential backoff
-  - [ ] 1.4 Handle connection errors
+- [x] Task 1: Create SSE stream client (AC: 1, 10)
+  - [x] 1.1 Create `web/src/lib/api/streamClient.ts`
+  - [x] 1.2 Implement EventSource connection
+  - [x] 1.3 Add auto-reconnect with exponential backoff
+  - [x] 1.4 Handle connection errors
 
-- [ ] Task 2: Create useStream hook (AC: 1, 2, 7, 8, 10, 11)
-  - [ ] 2.1 Create `web/src/lib/hooks/useStream.ts`
-  - [ ] 2.2 Manage EventSource lifecycle
-  - [ ] 2.3 Parse incoming SSE events
-  - [ ] 2.4 Update streaming message state
-  - [ ] 2.5 Handle done event - finalize message
-  - [ ] 2.6 Handle error event
-  - [ ] 2.7 Implement abort functionality
+- [x] Task 2: Create useStream hook (AC: 1, 2, 7, 8, 10, 11)
+  - [x] 2.1 Create `web/src/lib/hooks/useStream.ts`
+  - [x] 2.2 Manage EventSource lifecycle
+  - [x] 2.3 Parse incoming SSE events
+  - [x] 2.4 Update streaming message state
+  - [x] 2.5 Handle done event - finalize message
+  - [x] 2.6 Handle error event
+  - [x] 2.7 Implement abort functionality
 
-- [ ] Task 3: Create StreamingMessage component (AC: 2, 9)
-  - [ ] 3.1 Create `web/src/components/chat/StreamingMessage.tsx`
-  - [ ] 3.2 Display streaming content with cursor
-  - [ ] 3.3 Show typing indicator before first token
-  - [ ] 3.4 Animate cursor while streaming
+- [x] Task 3: Create StreamingMessage component (AC: 2, 9)
+  - [x] 3.1 Create `web/src/components/chat/StreamingMessage.tsx`
+  - [x] 3.2 Display streaming content with cursor
+  - [x] 3.3 Show typing indicator before first token
+  - [x] 3.4 Animate cursor while streaming
 
-- [ ] Task 4: Handle event types (AC: 3, 4, 5, 6)
-  - [ ] 4.1 Parse `message` events → append to content
-  - [ ] 4.2 Parse `status` events → update Annie state
-  - [ ] 4.3 Parse `tool_call` events → delegate to tool display
-  - [ ] 4.4 Parse `tool_result` events → delegate to tool display
+- [x] Task 4: Handle event types (AC: 3, 4, 5, 6)
+  - [x] 4.1 Parse `message` events → append to content
+  - [x] 4.2 Parse `status` events → update Annie state
+  - [x] 4.3 Parse `tool_call` events → delegate to tool display
+  - [x] 4.4 Parse `tool_result` events → delegate to tool display
 
-- [ ] Task 5: Implement cancel functionality (AC: 11)
-  - [ ] 5.1 Add cancel button to streaming UI
-  - [ ] 5.2 Implement AbortController for SSE
-  - [ ] 5.3 Finalize partial message on cancel
+- [x] Task 5: Implement cancel functionality (AC: 11)
+  - [x] 5.1 Add cancel button to streaming UI
+  - [x] 5.2 Implement disconnect for SSE
+  - [x] 5.3 Finalize partial message on cancel
 
-- [ ] Task 6: Implement error handling (AC: 8, 12)
-  - [ ] 6.1 Show error toast for stream errors
-  - [ ] 6.2 Add retry button
-  - [ ] 6.3 Handle specific error codes
+- [x] Task 6: Implement error handling (AC: 8, 12)
+  - [x] 6.1 Show error toast for stream errors
+  - [x] 6.2 Add retry button
+  - [x] 6.3 Handle specific error codes
 
-- [ ] Task 7: Update Zustand store
-  - [ ] 7.1 Add streamingMessage state
-  - [ ] 7.2 Add annieState ('idle', 'thinking', 'speaking', 'tool_calling')
-  - [ ] 7.3 Create setStreamingMessage action
-  - [ ] 7.4 Create setAnnieState action
+- [x] Task 7: Update Zustand store
+  - [x] 7.1 Add streamingMessage state
+  - [x] 7.2 Add annieState ('idle', 'thinking', 'speaking', 'tool_calling')
+  - [x] 7.3 Create setStreamingMessage action
+  - [x] 7.4 Create setAnnieState action
 
-- [ ] Task 8: Integrate with ChatPage
-  - [ ] 8.1 Connect useStream to message send flow
-  - [ ] 8.2 Show StreamingMessage in thread
-  - [ ] 8.3 Finalize message when done
+- [x] Task 8: Integrate with ChatPage
+  - [x] 8.1 Connect useStream to message send flow
+  - [x] 8.2 Show StreamingMessage in thread
+  - [x] 8.3 Finalize message when done
 
 ## Dev Notes
 
@@ -254,6 +254,25 @@ interface StreamState {
 ### Agent Model Used
 
 ### Debug Log References
+
+**Implementation Plan (2026-01-26):**
+1. Task 1: Create SSE stream client with EventSource connection and auto-reconnect
+2. Task 2: Create useStream hook for managing SSE lifecycle and event parsing
+3. Task 3: Enhance StreamingMessage component (already exists in MessageThread.tsx)
+4. Task 4: Handle all event types (status, token, tool_call, tool_result, done, error)
+5. Task 5: Implement cancel functionality with AbortController
+6. Task 6: Add error handling with retry option
+7. Task 7: Update Zustand store with annieState
+8. Task 8: Integrate with ChatPage and useChat hook
+
+**Key Observations:**
+- appStore.ts already has: streamingMessage, setStreamingMessage, appendToStreamingMessage, finalizeStreamingMessage, isStreaming
+- chatStore.ts already has: annieState, setAnnieState, streamUrl, setStreamUrl
+- MessageThread.tsx already has: StreamingMessage component and TypingIndicator
+- useChat.ts needs to integrate with useStream hook after getting stream_url
+- Backend SSE format: {"event": "message", "data": JSON.stringify({type, ...})}
+
+**Decision:** Use chatStore.ts for streaming state since it has annieState. Will consolidate streaming functionality there.
 
 ### Completion Notes List
 

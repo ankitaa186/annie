@@ -19,7 +19,9 @@ from fastapi.exceptions import RequestValidationError
 from api.config import get_config
 from api.logging import get_logger
 from api.mcp_client import MCPClient, MCPClientError
-from api.routes import chat, stream
+from api.routes import chat, stream, conversations
+from api.middleware.cloudflare_auth import cloudflare_auth_middleware
+from api.middleware.rate_limiter import rate_limit_middleware
 
 logger = get_logger(__name__)
 config = get_config()
@@ -55,15 +57,43 @@ app = FastAPI(
 # Include routers
 app.include_router(chat.router)
 app.include_router(stream.router)
+app.include_router(conversations.router)
 
 # Add CORS middleware
+# Configured for web UI domain and local development
+CORS_ORIGINS = [
+    "https://annie.memoryforge.io",  # Production web UI
+    "http://localhost:3000",          # Local Next.js development
+    "http://localhost:5173",          # Local Vite development
+    "http://127.0.0.1:3000",          # Alternative localhost
+    "http://127.0.0.1:5173",          # Alternative localhost
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+
+# Cloudflare Access authentication middleware (Epic 20, Story 20.13)
+# Runs before request logging to authenticate web UI users
+# For Telegram bot requests (no CF headers), passes through unchanged
+@app.middleware("http")
+async def cf_auth(request: Request, call_next):
+    """Cloudflare Access authentication wrapper."""
+    return await cloudflare_auth_middleware(request, call_next)
+
+
+# Rate limiting middleware (Epic 20, Story 20.14)
+# Applies 60 requests/minute limit per authenticated user
+# Runs after auth middleware so user_id is available
+@app.middleware("http")
+async def rate_limit(request: Request, call_next):
+    """Rate limiting middleware wrapper."""
+    return await rate_limit_middleware(request, call_next)
 
 
 # Request logging middleware
@@ -589,9 +619,17 @@ async def root() -> JSONResponse:
         "status": "running",
         "endpoints": {
             "health": "/health",
-            "detailed_health": "/health/detailed",
+            "detailed_health": "/health/full",
             "chat": "/api/chat",
             "stream": "/api/stream/{conversation_id}",
-            "stream_health": "/api/stream/health"
+            "stream_health": "/api/stream/health",
+            "conversations": {
+                "list": "GET /api/conversations",
+                "create": "POST /api/conversations",
+                "get": "GET /api/conversations/{id}",
+                "update": "PATCH /api/conversations/{id}",
+                "delete": "DELETE /api/conversations/{id}",
+                "messages": "GET /api/conversations/{id}/messages"
+            }
         }
     })

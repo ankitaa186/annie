@@ -1,6 +1,6 @@
 # Story 20.14: Backend API Extensions
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -25,58 +25,58 @@ so that users can list, create, switch, delete, and rename conversations in the 
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Create conversation model and schema (AC: 1, 2, 3)
-  - [ ] 1.1 Create `backend/api/models/conversation.py`
-  - [ ] 1.2 Define Conversation Pydantic model (id, title, created_at, updated_at, message_count, last_message_preview)
-  - [ ] 1.3 Define ConversationListResponse model
-  - [ ] 1.4 Define CreateConversationRequest/Response models
-  - [ ] 1.5 Define ConversationDetailResponse model (with messages)
+- [x] Task 1: Create conversation model and schema (AC: 1, 2, 3)
+  - [x] 1.1 Create `backend/api/models/conversation.py`
+  - [x] 1.2 Define Conversation Pydantic model (id, title, created_at, updated_at, message_count, last_message_preview)
+  - [x] 1.3 Define ConversationListResponse model
+  - [x] 1.4 Define CreateConversationRequest/Response models
+  - [x] 1.5 Define ConversationDetailResponse model (with messages)
 
-- [ ] Task 2: Create conversations router (AC: 1, 2, 3, 4, 5)
-  - [ ] 2.1 Create `backend/api/routes/conversations.py`
-  - [ ] 2.2 Implement GET /api/conversations (list)
-  - [ ] 2.3 Implement POST /api/conversations (create)
-  - [ ] 2.4 Implement GET /api/conversations/{id} (detail)
-  - [ ] 2.5 Implement DELETE /api/conversations/{id} (delete)
-  - [ ] 2.6 Implement PATCH /api/conversations/{id} (update title)
-  - [ ] 2.7 Implement GET /api/conversations/{id}/messages (paginated)
+- [x] Task 2: Create conversations router (AC: 1, 2, 3, 4, 5)
+  - [x] 2.1 Create `backend/api/routes/conversations.py`
+  - [x] 2.2 Implement GET /api/conversations (list)
+  - [x] 2.3 Implement POST /api/conversations (create)
+  - [x] 2.4 Implement GET /api/conversations/{id} (detail)
+  - [x] 2.5 Implement DELETE /api/conversations/{id} (delete)
+  - [x] 2.6 Implement PATCH /api/conversations/{id} (update title)
+  - [x] 2.7 Implement GET /api/conversations/{id}/messages (paginated)
 
-- [ ] Task 3: Implement Redis storage layer (AC: 7)
-  - [ ] 3.1 Design Redis key structure for conversations
-  - [ ] 3.2 Implement conversation CRUD operations in StateManager
-  - [ ] 3.3 Add conversation list by user_id (sorted by updated_at)
-  - [ ] 3.4 Add conversation metadata storage
-  - [ ] 3.5 Ensure backward compatibility with existing session/conversation data
+- [x] Task 3: Implement Redis storage layer (AC: 7)
+  - [x] 3.1 Design Redis key structure for conversations
+  - [x] 3.2 Implement conversation CRUD operations in StateManager
+  - [x] 3.3 Add conversation list by user_id (sorted by updated_at)
+  - [x] 3.4 Add conversation metadata storage
+  - [x] 3.5 Ensure backward compatibility with existing session/conversation data
 
-- [ ] Task 4: Implement user authentication for routes (AC: 8)
-  - [ ] 4.1 Get user_id from request.state (CF auth middleware)
-  - [ ] 4.2 Fallback to request body user_id (Telegram compatibility)
-  - [ ] 4.3 Validate user owns conversation before operations
-  - [ ] 4.4 Return 403 for unauthorized conversation access
+- [x] Task 4: Implement user authentication for routes (AC: 8)
+  - [x] 4.1 Get user_id from request.state (CF auth middleware)
+  - [x] 4.2 Fallback to request body user_id (Telegram compatibility)
+  - [x] 4.3 Validate user owns conversation before operations
+  - [x] 4.4 Return 403 for unauthorized conversation access
 
-- [ ] Task 5: Configure CORS (AC: 9)
-  - [ ] 5.1 Update CORS middleware for annie.memoryforge.io
-  - [ ] 5.2 Allow credentials for authenticated requests
-  - [ ] 5.3 Configure allowed methods (GET, POST, PATCH, DELETE, OPTIONS)
+- [x] Task 5: Configure CORS (AC: 9)
+  - [x] 5.1 Update CORS middleware for annie.memoryforge.io
+  - [x] 5.2 Allow credentials for authenticated requests
+  - [x] 5.3 Configure allowed methods (GET, POST, PATCH, DELETE, OPTIONS)
 
-- [ ] Task 6: Implement rate limiting (AC: 10)
-  - [ ] 6.1 Add rate limiter middleware or decorator
-  - [ ] 6.2 Configure limits per user (e.g., 60 req/min)
-  - [ ] 6.3 Return 429 with Retry-After header when exceeded
+- [x] Task 6: Implement rate limiting (AC: 10)
+  - [x] 6.1 Add rate limiter middleware or decorator
+  - [x] 6.2 Configure limits per user (e.g., 60 req/min)
+  - [x] 6.3 Return 429 with Retry-After header when exceeded
 
-- [ ] Task 7: Register router and update main.py
-  - [ ] 7.1 Import conversations router
-  - [ ] 7.2 Include router with /api prefix
-  - [ ] 7.3 Verify OpenAPI docs include new endpoints
+- [x] Task 7: Register router and update main.py
+  - [x] 7.1 Import conversations router
+  - [x] 7.2 Include router with /api prefix
+  - [x] 7.3 Verify OpenAPI docs include new endpoints
 
-- [ ] Task 8: Write unit and integration tests (AC: 11)
-  - [ ] 8.1 Test list conversations returns user's conversations only
-  - [ ] 8.2 Test create conversation returns valid response
-  - [ ] 8.3 Test get conversation with pagination
-  - [ ] 8.4 Test delete conversation removes data
-  - [ ] 8.5 Test update title works correctly
-  - [ ] 8.6 Test 404 for non-existent conversation
-  - [ ] 8.7 Test 403 for unauthorized access
+- [x] Task 8: Write unit and integration tests (AC: 11)
+  - [x] 8.1 Test list conversations returns user's conversations only
+  - [x] 8.2 Test create conversation returns valid response
+  - [x] 8.3 Test get conversation with pagination
+  - [x] 8.4 Test delete conversation removes data
+  - [x] 8.5 Test update title works correctly
+  - [x] 8.6 Test 404 for non-existent conversation
+  - [x] 8.7 Test 403 for unauthorized access
 
 ## Dev Notes
 
@@ -245,9 +245,88 @@ app.add_middleware(
 
 ### Agent Model Used
 
+claude-opus-4-5-20251101
+
 ### Debug Log References
+
+Implementation followed the story's Dev Notes architecture closely, including:
+- Redis key structure as specified (sorted sets for user conversations, hashes for metadata)
+- API endpoints matching the documented design
+- Authentication flow using CF auth middleware
+- Rate limiting with sliding window algorithm
 
 ### Completion Notes List
 
+1. **Conversation Models (Task 1)**: Created comprehensive Pydantic models in `conversation.py`:
+   - `Conversation`, `ConversationListResponse`, `CreateConversationRequest/Response`
+   - `UpdateConversationRequest/Response`, `DeleteConversationResponse`
+   - `Message`, `PaginationInfo`, `ConversationDetailResponse`, `MessageListResponse`
+
+2. **Redis Storage Layer (Task 3)**: Extended `StateManager` with 8 new methods:
+   - `list_conversations()` - Sorted set + hash retrieval
+   - `get_conversations_count()` - ZCARD for total count
+   - `create_conversation()` - Pipeline for atomic creation
+   - `get_conversation_detail()` - Hash retrieval
+   - `update_conversation_title()` - Hash update + sorted set score update
+   - `delete_conversation()` - Pipeline for atomic deletion
+   - `get_paginated_messages()` - LRANGE with offset/limit
+   - `touch_conversation()` - Update timestamp on message add
+
+3. **Conversations Router (Task 2)**: Implemented all 6 endpoints:
+   - GET /api/conversations - List with pagination
+   - POST /api/conversations - Create with optional title
+   - GET /api/conversations/{id} - Detail with paginated messages
+   - DELETE /api/conversations/{id} - Delete with ownership check
+   - PATCH /api/conversations/{id} - Update title
+   - GET /api/conversations/{id}/messages - Paginated messages only
+
+4. **Authentication (Task 4)**: Implemented `get_user_id()` and `verify_conversation_ownership()`:
+   - Extracts user_id from request.state (set by CF auth middleware)
+   - Returns 401 if no authentication
+   - Returns 403 if user doesn't own conversation
+   - Returns 404 if conversation not found
+
+5. **CORS Configuration (Task 5)**: Updated `main.py`:
+   - Production: https://annie.memoryforge.io
+   - Development: localhost:3000, localhost:5173, 127.0.0.1 variants
+   - Credentials enabled, specific methods allowed
+
+6. **Rate Limiting (Task 6)**: Created `rate_limiter.py`:
+   - Sliding window algorithm using Redis sorted sets
+   - 60 requests/minute per user
+   - Returns 429 with Retry-After header
+   - X-RateLimit-* headers on all responses
+   - Fails open on Redis errors
+
+7. **Router Registration (Task 7)**: Updated `main.py`:
+   - Imported and included conversations router
+   - Added rate limit middleware
+   - Updated root endpoint with new endpoints documentation
+
+8. **Tests (Task 8)**: Created comprehensive test suite:
+   - Model validation tests
+   - StateManager method tests
+   - Router authentication tests
+   - Rate limiter tests
+   - CORS configuration tests
+   - Integration tests for auth requirements
+
 ### File List
+
+**New Files:**
+- backend/api/models/conversation.py
+- backend/api/routes/conversations.py
+- backend/api/middleware/rate_limiter.py
+- backend/tests/test_conversations.py
+
+**Modified Files:**
+- backend/api/models/__init__.py (added conversation exports)
+- backend/api/routes/__init__.py (added conversations export)
+- backend/api/middleware/__init__.py (added rate_limiter exports)
+- backend/api/state.py (added 8 conversation management methods)
+- backend/api/main.py (CORS config, router registration, rate limit middleware)
+
+## Change Log
+
+- 2026-01-26: Story 20.14 Backend API Extensions - Implemented conversation management APIs (Claude Opus 4.5)
 

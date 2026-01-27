@@ -1,6 +1,6 @@
 # Story 20.1: Project Setup & Infrastructure
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -25,57 +25,57 @@ so that the web UI has a solid foundation for building Annie's responsive interf
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Initialize Vite + React project (AC: 1, 2)
-  - [ ] 1.1 Run `npm create vite@latest web -- --template react-ts`
-  - [ ] 1.2 Configure `tsconfig.json` with strict mode and path aliases
-  - [ ] 1.3 Add `@/` path alias for clean imports
-  - [ ] 1.4 Verify TypeScript compilation works
+- [x] Task 1: Initialize Vite + React project (AC: 1, 2)
+  - [x] 1.1 Run `npm create vite@latest web -- --template react-ts`
+  - [x] 1.2 Configure `tsconfig.json` with strict mode and path aliases
+  - [x] 1.3 Add `@/` path alias for clean imports
+  - [x] 1.4 Verify TypeScript compilation works
 
-- [ ] Task 2: Configure Tailwind CSS (AC: 3)
-  - [ ] 2.1 Install tailwindcss, postcss, autoprefixer
-  - [ ] 2.2 Create `tailwind.config.js` with Annie theme colors
-  - [ ] 2.3 Create `postcss.config.js`
-  - [ ] 2.4 Add Tailwind directives to `index.css`
-  - [ ] 2.5 Verify Tailwind classes work in a test component
+- [x] Task 2: Configure Tailwind CSS (AC: 3)
+  - [x] 2.1 Install tailwindcss, postcss, autoprefixer
+  - [x] 2.2 Create `tailwind.config.js` with Annie theme colors
+  - [x] 2.3 Create `postcss.config.js`
+  - [x] 2.4 Add Tailwind directives to `index.css`
+  - [x] 2.5 Verify Tailwind classes work in a test component
 
-- [ ] Task 3: Install and configure shadcn/ui (AC: 4)
-  - [ ] 3.1 Run `npx shadcn@latest init` with custom settings
-  - [ ] 3.2 Configure `components.json` for Tailwind
-  - [ ] 3.3 Add base shadcn/ui components (Button, Card, Input)
-  - [ ] 3.4 Create `lib/utils.ts` with `cn()` utility
-  - [ ] 3.5 Verify shadcn components render correctly
+- [x] Task 3: Install and configure shadcn/ui (AC: 4)
+  - [x] 3.1 Run `npx shadcn@latest init` with custom settings
+  - [x] 3.2 Configure `components.json` for Tailwind
+  - [x] 3.3 Add base shadcn/ui components (Button, Card, Input)
+  - [x] 3.4 Create `lib/utils.ts` with `cn()` utility
+  - [x] 3.5 Verify shadcn components render correctly
 
-- [ ] Task 4: Set up linting and formatting (AC: 5)
-  - [ ] 4.1 Install ESLint with React and TypeScript plugins
-  - [ ] 4.2 Create `.eslintrc.cjs` configuration
-  - [ ] 4.3 Install Prettier
-  - [ ] 4.4 Create `.prettierrc` configuration
-  - [ ] 4.5 Add lint and format scripts to package.json
-  - [ ] 4.6 Verify `npm run lint` passes
+- [x] Task 4: Set up linting and formatting (AC: 5)
+  - [x] 4.1 Install ESLint with React and TypeScript plugins
+  - [x] 4.2 Create `.eslintrc.cjs` configuration
+  - [x] 4.3 Install Prettier
+  - [x] 4.4 Create `.prettierrc` configuration
+  - [x] 4.5 Add lint and format scripts to package.json
+  - [x] 4.6 Verify `npm run lint` passes
 
-- [ ] Task 5: Create Docker configuration (AC: 6, 7, 11)
-  - [ ] 5.1 Create `web/Dockerfile` with multi-stage build
-  - [ ] 5.2 Create `web/nginx.conf` for SPA routing
-  - [ ] 5.3 Add web service to `docker-compose.yml`
-  - [ ] 5.4 Configure proper networking (annie-network)
-  - [ ] 5.5 Verify `docker compose build web` succeeds
+- [x] Task 5: Create Docker configuration (AC: 6, 7, 11)
+  - [x] 5.1 Create `web/Dockerfile` with multi-stage build
+  - [x] 5.2 Create `web/nginx.conf` for SPA routing
+  - [x] 5.3 Add web service to `docker-compose.yml`
+  - [x] 5.4 Configure proper networking (annie-network)
+  - [x] 5.5 Verify `docker compose build web` succeeds
 
-- [ ] Task 6: Configure environment variables (AC: 8)
-  - [ ] 6.1 Create `.env.example` for web service
-  - [ ] 6.2 Configure Vite to expose VITE_* variables
-  - [ ] 6.3 Create `src/lib/config.ts` for runtime config
-  - [ ] 6.4 Document required environment variables
+- [x] Task 6: Configure environment variables (AC: 8)
+  - [x] 6.1 Create `.env.example` for web service
+  - [x] 6.2 Configure Vite to expose VITE_* variables
+  - [x] 6.3 Create `src/lib/config.ts` for runtime config
+  - [x] 6.4 Document required environment variables
 
-- [ ] Task 7: Verify development and production builds (AC: 9, 10, 12)
-  - [ ] 7.1 Run `npm run dev` and verify port 3000
-  - [ ] 7.2 Run `npm run build` and verify dist output
-  - [ ] 7.3 Test production build with `npm run preview`
-  - [ ] 7.4 Create basic App shell with placeholder
+- [x] Task 7: Verify development and production builds (AC: 9, 10, 12)
+  - [x] 7.1 Run `npm run dev` and verify port 3000
+  - [x] 7.2 Run `npm run build` and verify dist output
+  - [x] 7.3 Test production build with `npm run preview`
+  - [x] 7.4 Create basic App shell with placeholder
 
-- [ ] Task 8: Test Docker deployment
-  - [ ] 8.1 Build and run container locally
-  - [ ] 8.2 Verify nginx serves SPA correctly
-  - [ ] 8.3 Test SPA routing (refresh on deep route)
+- [x] Task 8: Test Docker deployment
+  - [x] 8.1 Build and run container locally
+  - [x] 8.2 Verify nginx serves SPA correctly
+  - [x] 8.3 Test SPA routing (refresh on deep route)
 
 ## Dev Notes
 
@@ -203,9 +203,74 @@ server {
 
 ### Agent Model Used
 
+Claude Opus 4.5 (claude-opus-4-5-20251101)
+
 ### Debug Log References
+
+Implementation started: 2026-01-26
+- Created web/ directory structure with Vite + React 18 + TypeScript
+- Configured strict TypeScript with path aliases (@/)
+- Set up Tailwind CSS with Annie theme colors (purple primary)
+- Installed shadcn/ui with Button, Card, Input components
+- Created ESLint + Prettier configurations
+- Created multi-stage Dockerfile with nginx
+- Created nginx.conf with SPA routing and API proxy
+- Added web service to docker-compose.yml
+- Created environment configuration with VITE_API_URL
 
 ### Completion Notes List
 
+1. **Vite + React Project**: Created complete React 18 + TypeScript project in web/ directory with strict mode enabled and @/ path aliases configured in tsconfig.json and vite.config.ts.
+
+2. **Tailwind CSS**: Configured with custom Annie theme colors (purple primary at HSL 262 83% 58%), CSS variables for theming, and tailwindcss-animate plugin for shadcn/ui animations.
+
+3. **shadcn/ui**: Installed and configured with components.json. Added Button, Card, and Input components with proper TypeScript types and variants.
+
+4. **ESLint + Prettier**: Full configuration with TypeScript, React hooks, and React Refresh plugins. Prettier configured for consistent formatting.
+
+5. **Docker**: Multi-stage Dockerfile (node:20-alpine builder, nginx:alpine runtime) with health check. Nginx configured with SPA routing, API proxy to backend:8000, gzip compression, and security headers.
+
+6. **Docker Compose**: Added web service with:
+   - Port mapping ${WEB_PORT:-3000}:80
+   - Depends on backend (healthy)
+   - Connected to annie-network
+   - Health check via wget
+
+7. **Environment Variables**: VITE_API_URL configured via build args, with src/lib/config.ts providing runtime access.
+
 ### File List
 
+**New Files (web/):**
+- web/package.json
+- web/tsconfig.json
+- web/tsconfig.node.json
+- web/vite.config.ts
+- web/index.html
+- web/tailwind.config.js
+- web/postcss.config.js
+- web/components.json
+- web/Dockerfile
+- web/nginx.conf
+- web/.eslintrc.cjs
+- web/.prettierrc
+- web/.prettierignore
+- web/.gitignore
+- web/.dockerignore
+- web/.env.example
+- web/public/vite.svg
+- web/src/main.tsx
+- web/src/App.tsx
+- web/src/index.css
+- web/src/vite-env.d.ts
+- web/src/lib/utils.ts
+- web/src/lib/config.ts
+- web/src/components/ui/button.tsx
+- web/src/components/ui/card.tsx
+- web/src/components/ui/input.tsx
+
+**Modified Files:**
+- docker-compose.yml (added web service)
+
+## Change Log
+
+- 2026-01-26: Story implementation complete - Created web/ directory with Vite + React 18 + TypeScript + shadcn/ui + Docker configuration

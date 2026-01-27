@@ -804,3 +804,705 @@ class StateManager:
 
             self._is_healthy = False
             return None
+
+    # =========================================================================
+    # Conversation Management Methods (Epic 20, Story 20.14)
+    # =========================================================================
+    #
+    # Redis Key Patterns for conversations:
+    # - conversations:{user_id}  -> Sorted set (score = updated_at timestamp)
+    # - conversation:{conv_id}:meta  -> Hash (user_id, title, created_at, updated_at)
+    # - conversation:{conv_id}  -> List (messages, existing pattern)
+    # - conversation_mapping:{conv_id}  -> String (user_id, existing pattern)
+
+    # Conversation metadata TTL (7 days) - longer than session TTL for persistence
+    CONVERSATION_META_TTL = 7 * 24 * 3600  # 7 days in seconds
+
+    async def list_conversations(
+        self,
+        user_id: str,
+        limit: int = 50,
+        offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """
+        List conversations for a user, sorted by updated_at (most recent first).
+
+        Args:
+            user_id: Unique user identifier
+            limit: Maximum number of conversations to return (default: 50)
+            offset: Number of conversations to skip (default: 0)
+
+        Returns:
+            List of conversation metadata dictionaries
+
+        Redis Keys Used:
+            - conversations:{user_id} (sorted set, score = updated_at timestamp)
+            - conversation:{conv_id}:meta (hash for each conversation)
+        """
+        if not user_id or not user_id.strip():
+            raise StateValidationError("user_id cannot be empty", field="user_id")
+
+        start_time = time.time()
+
+        if not self._is_healthy:
+            logger.warning(
+                "Redis unavailable, cannot list conversations (degraded mode)",
+                extra={"user_id": user_id}
+            )
+            return []
+
+        try:
+            # Get conversation IDs from sorted set (reverse order = most recent first)
+            conversations_key = f"conversations:{user_id}"
+            conv_ids = await self.redis_client.zrevrange(
+                conversations_key,
+                offset,
+                offset + limit - 1
+            )
+
+            if not conv_ids:
+                logger.debug(
+                    "No conversations found for user",
+                    extra={"user_id": user_id}
+                )
+                return []
+
+            # Fetch metadata for each conversation
+            conversations = []
+            for conv_id in conv_ids:
+                # Handle bytes if needed
+                if isinstance(conv_id, bytes):
+                    conv_id = conv_id.decode("utf-8")
+
+                meta_key = f"conversation:{conv_id}:meta"
+                meta = await self.redis_client.hgetall(meta_key)
+
+                if meta:
+                    # Get message count and last message preview
+                    messages_key = f"conversation:{conv_id}"
+                    message_count = await self.redis_client.llen(messages_key)
+
+                    # Get last message for preview
+                    last_message_preview = None
+                    if message_count > 0:
+                        last_msg_json = await self.redis_client.lindex(messages_key, -1)
+                        if last_msg_json:
+                            try:
+                                if isinstance(last_msg_json, bytes):
+                                    last_msg_json = last_msg_json.decode("utf-8")
+                                last_msg = json.loads(last_msg_json)
+                                content = last_msg.get("content", "")
+                                # Truncate to 100 chars
+                                last_message_preview = content[:100] + "..." if len(content) > 100 else content
+                            except (json.JSONDecodeError, TypeError):
+                                pass
+
+                    # Handle bytes in meta dict
+                    meta_dict = {}
+                    for k, v in meta.items():
+                        if isinstance(k, bytes):
+                            k = k.decode("utf-8")
+                        if isinstance(v, bytes):
+                            v = v.decode("utf-8")
+                        meta_dict[k] = v
+
+                    conversations.append({
+                        "id": conv_id,
+                        "title": meta_dict.get("title", "Untitled"),
+                        "created_at": meta_dict.get("created_at"),
+                        "updated_at": meta_dict.get("updated_at"),
+                        "message_count": message_count,
+                        "last_message_preview": last_message_preview
+                    })
+
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            logger.info(
+                "Conversations listed",
+                extra={
+                    "user_id": user_id,
+                    "count": len(conversations),
+                    "limit": limit,
+                    "offset": offset,
+                    "duration_ms": duration_ms
+                }
+            )
+
+            return conversations
+
+        except (redis_exceptions.ConnectionError, redis_exceptions.TimeoutError) as e:
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            logger.error(
+                "Failed to list conversations",
+                extra={
+                    "user_id": user_id,
+                    "error": str(e),
+                    "duration_ms": duration_ms
+                }
+            )
+
+            self._is_healthy = False
+            return []
+
+    async def get_conversations_count(self, user_id: str) -> int:
+        """
+        Get total number of conversations for a user.
+
+        Args:
+            user_id: Unique user identifier
+
+        Returns:
+            Total conversation count
+        """
+        if not user_id or not user_id.strip():
+            raise StateValidationError("user_id cannot be empty", field="user_id")
+
+        if not self._is_healthy:
+            return 0
+
+        try:
+            conversations_key = f"conversations:{user_id}"
+            count = await self.redis_client.zcard(conversations_key)
+            return count or 0
+
+        except (redis_exceptions.ConnectionError, redis_exceptions.TimeoutError) as e:
+            logger.error(
+                "Failed to get conversations count",
+                extra={"user_id": user_id, "error": str(e)}
+            )
+            self._is_healthy = False
+            return 0
+
+    async def create_conversation(
+        self,
+        user_id: str,
+        title: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Create a new conversation for a user.
+
+        Args:
+            user_id: Unique user identifier
+            title: Optional conversation title (auto-generated if not provided)
+
+        Returns:
+            Conversation metadata dictionary with id, title, created_at
+
+        Redis Keys Created:
+            - conversations:{user_id} (adds to sorted set)
+            - conversation:{conv_id}:meta (hash with metadata)
+            - conversation_mapping:{conv_id} (string for reverse lookup)
+        """
+        if not user_id or not user_id.strip():
+            raise StateValidationError("user_id cannot be empty", field="user_id")
+
+        start_time = time.time()
+
+        # Generate unique conversation ID
+        conversation_id = f"conv_{uuid.uuid4().hex[:16]}"
+        now = datetime.now(timezone.utc)
+        now_iso = now.isoformat().replace("+00:00", "Z")
+        now_timestamp = now.timestamp()
+
+        # Generate default title if not provided
+        if not title:
+            title = f"Conversation {now.strftime('%Y-%m-%d %H:%M')}"
+
+        # Create metadata
+        conversation_meta = {
+            "user_id": user_id,
+            "title": title,
+            "created_at": now_iso,
+            "updated_at": now_iso
+        }
+
+        if not self._is_healthy:
+            logger.warning(
+                "Redis unavailable, conversation not persisted (degraded mode)",
+                extra={"user_id": user_id, "conversation_id": conversation_id}
+            )
+            return {
+                "id": conversation_id,
+                "title": title,
+                "created_at": now_iso
+            }
+
+        try:
+            # Pipeline for atomic operation
+            pipe = self.redis_client.pipeline()
+
+            # Store metadata hash
+            meta_key = f"conversation:{conversation_id}:meta"
+            pipe.hset(meta_key, mapping=conversation_meta)
+            pipe.expire(meta_key, self.CONVERSATION_META_TTL)
+
+            # Add to user's conversation sorted set (score = updated_at timestamp)
+            conversations_key = f"conversations:{user_id}"
+            pipe.zadd(conversations_key, {conversation_id: now_timestamp})
+            pipe.expire(conversations_key, self.CONVERSATION_META_TTL)
+
+            # Store reverse mapping for user_id lookup
+            mapping_key = f"conversation_mapping:{conversation_id}"
+            pipe.setex(mapping_key, self.CONVERSATION_META_TTL, user_id)
+
+            await pipe.execute()
+
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            logger.info(
+                "Conversation created",
+                extra={
+                    "user_id": user_id,
+                    "conversation_id": conversation_id,
+                    "title": title,
+                    "duration_ms": duration_ms
+                }
+            )
+
+            return {
+                "id": conversation_id,
+                "title": title,
+                "created_at": now_iso
+            }
+
+        except (redis_exceptions.ConnectionError, redis_exceptions.TimeoutError) as e:
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            logger.error(
+                "Failed to create conversation in Redis",
+                extra={
+                    "user_id": user_id,
+                    "error": str(e),
+                    "duration_ms": duration_ms
+                }
+            )
+
+            self._is_healthy = False
+            return {
+                "id": conversation_id,
+                "title": title,
+                "created_at": now_iso
+            }
+
+    async def get_conversation_detail(
+        self,
+        conversation_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get detailed conversation metadata.
+
+        Args:
+            conversation_id: Unique conversation identifier
+
+        Returns:
+            Conversation metadata dictionary or None if not found
+        """
+        if not conversation_id or not conversation_id.strip():
+            raise StateValidationError("conversation_id cannot be empty", field="conversation_id")
+
+        if not self._is_healthy:
+            logger.warning(
+                "Redis unavailable, cannot get conversation detail (degraded mode)",
+                extra={"conversation_id": conversation_id}
+            )
+            return None
+
+        try:
+            meta_key = f"conversation:{conversation_id}:meta"
+            meta = await self.redis_client.hgetall(meta_key)
+
+            if not meta:
+                logger.debug(
+                    "Conversation not found",
+                    extra={"conversation_id": conversation_id}
+                )
+                return None
+
+            # Handle bytes in meta dict
+            meta_dict = {}
+            for k, v in meta.items():
+                if isinstance(k, bytes):
+                    k = k.decode("utf-8")
+                if isinstance(v, bytes):
+                    v = v.decode("utf-8")
+                meta_dict[k] = v
+
+            return {
+                "id": conversation_id,
+                "title": meta_dict.get("title", "Untitled"),
+                "user_id": meta_dict.get("user_id"),
+                "created_at": meta_dict.get("created_at"),
+                "updated_at": meta_dict.get("updated_at")
+            }
+
+        except (redis_exceptions.ConnectionError, redis_exceptions.TimeoutError) as e:
+            logger.error(
+                "Failed to get conversation detail",
+                extra={"conversation_id": conversation_id, "error": str(e)}
+            )
+            self._is_healthy = False
+            return None
+
+    async def update_conversation_title(
+        self,
+        conversation_id: str,
+        title: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Update conversation title.
+
+        Args:
+            conversation_id: Unique conversation identifier
+            title: New title for the conversation
+
+        Returns:
+            Updated conversation metadata or None if not found
+        """
+        if not conversation_id or not conversation_id.strip():
+            raise StateValidationError("conversation_id cannot be empty", field="conversation_id")
+
+        if not title or not title.strip():
+            raise StateValidationError("title cannot be empty", field="title")
+
+        start_time = time.time()
+
+        if not self._is_healthy:
+            logger.warning(
+                "Redis unavailable, cannot update conversation (degraded mode)",
+                extra={"conversation_id": conversation_id}
+            )
+            return None
+
+        try:
+            meta_key = f"conversation:{conversation_id}:meta"
+
+            # Check if conversation exists
+            exists = await self.redis_client.exists(meta_key)
+            if not exists:
+                logger.debug(
+                    "Conversation not found for update",
+                    extra={"conversation_id": conversation_id}
+                )
+                return None
+
+            # Update title and updated_at
+            now = datetime.now(timezone.utc)
+            now_iso = now.isoformat().replace("+00:00", "Z")
+            now_timestamp = now.timestamp()
+
+            pipe = self.redis_client.pipeline()
+            pipe.hset(meta_key, mapping={"title": title, "updated_at": now_iso})
+            pipe.expire(meta_key, self.CONVERSATION_META_TTL)
+
+            # Get user_id to update sorted set score
+            user_id = await self.redis_client.hget(meta_key, "user_id")
+            if user_id:
+                if isinstance(user_id, bytes):
+                    user_id = user_id.decode("utf-8")
+                conversations_key = f"conversations:{user_id}"
+                pipe.zadd(conversations_key, {conversation_id: now_timestamp})
+
+            await pipe.execute()
+
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            logger.info(
+                "Conversation title updated",
+                extra={
+                    "conversation_id": conversation_id,
+                    "title": title,
+                    "duration_ms": duration_ms
+                }
+            )
+
+            return {
+                "id": conversation_id,
+                "title": title,
+                "updated_at": now_iso
+            }
+
+        except (redis_exceptions.ConnectionError, redis_exceptions.TimeoutError) as e:
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            logger.error(
+                "Failed to update conversation title",
+                extra={
+                    "conversation_id": conversation_id,
+                    "error": str(e),
+                    "duration_ms": duration_ms
+                }
+            )
+
+            self._is_healthy = False
+            return None
+
+    async def delete_conversation(
+        self,
+        conversation_id: str
+    ) -> bool:
+        """
+        Delete a conversation and all its data.
+
+        Args:
+            conversation_id: Unique conversation identifier
+
+        Returns:
+            True if deleted successfully, False if not found or error
+        """
+        if not conversation_id or not conversation_id.strip():
+            raise StateValidationError("conversation_id cannot be empty", field="conversation_id")
+
+        start_time = time.time()
+
+        if not self._is_healthy:
+            logger.warning(
+                "Redis unavailable, cannot delete conversation (degraded mode)",
+                extra={"conversation_id": conversation_id}
+            )
+            return False
+
+        try:
+            # Get user_id from metadata to remove from sorted set
+            meta_key = f"conversation:{conversation_id}:meta"
+            user_id = await self.redis_client.hget(meta_key, "user_id")
+
+            if not user_id:
+                logger.debug(
+                    "Conversation not found for deletion",
+                    extra={"conversation_id": conversation_id}
+                )
+                return False
+
+            if isinstance(user_id, bytes):
+                user_id = user_id.decode("utf-8")
+
+            # Delete all conversation data
+            pipe = self.redis_client.pipeline()
+
+            # Remove from user's conversation list
+            conversations_key = f"conversations:{user_id}"
+            pipe.zrem(conversations_key, conversation_id)
+
+            # Delete metadata
+            pipe.delete(meta_key)
+
+            # Delete messages
+            messages_key = f"conversation:{conversation_id}"
+            pipe.delete(messages_key)
+
+            # Delete reverse mapping
+            mapping_key = f"conversation_mapping:{conversation_id}"
+            pipe.delete(mapping_key)
+
+            await pipe.execute()
+
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            logger.info(
+                "Conversation deleted",
+                extra={
+                    "conversation_id": conversation_id,
+                    "user_id": user_id,
+                    "duration_ms": duration_ms
+                }
+            )
+
+            return True
+
+        except (redis_exceptions.ConnectionError, redis_exceptions.TimeoutError) as e:
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            logger.error(
+                "Failed to delete conversation",
+                extra={
+                    "conversation_id": conversation_id,
+                    "error": str(e),
+                    "duration_ms": duration_ms
+                }
+            )
+
+            self._is_healthy = False
+            return False
+
+    async def get_paginated_messages(
+        self,
+        conversation_id: str,
+        page: int = 1,
+        limit: int = 50
+    ) -> Dict[str, Any]:
+        """
+        Get paginated messages for a conversation.
+
+        Args:
+            conversation_id: Unique conversation identifier
+            page: Page number (1-indexed)
+            limit: Messages per page (default: 50)
+
+        Returns:
+            Dictionary with messages list and pagination info
+        """
+        if not conversation_id or not conversation_id.strip():
+            raise StateValidationError("conversation_id cannot be empty", field="conversation_id")
+
+        if page < 1:
+            raise StateValidationError("page must be >= 1", field="page")
+
+        if limit < 1 or limit > 100:
+            raise StateValidationError("limit must be between 1 and 100", field="limit")
+
+        start_time = time.time()
+
+        if not self._is_healthy:
+            logger.warning(
+                "Redis unavailable, cannot get paginated messages (degraded mode)",
+                extra={"conversation_id": conversation_id}
+            )
+            return {
+                "messages": [],
+                "pagination": {
+                    "page": page,
+                    "limit": limit,
+                    "total": 0,
+                    "has_more": False
+                }
+            }
+
+        try:
+            messages_key = f"conversation:{conversation_id}"
+
+            # Get total count
+            total = await self.redis_client.llen(messages_key)
+
+            # Calculate offset
+            offset = (page - 1) * limit
+
+            # Get messages (LRANGE is 0-indexed)
+            messages_json = await self.redis_client.lrange(
+                messages_key,
+                offset,
+                offset + limit - 1
+            )
+
+            # Parse messages
+            messages = []
+            for msg_json in messages_json:
+                try:
+                    if isinstance(msg_json, bytes):
+                        msg_json = msg_json.decode("utf-8")
+                    messages.append(json.loads(msg_json))
+                except (json.JSONDecodeError, TypeError) as e:
+                    logger.error(
+                        "Failed to parse message JSON",
+                        extra={
+                            "conversation_id": conversation_id,
+                            "error": str(e)
+                        }
+                    )
+                    continue
+
+            has_more = (offset + limit) < total
+
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            logger.debug(
+                "Paginated messages retrieved",
+                extra={
+                    "conversation_id": conversation_id,
+                    "page": page,
+                    "limit": limit,
+                    "total": total,
+                    "returned": len(messages),
+                    "duration_ms": duration_ms
+                }
+            )
+
+            return {
+                "messages": messages,
+                "pagination": {
+                    "page": page,
+                    "limit": limit,
+                    "total": total,
+                    "has_more": has_more
+                }
+            }
+
+        except (redis_exceptions.ConnectionError, redis_exceptions.TimeoutError) as e:
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            logger.error(
+                "Failed to get paginated messages",
+                extra={
+                    "conversation_id": conversation_id,
+                    "error": str(e),
+                    "duration_ms": duration_ms
+                }
+            )
+
+            self._is_healthy = False
+            return {
+                "messages": [],
+                "pagination": {
+                    "page": page,
+                    "limit": limit,
+                    "total": 0,
+                    "has_more": False
+                }
+            }
+
+    async def touch_conversation(self, conversation_id: str) -> None:
+        """
+        Update conversation's updated_at timestamp (touch).
+
+        Called when messages are added to update the sort order.
+
+        Args:
+            conversation_id: Unique conversation identifier
+        """
+        if not conversation_id or not conversation_id.strip():
+            return
+
+        if not self._is_healthy:
+            return
+
+        try:
+            meta_key = f"conversation:{conversation_id}:meta"
+
+            # Check if this is a managed conversation (has metadata)
+            exists = await self.redis_client.exists(meta_key)
+            if not exists:
+                # This is likely a legacy conversation without metadata
+                return
+
+            now = datetime.now(timezone.utc)
+            now_iso = now.isoformat().replace("+00:00", "Z")
+            now_timestamp = now.timestamp()
+
+            # Get user_id
+            user_id = await self.redis_client.hget(meta_key, "user_id")
+            if not user_id:
+                return
+
+            if isinstance(user_id, bytes):
+                user_id = user_id.decode("utf-8")
+
+            # Update metadata and sorted set
+            pipe = self.redis_client.pipeline()
+            pipe.hset(meta_key, "updated_at", now_iso)
+
+            conversations_key = f"conversations:{user_id}"
+            pipe.zadd(conversations_key, {conversation_id: now_timestamp})
+
+            await pipe.execute()
+
+            logger.debug(
+                "Conversation touched",
+                extra={"conversation_id": conversation_id}
+            )
+
+        except Exception as e:
+            # Silent failure - touching is non-critical
+            logger.warning(
+                "Failed to touch conversation",
+                extra={"conversation_id": conversation_id, "error": str(e)}
+            )
