@@ -350,7 +350,6 @@ class GeminiProvider(BaseProvider):
             # Track metrics
             first_token = True
             first_token_time = None
-            token_count = 0
             accumulated_content = []
 
             # Get current trace for Langfuse
@@ -426,6 +425,9 @@ class GeminiProvider(BaseProvider):
                 }
             )
 
+            malformed_retries = 0  # Track MALFORMED_FUNCTION_CALL retries (cap: 3)
+            MAX_MALFORMED_RETRIES = 3
+
             while tool_iteration < self.max_tool_iterations:
                 # Generate streaming response using ChatSession
                 try:
@@ -444,6 +446,7 @@ class GeminiProvider(BaseProvider):
 
                     # Track ALL function calls in this iteration (parallel tool calling support)
                     function_calls = []  # List of {name, args} dicts
+                    token_count = 0  # Reset per iteration for accurate retry detection
 
                     # Debug: Track raw chunk data for MALFORMED_FUNCTION_CALL diagnosis
                     raw_chunk_data = []  # Accumulate for debugging if needed
@@ -916,8 +919,10 @@ class GeminiProvider(BaseProvider):
                                 "I wasn't able to generate a response. Please try again or rephrase your request."
                             )
 
-                            # For MALFORMED_FUNCTION_CALL, log detailed diagnostic info
+                            # For MALFORMED_FUNCTION_CALL, retry before giving up
                             if fr_value == 10:
+                                malformed_retries += 1
+
                                 # Extract tool names for debugging
                                 tool_names = []
                                 if gemini_tools:
@@ -935,12 +940,32 @@ class GeminiProvider(BaseProvider):
                                 # Get last chunk which should have the finish_reason
                                 last_chunk = raw_chunk_data[-1] if raw_chunk_data else {}
 
+                                if malformed_retries <= MAX_MALFORMED_RETRIES:
+                                    logger.warning(
+                                        f"MALFORMED_FUNCTION_CALL detected - retrying "
+                                        f"({malformed_retries}/{MAX_MALFORMED_RETRIES})",
+                                        extra={
+                                            "provider": self.model_name,
+                                            "tool_iteration": tool_iteration,
+                                            "malformed_retry": malformed_retries,
+                                            "max_malformed_retries": MAX_MALFORMED_RETRIES,
+                                            "message_count": len(messages),
+                                            "tool_count": len(gemini_tools) if gemini_tools else 0,
+                                            "chunk_count": len(raw_chunk_data),
+                                            "last_chunk": last_chunk,
+                                        }
+                                    )
+                                    tool_iteration += 1
+                                    continue  # Re-enter loop, re-send same message
+
+                                # Exhausted retries — log full diagnostic and fall through to error
                                 logger.error(
-                                    "MALFORMED_FUNCTION_CALL detected - Gemini failed to generate valid function call. "
+                                    "MALFORMED_FUNCTION_CALL detected - all retries exhausted. "
                                     "RAW CHUNK DATA LOGGED FOR DIAGNOSIS.",
                                     extra={
                                         "provider": self.model_name,
                                         "tool_iteration": tool_iteration,
+                                        "malformed_retries_exhausted": malformed_retries,
                                         "message_count": len(messages),
                                         "last_user_content": messages[-1].get("content", "")[:500] if messages else None,
                                         "tool_count": len(gemini_tools) if gemini_tools else 0,
