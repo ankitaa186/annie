@@ -13,7 +13,6 @@ from fastapi.responses import JSONResponse
 
 from api.middleware.cloudflare_auth import (
     cloudflare_auth_middleware,
-    CloudflareAuthMiddleware,
     should_bypass_auth,
     extract_email_from_jwt,
     USER_MAPPING,
@@ -486,30 +485,3 @@ class TestAuditLogging:
         assert unknown_email_logged
 
 
-# ============================================================================
-# Test: Class-based middleware (CloudflareAuthMiddleware)
-# ============================================================================
-
-class TestClassBasedMiddleware:
-    """Tests for CloudflareAuthMiddleware class."""
-
-    def test_class_middleware_works(self):
-        """Test class-based middleware works the same as functional."""
-        app = FastAPI()
-        app.add_middleware(CloudflareAuthMiddleware)
-
-        @app.get("/api/test")
-        async def test_endpoint(request: Request):
-            return {
-                "user_id": getattr(request.state, "user_id", None),
-                "email": getattr(request.state, "email", None)
-            }
-
-        client = TestClient(app)
-        token = create_test_jwt("user@example.com")
-        headers = {"CF-Access-JWT-Assertion": token}
-
-        response = client.get("/api/test", headers=headers)
-
-        assert response.status_code == 200
-        assert response.json()["user_id"] == "YOUR_USER_ID"

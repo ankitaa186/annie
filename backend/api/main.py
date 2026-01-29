@@ -61,14 +61,9 @@ app.include_router(conversations.router)
 app.include_router(session.router)
 
 # Add CORS middleware
-# Configured for web UI domain and local development
-CORS_ORIGINS = [
-    "https://annie.memoryforge.io",  # Production web UI
-    "http://localhost:3000",          # Local Next.js development
-    "http://localhost:5173",          # Local Vite development
-    "http://127.0.0.1:3000",          # Alternative localhost
-    "http://127.0.0.1:5173",          # Alternative localhost
-]
+# Configured via CORS_ORIGINS env var (comma-separated) or defaults
+_default_origins = "https://annie.memoryforge.io,http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173"
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", _default_origins).split(",")
 
 app.add_middleware(
     CORSMiddleware,
