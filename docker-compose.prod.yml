@@ -48,6 +48,13 @@ services:
         <<: *loki-options
         loki-external-labels: "service=proactive-worker,env=prod,project=annie"
 
+  web:
+    logging:
+      driver: loki
+      options:
+        <<: *loki-options
+        loki-external-labels: "service=web,env=prod,project=annie"
+
   redis:
     logging:
       driver: loki
