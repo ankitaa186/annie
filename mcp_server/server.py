@@ -241,6 +241,18 @@ class MCPServer:
         try:
             tool_handler = tool_info["handler"]
 
+            # Filter arguments to only those accepted by the handler.
+            # This prevents TypeError when inject_user_id adds user_id
+            # to tools that don't have a user_id parameter.
+            sig = inspect.signature(tool_handler)
+            has_var_keyword = any(
+                p.kind == inspect.Parameter.VAR_KEYWORD
+                for p in sig.parameters.values()
+            )
+            if not has_var_keyword:
+                valid_params = set(sig.parameters.keys())
+                arguments = {k: v for k, v in arguments.items() if k in valid_params}
+
             # Check if handler is async and await if needed
             if inspect.iscoroutinefunction(tool_handler):
                 result = await tool_handler(**arguments)

@@ -481,7 +481,7 @@ web_search_tool = {
     "description": """Search the web when you don't have a specific URL.
 
 Use this tool to FIND information — news, facts, products, prices, opinions, or anything you need to look up.
-Returns a list of results with titles, URLs, and snippets.
+Returns a list of results with titles, URLs, and snippets. Uses Tavily (primary) with DuckDuckGo as fallback.
 
 Do NOT use this tool if you already have a URL. Use web_crawl instead to read a known URL.""",
     "inputSchema": {

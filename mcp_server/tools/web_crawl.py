@@ -607,7 +607,7 @@ async def web_crawl_tool_handler(
                 "Both crawl4ai and Jina Reader failed, escalating to browser",
                 extra={
                     "url": url,
-                    "crawl4ai_error": str(e),
+                    "crawl4ai_error": crawl4ai_error,
                     "jina_error": str(jina_error),
                     "request_id": request_id
                 }
@@ -636,7 +636,7 @@ async def web_crawl_tool_handler(
                     "All three providers failed (crawl4ai, Jina, browser)",
                     extra={
                         "url": url,
-                        "crawl4ai_error": str(e),
+                        "crawl4ai_error": crawl4ai_error,
                         "jina_error": str(jina_error),
                         "browser_error": result.get("error_message"),
                         "duration_ms": duration_ms,
@@ -651,7 +651,7 @@ async def web_crawl_tool_handler(
                     "All three providers failed (crawl4ai, Jina, browser)",
                     extra={
                         "url": url,
-                        "crawl4ai_error": str(e),
+                        "crawl4ai_error": crawl4ai_error,
                         "jina_error": str(jina_error),
                         "browser_error": str(browser_error),
                         "duration_ms": duration_ms,

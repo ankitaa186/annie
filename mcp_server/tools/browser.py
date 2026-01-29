@@ -100,6 +100,13 @@ async def _execute_action(
             await asyncio.sleep(wait_ms / 1000)
             return {"action": "wait", "status": "success", "waited_ms": wait_ms}
 
+        elif action_type == "close_session":
+            resp = await client.delete(
+                f"{base}/sessions/{session_id}",
+                timeout=10,
+            )
+            return {"action": "close_session", "status": "success"}
+
         else:
             return {"action": action_type, "status": "error", "error": f"Unknown action type: {action_type}"}
 
@@ -123,17 +130,22 @@ async def browser_action_handler(
     actions: List[Dict[str, Any]],
     profile: str = "default",
     session_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    keep_session: bool = False,
 ) -> Dict[str, Any]:
     """
     Execute a sequence of browser actions.
 
     If session_id is provided, reuses an existing browser session.
-    Otherwise, creates a new session and closes it after all actions complete.
+    Otherwise, creates a new session and closes it after all actions complete
+    (unless keep_session=True, in which case the session stays alive for reuse).
 
     Args:
         actions: List of action dicts, each with at minimum a "type" key.
         profile: Chrome profile name for persistent sessions (default: "default").
         session_id: Optional existing session ID to reuse.
+        user_id: Optional user ID for per-user profile isolation (auto-injected).
+        keep_session: If True, session is kept alive after actions complete.
 
     Returns:
         Dict with status, session_id, and results array.
@@ -142,6 +154,10 @@ async def browser_action_handler(
     start_time = time.time()
     base = _get_browser_url()
     created_session = False
+
+    # Derive per-user profile when user_id is provided and no custom profile set
+    if user_id and profile == "default":
+        profile = f"user_{user_id}"
 
     logger.info(
         f"browser_action called with {len(actions)} action(s)",
@@ -191,6 +207,46 @@ async def browser_action_handler(
         results: List[Dict[str, Any]] = []
         for idx, action in enumerate(actions):
             action_result = await _execute_action(client, session_id, action, request_id)
+
+            # Expired session retry: if session_id was provided (not created here)
+            # and the first action fails with a "not found" error, create a new
+            # session with the same profile and retry the failed action.
+            # The browser service returns 404s as {"detail": "Session not found: ..."}
+            error_text = (
+                str(action_result.get("error", ""))
+                + str(action_result.get("detail", ""))
+            ).lower()
+            if (
+                not created_session
+                and idx == 0
+                and "not found" in error_text
+            ):
+                logger.info(
+                    f"Session {session_id} expired, creating new session with profile {profile}",
+                    extra={"request_id": request_id},
+                )
+                try:
+                    resp = await client.post(
+                        f"{base}/sessions",
+                        json={"profile": profile},
+                        timeout=15,
+                    )
+                    resp_data = resp.json()
+                    if resp.status_code == 200 and resp_data.get("status") == "success":
+                        session_id = resp_data["data"]["session_id"]
+                        created_session = True
+                        logger.info(
+                            f"Recreated browser session {session_id} after expiry",
+                            extra={"request_id": request_id, "session_id": session_id},
+                        )
+                        # Retry the failed action with new session
+                        action_result = await _execute_action(client, session_id, action, request_id)
+                except Exception as exc:
+                    logger.error(
+                        f"Failed to recreate session after expiry: {exc}",
+                        extra={"request_id": request_id},
+                    )
+
             results.append(action_result)
 
             # Stop on error unless it's a non-critical action
@@ -202,7 +258,7 @@ async def browser_action_handler(
                 break
 
         # ---- Clean up -------------------------------------------------------
-        if created_session:
+        if created_session and not keep_session:
             try:
                 await client.delete(f"{base}/sessions/{session_id}", timeout=10)
                 logger.info(
@@ -214,6 +270,11 @@ async def browser_action_handler(
                     f"Failed to close session {session_id}: {exc}",
                     extra={"request_id": request_id},
                 )
+        elif created_session and keep_session:
+            logger.info(
+                f"Keeping browser session {session_id} alive (1-hour idle timeout)",
+                extra={"request_id": request_id, "session_id": session_id},
+            )
 
     duration_ms = int((time.time() - start_time) * 1000)
     logger.info(
@@ -267,6 +328,7 @@ browser_action_tool = {
                                 "content",
                                 "wait",
                                 "evaluate",
+                                "close_session",
                             ],
                             "description": "Action type",
                         },
@@ -303,6 +365,15 @@ browser_action_tool = {
             "session_id": {
                 "type": "string",
                 "description": "Reuse existing browser session (optional)",
+            },
+            "user_id": {
+                "type": "string",
+                "description": "User ID for per-user profile isolation (auto-injected by system)",
+            },
+            "keep_session": {
+                "type": "boolean",
+                "default": False,
+                "description": "Keep session alive after actions complete for multi-step flows",
             },
         },
         "required": ["actions"],

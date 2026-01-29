@@ -313,6 +313,71 @@ async def stream_generator(
                                         exc_info=True
                                     )
 
+                    # Persist Gemini tool calls to Redis (intercept-only, not forwarded to client)
+                    if event.get("type") == "tool_persist_calls" and state_manager:
+                        try:
+                            await state_manager.add_message(conversation_id, {
+                                "role": "assistant",
+                                "content": "",
+                                "tool_calls": [
+                                    {
+                                        "id": tc["id"],
+                                        "type": "function",
+                                        "function": {
+                                            "name": tc["name"],
+                                            "arguments": tc.get("arguments", "{}")
+                                        }
+                                    }
+                                    for tc in event.get("tool_calls", [])
+                                ],
+                                "is_tool_call": True
+                            })
+                            tool_names = [tc["name"] for tc in event.get("tool_calls", [])]
+                            logger.info(
+                                "Gemini tool calls persisted to Redis",
+                                extra={
+                                    "conversation_id": conversation_id,
+                                    "tool_names": tool_names,
+                                    "tool_count": len(tool_names)
+                                }
+                            )
+                        except Exception as e:
+                            logger.warning(
+                                "Failed to persist Gemini tool calls to Redis",
+                                extra={
+                                    "conversation_id": conversation_id,
+                                    "error": str(e)
+                                }
+                            )
+                        continue  # Don't forward persistence events to SSE client
+
+                    if event.get("type") == "tool_persist_result" and state_manager:
+                        try:
+                            await state_manager.add_message(conversation_id, {
+                                "role": "tool",
+                                "content": event.get("result_content", ""),
+                                "tool_call_id": event.get("tool_call_id", ""),
+                                "tool_name": event.get("tool_name", ""),
+                                "is_tool_result": True
+                            })
+                            logger.info(
+                                "Gemini tool result persisted to Redis",
+                                extra={
+                                    "conversation_id": conversation_id,
+                                    "tool_name": event.get("tool_name", "")
+                                }
+                            )
+                        except Exception as e:
+                            logger.warning(
+                                "Failed to persist Gemini tool result to Redis",
+                                extra={
+                                    "conversation_id": conversation_id,
+                                    "tool_name": event.get("tool_name", ""),
+                                    "error": str(e)
+                                }
+                            )
+                        continue  # Don't forward persistence events to SSE client
+
                     # Drain status queue before yielding event (ensures status frames are interleaved)
                     while not status_queue.empty():
                         try:
@@ -558,6 +623,36 @@ async def stream_generator(
                 # Add assistant message with tool calls to conversation
                 conversation_messages.append(message)
 
+                # Persist tool call message to Redis for context continuity
+                if state_manager:
+                    try:
+                        tool_call_message = {
+                            "role": "assistant",
+                            "content": message.get("content", "") or "",
+                            "tool_calls": [
+                                {
+                                    "id": tc.get("id", ""),
+                                    "type": "function",
+                                    "function": {
+                                        "name": tc.get("function", {}).get("name", ""),
+                                        "arguments": tc.get("function", {}).get("arguments", "{}")
+                                    }
+                                }
+                                for tc in tool_calls
+                            ],
+                            "is_tool_call": True
+                        }
+                        await state_manager.add_message(conversation_id, tool_call_message)
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to persist tool call message to Redis",
+                            extra={
+                                "conversation_id": conversation_id,
+                                "error": str(e),
+                                "tool_count": len(tool_calls)
+                            }
+                        )
+
                 # Execute each tool call
                 for tool_call in tool_calls:
                     function_name = tool_call.get("function", {}).get("name", "")
@@ -676,6 +771,27 @@ async def stream_generator(
                             "content": tool_content,
                             "tool_call_id": tool_call_id
                         })
+
+                        # Persist tool result to Redis for context continuity
+                        if state_manager:
+                            try:
+                                await state_manager.add_message(conversation_id, {
+                                    "role": "tool",
+                                    "content": tool_content,
+                                    "tool_call_id": tool_call_id,
+                                    "tool_name": function_name,
+                                    "is_tool_result": True
+                                })
+                            except Exception as e:
+                                logger.warning(
+                                    "Failed to persist tool result to Redis",
+                                    extra={
+                                        "conversation_id": conversation_id,
+                                        "tool_name": function_name,
+                                        "tool_call_id": tool_call_id,
+                                        "error": str(e)
+                                    }
+                                )
 
                         # DEBUG: Log tool result content (first 500 chars)
                         logger.debug(

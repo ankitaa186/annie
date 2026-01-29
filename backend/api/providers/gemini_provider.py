@@ -7,6 +7,7 @@ safety filter handling, function calling, and Langfuse tracing integration.
 
 import json
 import time
+import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional
 import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
@@ -783,6 +784,25 @@ class GeminiProvider(BaseProvider):
                         # Execute ALL tools via MCP client
                         tool_results = []
 
+                        # Generate stable IDs for persistence tracking
+                        tool_call_ids = [
+                            f"gemini_{uuid.uuid4().hex[:8]}"
+                            for _ in function_calls
+                        ]
+
+                        # Emit persistence event: batch of tool calls
+                        yield {
+                            "type": "tool_persist_calls",
+                            "tool_calls": [
+                                {
+                                    "id": tool_call_ids[i],
+                                    "name": fc["name"],
+                                    "arguments": json.dumps(fc["args"])
+                                }
+                                for i, fc in enumerate(function_calls)
+                            ]
+                        }
+
                         for idx, func_call in enumerate(function_calls, 1):
                             # Log tool execution with position indicator
                             logger.info(
@@ -818,6 +838,14 @@ class GeminiProvider(BaseProvider):
                                     "tool": func_call["name"],
                                     "result_summary": result_summary
                                 }
+
+                            # Emit persistence event: individual tool result
+                            yield {
+                                "type": "tool_persist_result",
+                                "tool_name": func_call["name"],
+                                "tool_call_id": tool_call_ids[idx - 1],
+                                "result_content": json.dumps(tool_result)
+                            }
 
                             # Format function response for Gemini
                             formatted_result = self.tool_adapter.format_tool_result_for_gemini(

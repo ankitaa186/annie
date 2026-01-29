@@ -970,7 +970,14 @@ class StateManager:
             messages = []
             for msg_json in messages_json:
                 try:
-                    messages.append(json.loads(msg_json))
+                    msg = json.loads(msg_json)
+                    # Normalize tool_calls: ensure "type": "function" is present
+                    # (older persisted messages may lack this field)
+                    if msg.get("tool_calls"):
+                        for tc in msg["tool_calls"]:
+                            if "type" not in tc:
+                                tc["type"] = "function"
+                    messages.append(msg)
                 except json.JSONDecodeError as e:
                     logger.error(
                         "Failed to parse message JSON",
@@ -1007,6 +1014,446 @@ class StateManager:
             self._is_healthy = False
             return []
 
+    # =========================================================================
+    # Context Compaction Methods
+    # =========================================================================
+
+    @staticmethod
+    def _create_tool_result_summary(content: str, tool_name: str = "") -> str:
+        """
+        Create a compact deterministic summary of a tool result (no LLM call).
+
+        Parses JSON content and returns a short description. Falls back to
+        a length-based summary if JSON parsing fails.
+
+        Args:
+            content: The tool result content string
+            tool_name: Optional tool name for context
+
+        Returns:
+            Compact summary string
+        """
+        try:
+            data = json.loads(content)
+        except (json.JSONDecodeError, TypeError):
+            # Not JSON — summarize by length
+            length = len(content) if content else 0
+            return f"[Tool result: {length} chars]"
+
+        # Handle error results
+        if isinstance(data, dict):
+            if data.get("status") == "error" or data.get("status") == "failed":
+                error_msg = data.get("error", data.get("message", "unknown error"))
+                return f"[Error: {str(error_msg)[:80]}]"
+
+            if data.get("status") == "queued":
+                return "[Queued for background processing]"
+
+            # Handle common tool result patterns
+            # Web search results
+            if "results" in data and isinstance(data["results"], list):
+                count = len(data["results"])
+                return f"[Returned {count} results]"
+
+            # Memory retrieval
+            if "memories" in data and isinstance(data["memories"], list):
+                count = len(data["memories"])
+                return f"[Retrieved {count} memories]"
+
+            if "memory_count" in data:
+                return f"[Retrieved {data['memory_count']} memories]"
+
+            # Profile data
+            if "completeness" in data:
+                return f"[Profile loaded ({data['completeness']}% complete)]"
+
+            # Portfolio data
+            if "holdings" in data and isinstance(data["holdings"], list):
+                count = len(data["holdings"])
+                return f"[Portfolio: {count} holdings]"
+
+            # Home Assistant
+            if "entities" in data and isinstance(data["entities"], list):
+                count = len(data["entities"])
+                return f"[{count} entities returned]"
+
+            # Generic success with status
+            if data.get("status") == "success":
+                msg = data.get("message", "")
+                if msg:
+                    return f"[Success: {str(msg)[:80]}]"
+                return "[Success]"
+
+        # Fallback: describe by size
+        content_len = len(content) if content else 0
+        if tool_name:
+            return f"[{tool_name} result: {content_len} chars]"
+        return f"[Tool result: {content_len} chars]"
+
+    @staticmethod
+    def _prune_tool_results(
+        messages: List[Dict[str, Any]],
+        keep_recent_turns: int = 2
+    ) -> List[Dict[str, Any]]:
+        """
+        Replace verbose tool result content in older turns with compact summaries.
+
+        Walks messages backwards, identifies turn boundaries (each role="user"
+        message starts a new turn), and replaces tool result content in turns
+        older than keep_recent_turns with compact summaries.
+
+        Args:
+            messages: List of conversation messages
+            keep_recent_turns: Number of recent user turns to preserve fully
+
+        Returns:
+            New list of messages with older tool results pruned
+        """
+        if not messages:
+            return messages
+
+        # Identify turn boundaries by finding user messages (walking backwards)
+        user_indices = []
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i].get("role") == "user":
+                user_indices.append(i)
+
+        # If fewer turns than threshold, nothing to prune
+        if len(user_indices) <= keep_recent_turns:
+            return messages
+
+        # The cutoff index: messages before this index are in "old" turns
+        # user_indices is in reverse order, so user_indices[keep_recent_turns - 1]
+        # is the start of the oldest "recent" turn
+        cutoff_index = user_indices[keep_recent_turns - 1]
+
+        # Build pruned message list
+        pruned = []
+        for i, msg in enumerate(messages):
+            if i < cutoff_index and msg.get("role") == "tool":
+                # This is a tool result in an older turn — prune it
+                tool_name = msg.get("tool_name", "")
+                original_content = msg.get("content", "")
+                summary = StateManager._create_tool_result_summary(
+                    original_content, tool_name
+                )
+                pruned_msg = {
+                    **msg,
+                    "content": summary,
+                    "_pruned": True
+                }
+                pruned.append(pruned_msg)
+            elif i < cutoff_index and msg.get("is_tool_call"):
+                # Tool call assistant message in older turn — keep but strip large arguments
+                pruned_msg = dict(msg)
+                if "tool_calls" in pruned_msg:
+                    compact_calls = []
+                    for tc in pruned_msg["tool_calls"]:
+                        compact_calls.append({
+                            "id": tc.get("id", ""),
+                            "function": {
+                                "name": tc.get("function", {}).get("name", ""),
+                                "arguments": "{}"
+                            }
+                        })
+                    pruned_msg["tool_calls"] = compact_calls
+                    pruned_msg["_pruned"] = True
+                pruned.append(pruned_msg)
+            else:
+                pruned.append(msg)
+
+        return pruned
+
+    # Summary staleness threshold: regenerate if this many new messages arrived
+    SUMMARY_STALENESS_THRESHOLD = 5
+
+    @staticmethod
+    def _format_messages_for_summary(messages: List[Dict[str, Any]]) -> str:
+        """
+        Format messages into a readable transcript for the summarizer LLM.
+
+        Truncates long messages and labels tool results with tool name.
+
+        Args:
+            messages: List of conversation messages to format
+
+        Returns:
+            Formatted transcript string
+        """
+        lines = []
+        for msg in messages:
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
+
+            if role == "tool":
+                tool_name = msg.get("tool_name", "unknown_tool")
+                # Truncate long tool results
+                if len(content) > 500:
+                    content = content[:500] + "... [truncated]"
+                lines.append(f"[Tool: {tool_name}] {content}")
+            elif role == "assistant" and msg.get("is_tool_call"):
+                tool_calls = msg.get("tool_calls", [])
+                tool_names = [tc.get("function", {}).get("name", "?") for tc in tool_calls]
+                lines.append(f"Assistant called tools: {', '.join(tool_names)}")
+            elif role == "system":
+                # Skip system messages from summary transcript
+                continue
+            else:
+                # User or assistant text
+                if len(content) > 500:
+                    content = content[:500] + "... [truncated]"
+                label = role.capitalize()
+                lines.append(f"{label}: {content}")
+
+        return "\n".join(lines)
+
+    async def _generate_summary(self, messages: List[Dict[str, Any]]) -> Optional[str]:
+        """
+        Generate a summary of messages using an LLM call.
+
+        Uses SUMMARY_LLM_PROVIDER if configured, otherwise the default provider.
+
+        Args:
+            messages: Messages to summarize
+
+        Returns:
+            Summary text string, or None on failure
+        """
+        try:
+            from api.prompts import SUMMARY_SYSTEM_PROMPT
+            from api.llm_client import LLMClient
+
+            config = get_config()
+            provider_override = config.get("SUMMARY_LLM_PROVIDER")
+
+            transcript = self._format_messages_for_summary(messages)
+            if not transcript.strip():
+                return None
+
+            llm_messages = [
+                {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
+                {"role": "user", "content": f"Summarize this conversation:\n\n{transcript}"}
+            ]
+
+            async with LLMClient(provider_override=provider_override) as client:
+                response = await client.chat_completion(llm_messages)
+
+            # Extract content from response
+            choices = response.get("choices", [])
+            if choices:
+                summary = choices[0].get("message", {}).get("content", "")
+                if summary:
+                    logger.info(
+                        "Summary generated",
+                        extra={
+                            "input_messages": len(messages),
+                            "summary_length": len(summary)
+                        }
+                    )
+                    return summary
+
+            return None
+
+        except Exception as e:
+            logger.warning(
+                "Failed to generate summary, will fall back to truncation",
+                extra={"error": str(e), "error_type": type(e).__name__}
+            )
+            return None
+
+    async def get_or_create_summary(
+        self,
+        conversation_id: str,
+        messages_to_summarize: List[Dict[str, Any]],
+        current_message_count: int
+    ) -> Optional[str]:
+        """
+        Get cached summary or generate a new one.
+
+        Checks Redis for a cached summary. If it exists and is fresh
+        (within SUMMARY_STALENESS_THRESHOLD messages), returns it.
+        Otherwise generates a new summary and caches it.
+
+        Args:
+            conversation_id: Conversation identifier
+            messages_to_summarize: Messages that would be dropped by truncation
+            current_message_count: Current total message count in conversation
+
+        Returns:
+            Summary text, or None if generation fails
+        """
+        summary_key = f"conversation:{conversation_id}:summary"
+
+        # Check for cached summary
+        if self._is_healthy:
+            try:
+                cached = await self.redis_client.get(summary_key)
+                if cached:
+                    cached_data = json.loads(cached)
+                    msg_count_at_gen = cached_data.get("message_count_at_generation", 0)
+                    # If the cached summary is still fresh enough, use it
+                    if (current_message_count - msg_count_at_gen) < self.SUMMARY_STALENESS_THRESHOLD:
+                        logger.debug(
+                            "Using cached summary",
+                            extra={
+                                "conversation_id": conversation_id,
+                                "generated_at_count": msg_count_at_gen,
+                                "current_count": current_message_count
+                            }
+                        )
+                        return cached_data.get("text")
+            except Exception as e:
+                logger.warning(
+                    "Failed to read cached summary",
+                    extra={"conversation_id": conversation_id, "error": str(e)}
+                )
+
+        # Generate new summary
+        summary_text = await self._generate_summary(messages_to_summarize)
+        if not summary_text:
+            return None
+
+        # Cache the summary
+        if self._is_healthy:
+            try:
+                summary_data = json.dumps({
+                    "text": summary_text,
+                    "message_count_at_generation": current_message_count,
+                    "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                })
+                await self.redis_client.setex(
+                    summary_key,
+                    self.TTL_SECONDS,  # Same TTL as conversation
+                    summary_data
+                )
+            except Exception as e:
+                logger.warning(
+                    "Failed to cache summary (returning summary anyway)",
+                    extra={"conversation_id": conversation_id, "error": str(e)}
+                )
+
+        # Fire-and-forget: echo summary to agentic-memories
+        asyncio.ensure_future(
+            self._echo_summary_to_memories(conversation_id, summary_text)
+        )
+
+        return summary_text
+
+    @staticmethod
+    def _extract_echoes(summary_text: str) -> Optional[str]:
+        """
+        Extract the Echoes section from a tiered summary.
+
+        The summary is structured with ## Ripples and ## Echoes sections.
+        Echoes are the deeper layer (decisions, preferences, emotional moments)
+        that should persist in long-term memory.
+
+        Args:
+            summary_text: Full tiered summary text
+
+        Returns:
+            Echoes section text, or None if not found or empty
+        """
+        if not summary_text:
+            return None
+
+        # Find the ## Echoes section
+        echoes_start = summary_text.find("## Echoes")
+        if echoes_start == -1:
+            # Fallback: no structured format, return full text
+            return summary_text
+
+        # Extract from "## Echoes" to end (or next ## heading)
+        echoes_content = summary_text[echoes_start + len("## Echoes"):]
+
+        # Check if there's another section after Echoes
+        next_section = echoes_content.find("\n## ")
+        if next_section != -1:
+            echoes_content = echoes_content[:next_section]
+
+        echoes_content = echoes_content.strip()
+
+        # Strip the parenthetical description line if present
+        lines = echoes_content.split("\n")
+        filtered = [
+            line for line in lines
+            if not line.strip().startswith("(") or not line.strip().endswith(")")
+        ]
+        echoes_content = "\n".join(filtered).strip()
+
+        if not echoes_content or "no significant decisions" in echoes_content.lower():
+            return None
+
+        return echoes_content
+
+    async def _echo_summary_to_memories(
+        self,
+        conversation_id: str,
+        summary_text: str
+    ) -> None:
+        """
+        Fire-and-forget: send the Echoes layer to agentic-memories for long-term recall.
+
+        The summary follows the Tiered Echo Model:
+        - Ripples (surface topics) stay in Redis context only — they fade naturally.
+        - Echoes (decisions, preferences, emotional moments) persist in agentic-memories.
+        - Imprints (identity patterns) are handled separately by the profile system.
+
+        Only the Echoes section is sent to long-term memory, not the full summary.
+
+        Args:
+            conversation_id: Conversation identifier
+            summary_text: The full tiered summary text (with ## Ripples and ## Echoes)
+        """
+        try:
+            from api.memory import MemoryManager
+
+            # Look up user_id for this conversation
+            user_id = await self.get_user_id_for_conversation(conversation_id)
+            if not user_id:
+                logger.debug(
+                    "No user_id for conversation, skipping memory echo",
+                    extra={"conversation_id": conversation_id}
+                )
+                return
+
+            # Extract just the Echoes layer for long-term storage
+            echoes = self._extract_echoes(summary_text)
+            if not echoes:
+                logger.debug(
+                    "No echoes to persist (informational exchange only)",
+                    extra={"conversation_id": conversation_id}
+                )
+                return
+
+            memory_manager = MemoryManager()
+            await memory_manager.store_conversation_memory(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                conversation_history=[{
+                    "role": "assistant",
+                    "content": echoes
+                }]
+            )
+            logger.info(
+                "Echoes persisted to agentic-memories",
+                extra={
+                    "conversation_id": conversation_id,
+                    "user_id": user_id,
+                    "echoes_length": len(echoes),
+                    "full_summary_length": len(summary_text)
+                }
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to echo summary to agentic-memories (non-blocking)",
+                extra={
+                    "conversation_id": conversation_id,
+                    "error": str(e),
+                    "error_type": type(e).__name__
+                }
+            )
+
     @observe(name="build_llm_context", as_type="span")
     async def build_llm_context(
         self,
@@ -1031,8 +1478,11 @@ class StateManager:
         """
         start_time = time.time()
 
-        # Retrieve last 20 messages
+        # Retrieve conversation history
         messages = await self.get_conversation_history(conversation_id, limit=self.MAX_MESSAGES)
+
+        # Prune verbose tool results in older turns to save tokens
+        messages = self._prune_tool_results(messages)
 
         # Estimate token count
         def estimate_tokens(text: str) -> int:
@@ -1054,7 +1504,7 @@ class StateManager:
         # Truncate from beginning if exceeds token limit
         if total_tokens > self.MAX_TOKENS:
             logger.info(
-                "Context exceeds token limit, truncating from beginning",
+                "Context exceeds token limit, attempting summarization",
                 extra={
                     "conversation_id": conversation_id,
                     "original_messages": len(messages),
@@ -1063,10 +1513,51 @@ class StateManager:
                 }
             )
 
-            # Keep removing oldest messages until under limit
-            while total_tokens > self.MAX_TOKENS and messages:
-                removed_msg = messages.pop(0)  # Remove from beginning
-                total_tokens -= estimate_tokens(removed_msg.get("content", ""))
+            # Identify which messages would be dropped
+            messages_to_drop = []
+            temp_tokens = total_tokens
+            temp_messages = list(messages)
+            while temp_tokens > self.MAX_TOKENS and temp_messages:
+                removed = temp_messages.pop(0)
+                temp_tokens -= estimate_tokens(removed.get("content", ""))
+                messages_to_drop.append(removed)
+
+            # Try to summarize the dropped messages
+            summary_text = None
+            if messages_to_drop:
+                try:
+                    summary_text = await self.get_or_create_summary(
+                        conversation_id,
+                        messages_to_drop,
+                        len(messages)
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Summary generation failed, falling back to truncation",
+                        extra={
+                            "conversation_id": conversation_id,
+                            "error": str(e)
+                        }
+                    )
+
+            if summary_text:
+                # Insert summary as system message after the main system message
+                summary_msg = {
+                    "role": "system",
+                    "content": f"[Earlier conversation summary]\n{summary_text}"
+                }
+                context_messages.append(summary_msg)
+                total_tokens = (
+                    estimate_tokens(system_message or "")
+                    + estimate_tokens(summary_msg["content"])
+                    + sum(estimate_tokens(m.get("content", "")) for m in temp_messages)
+                )
+                messages = temp_messages
+            else:
+                # Fallback: plain truncation (drop oldest)
+                while total_tokens > self.MAX_TOKENS and messages:
+                    removed_msg = messages.pop(0)
+                    total_tokens -= estimate_tokens(removed_msg.get("content", ""))
 
         # Add conversation messages
         context_messages.extend(messages)
