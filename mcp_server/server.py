@@ -49,6 +49,7 @@ from mcp_server.tools import (
     home_assistant_query_tool,  # Epic 16 - Story 16.1
     home_assistant_control_tool,  # Epic 16 - Story 16.2
     send_voice_message_to_smart_home_tool,  # Epic 16 - Story 16.6
+    browser_action_tool,  # Browser Automation
 )
 
 logger = get_logger(__name__)
@@ -122,6 +123,8 @@ class MCPServer:
         self.tool_registry.register(home_assistant_query_tool)
         self.tool_registry.register(home_assistant_control_tool)
         self.tool_registry.register(send_voice_message_to_smart_home_tool)
+        # Browser automation tool
+        self.tool_registry.register(browser_action_tool)
         logger.info(f"Registered {len(self.tool_registry.tools)} tools")
 
     async def handle_request(self, request: Dict[str, Any]) -> Dict[str, Any]:

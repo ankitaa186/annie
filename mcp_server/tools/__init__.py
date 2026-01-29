@@ -117,6 +117,12 @@ from .reddit_search import (
     _reddit_json_search,
 )
 
+# Browser Automation Tool
+from .browser import (
+    browser_action_tool,
+    browser_action_handler,
+)
+
 # Home Assistant Tools (Epic 16 - Stories 16.1, 16.2, 16.6)
 from .home_assistant import (
     home_assistant_query_tool,
@@ -226,6 +232,10 @@ __all__ = [
     "reddit_search_tool_handler",
     "_praw_search_sync",
     "_reddit_json_search",
+
+    # Browser Automation
+    "browser_action_tool",
+    "browser_action_handler",
 
     # Home Assistant
     "home_assistant_query_tool",

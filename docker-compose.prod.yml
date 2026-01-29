@@ -55,6 +55,13 @@ services:
         <<: *loki-options
         loki-external-labels: "service=web,env=prod,project=annie"
 
+  browser:
+    logging:
+      driver: loki
+      options:
+        <<: *loki-options
+        loki-external-labels: "service=browser,env=prod,project=annie"
+
   redis:
     logging:
       driver: loki
