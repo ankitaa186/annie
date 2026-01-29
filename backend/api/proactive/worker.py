@@ -259,10 +259,14 @@ async def process_trigger(
             # This ensures the LLM has context when user replies
             try:
                 async with StateManager() as state_manager:
-                    # Get or create session for user
+                    # Get or create conversation for user
                     session = await state_manager.get_session(user_id)
                     if not session:
-                        session = await state_manager.create_session(user_id, "telegram")
+                        session = await state_manager.create_conversation(
+                            user_id=user_id,
+                            platform="telegram",
+                            title="Proactive Check-in"
+                        )
 
                     conversation_id = session.get("conversation_id")
                     if conversation_id:

@@ -368,7 +368,7 @@ async def test_process_trigger_creates_session_if_missing(
             # Setup StateManager mock - no existing session
             mock_state_manager = AsyncMock()
             mock_state_manager.get_session = AsyncMock(return_value=None)
-            mock_state_manager.create_session = AsyncMock(return_value={
+            mock_state_manager.create_conversation = AsyncMock(return_value={
                 "user_id": "user_456",
                 "conversation_id": "conv_new123"
             })
@@ -384,8 +384,12 @@ async def test_process_trigger_creates_session_if_missing(
                 delivery=mock_delivery
             )
 
-            # Verify session was created
-            mock_state_manager.create_session.assert_called_once_with("user_456", "telegram")
+            # Verify conversation was created
+            mock_state_manager.create_conversation.assert_called_once_with(
+                user_id="user_456",
+                platform="telegram",
+                title="Proactive Check-in"
+            )
 
             # Verify message was stored in new conversation
             mock_state_manager.add_message.assert_called_once()

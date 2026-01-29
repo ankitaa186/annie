@@ -1,6 +1,6 @@
 # Story 20.6: Chat Interface - Input & Sending
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -25,49 +25,49 @@ so that I can communicate with Annie through text and share documents/images for
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Create InputArea component (AC: 1, 2, 3, 9, 10)
-  - [ ] 1.1 Create `web/src/components/chat/InputArea.tsx`
-  - [ ] 1.2 Implement auto-expanding textarea
-  - [ ] 1.3 Add send button with enabled/disabled state
-  - [ ] 1.4 Handle Enter/Shift+Enter key events
-  - [ ] 1.5 Show loading state during send
-  - [ ] 1.6 Disable input while Annie responds
+- [x] Task 1: Create InputArea component (AC: 1, 2, 3, 9, 10)
+  - [x] 1.1 Create `web/src/components/chat/InputArea.tsx`
+  - [x] 1.2 Implement auto-expanding textarea
+  - [x] 1.3 Add send button with enabled/disabled state
+  - [x] 1.4 Handle Enter/Shift+Enter key events
+  - [x] 1.5 Show loading state during send
+  - [x] 1.6 Disable input while Annie responds
 
-- [ ] Task 2: Create FileUpload component (AC: 4, 5, 6)
-  - [ ] 2.1 Create `web/src/components/chat/FileUpload.tsx`
-  - [ ] 2.2 Add file input with hidden trigger
-  - [ ] 2.3 Implement drag-and-drop zone
-  - [ ] 2.4 Show file previews (thumbnails for images)
-  - [ ] 2.5 Allow removing files before send
-  - [ ] 2.6 Limit to 10 files max
+- [x] Task 2: Create FileUpload component (AC: 4, 5, 6)
+  - [x] 2.1 Create `web/src/components/chat/FileUpload.tsx` (integrated into InputArea)
+  - [x] 2.2 Add file input with hidden trigger
+  - [x] 2.3 Implement drag-and-drop zone
+  - [x] 2.4 Show file previews (thumbnails for images)
+  - [x] 2.5 Allow removing files before send
+  - [x] 2.6 Limit to 10 files max
 
-- [ ] Task 3: Implement file validation (AC: 7, 8)
-  - [ ] 3.1 Create file validation utilities
-  - [ ] 3.2 Validate MIME types against allowed list
-  - [ ] 3.3 Validate file sizes (10MB images, 20MB documents)
-  - [ ] 3.4 Show user-friendly error toasts
+- [x] Task 3: Implement file validation (AC: 7, 8)
+  - [x] 3.1 Create file validation utilities
+  - [x] 3.2 Validate MIME types against allowed list
+  - [x] 3.3 Validate file sizes (10MB images, 20MB documents)
+  - [x] 3.4 Show user-friendly error toasts
 
-- [ ] Task 4: Create useChat hook (AC: 9)
-  - [ ] 4.1 Create `web/src/lib/hooks/useChat.ts`
-  - [ ] 4.2 Implement sendMessage function
-  - [ ] 4.3 Handle POST to /api/chat with files
-  - [ ] 4.4 Update Zustand store with sent message
-  - [ ] 4.5 Trigger SSE stream connection
+- [x] Task 4: Create useChat hook (AC: 9)
+  - [x] 4.1 Create `web/src/lib/hooks/useChat.ts`
+  - [x] 4.2 Implement sendMessage function
+  - [x] 4.3 Handle POST to /api/chat with files
+  - [x] 4.4 Update Zustand store with sent message
+  - [x] 4.5 Trigger SSE stream connection (placeholder for Story 20.7)
 
-- [ ] Task 5: Implement clipboard paste (AC: 12)
-  - [ ] 5.1 Listen for paste events
-  - [ ] 5.2 Extract images from clipboard
-  - [ ] 5.3 Add to file list for upload
+- [x] Task 5: Implement clipboard paste (AC: 12)
+  - [x] 5.1 Listen for paste events
+  - [x] 5.2 Extract images from clipboard
+  - [x] 5.3 Add to file list for upload
 
-- [ ] Task 6: Add character count (AC: 11)
-  - [ ] 6.1 Display character count for messages >500 chars
-  - [ ] 6.2 Show warning at 4000 chars
-  - [ ] 6.3 Prevent send at 8000 chars (optional limit)
+- [x] Task 6: Add character count (AC: 11)
+  - [x] 6.1 Display character count for messages >500 chars
+  - [x] 6.2 Show warning at 4000 chars
+  - [x] 6.3 Prevent send at 8000 chars (optional limit)
 
-- [ ] Task 7: Integrate with ChatPage
-  - [ ] 7.1 Add InputArea below MessageThread
-  - [ ] 7.2 Connect to useChat hook
-  - [ ] 7.3 Wire up to Zustand store
+- [x] Task 7: Integrate with ChatPage
+  - [x] 7.1 Add InputArea below MessageThread
+  - [x] 7.2 Connect to useChat hook
+  - [x] 7.3 Wire up to Zustand store
 
 ## Dev Notes
 
@@ -242,8 +242,53 @@ const sendMessage = async () => {
 
 ### Agent Model Used
 
+Claude Opus 4.5 (claude-opus-4-5-20251101)
+
 ### Debug Log References
+
+Implementation plan:
+1. Task 1-2: InputArea component with integrated file upload (no separate FileUpload component - cleaner architecture)
+2. Task 3: File validation utilities mirroring backend rules
+3. Task 4: useChat hook using appStore for state management
+4. Task 5: Clipboard paste integrated into InputArea
+5. Task 6: Character count integrated into InputArea
+6. Task 7: ChatPage integration connecting all pieces
+
+Key decisions:
+- Integrated file upload into InputArea rather than separate component (simpler, better UX)
+- Created useToast hook + ToastContainer for error notifications
+- Updated useChat to use appStore instead of separate chatStore (consistency)
+- SSE streaming placeholder - actual implementation in Story 20.7
 
 ### Completion Notes List
 
+- All 7 tasks completed successfully
+- InputArea provides full-featured message input with file upload
+- File validation mirrors backend rules (10MB images, 20MB docs, max 10 files)
+- Toast notifications for validation errors
+- Character count appears at 500+ chars, warning at 4000, blocks at 8000
+- Clipboard paste supports images (Ctrl/Cmd+V)
+- Drag-and-drop zone with visual feedback
+- useChat hook ready for SSE integration in Story 20.7
+
 ### File List
+
+**New Files:**
+- web/src/lib/utils/fileValidation.ts - File validation utilities (MIME types, size limits, base64 conversion)
+- web/src/lib/hooks/useToast.ts - Toast notification hook and Zustand store
+- web/src/components/ui/toast.tsx - ToastContainer component for rendering notifications
+- web/src/components/chat/FilePreview.tsx - File preview with thumbnails and remove buttons
+- web/src/components/chat/InputArea.tsx - Main chat input component with all features
+
+**Modified Files:**
+- web/src/lib/hooks/useChat.ts - Updated to use appStore, added file attachment handling
+- web/src/lib/hooks/index.ts - Export useChat, useToast hooks
+- web/src/pages/ChatPage.tsx - Integrated InputArea component
+- web/src/App.tsx - Added ToastContainer
+
+**Deleted Files:**
+- web/src/lib/stores/chatStore.ts - Removed duplicate store (using appStore instead)
+
+### Change Log
+
+- 2026-01-26: Story 20.6 implementation complete - Chat input with file upload, validation, and sending

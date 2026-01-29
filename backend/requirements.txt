@@ -41,3 +41,6 @@ python-telegram-bot==20.7  # Telegram delivery (Story 13.9)
 pypdf>=4.0.0           # PDF text extraction
 python-docx>=1.1.0     # DOCX text extraction
 openpyxl>=3.1.0        # XLSX text extraction
+
+# Cloudflare Access authentication (Epic 20)
+pyjwt>=2.8.0           # JWT decoding for CF-Access-JWT-Assertion

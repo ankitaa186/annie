@@ -15,6 +15,15 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
+# Detect if running inside Docker container
+def _is_running_in_docker():
+    """Check if we're running inside a Docker container."""
+    return os.path.exists("/.dockerenv") or os.environ.get("DOCKER_CONTAINER") == "true"
+
+# Use Docker service names when running inside container, localhost otherwise
+_REDIS_HOST = "redis" if _is_running_in_docker() else "localhost"
+_AGENTIC_MEMORIES_HOST = "host.docker.internal" if _is_running_in_docker() else "localhost"
+
 # Test environment variables - SET BEFORE ANY PROJECT IMPORTS
 TEST_ENV_VARS = {
     # Environment
@@ -42,15 +51,15 @@ TEST_ENV_VARS = {
     "BRAVE_SEARCH_API_KEY": "test-brave-key",
     "STOCK_API_KEY": "test-stock-key",
     # External Services
-    "AGENTIC_MEMORIES_URL": "http://localhost:8080",
+    "AGENTIC_MEMORIES_URL": f"http://{_AGENTIC_MEMORIES_HOST}:8080",
     # Langfuse (disabled for tests)
     "LANGFUSE_PUBLIC_KEY": "",
     "LANGFUSE_SECRET_KEY": "",
     "LANGFUSE_HOST": "https://us.cloud.langfuse.com",
     "LANGFUSE_PROJECT_NAME": "annie-test",
     "LANGFUSE_ENVIRONMENT": "test",
-    # Redis
-    "REDIS_HOST": "localhost",
+    # Redis - use Docker service name when in container
+    "REDIS_HOST": _REDIS_HOST,
     "REDIS_PORT": "6379",
     # Service Configuration
     "BACKEND_PORT": "8001",
