@@ -9,6 +9,15 @@ from abc import ABC, abstractmethod
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 
+class ContextLengthError(Exception):
+    """Raised when request exceeds model's context window."""
+    def __init__(self, provider: str, message: str, original_error: Exception = None):
+        self.provider = provider
+        self.message = message
+        self.original_error = original_error
+        super().__init__(f"{provider}: {message}")
+
+
 class BaseProvider(ABC):
     """
     Abstract base class for LLM providers.

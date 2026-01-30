@@ -219,7 +219,9 @@ async def stream_generator(
                     tools=tools,
                     mcp_client=mcp_client,
                     files=files,
-                    user_id=user_id
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    state_manager=state_manager
                 ):
                     # Check for client disconnection
                     if await request.is_disconnected():
@@ -489,7 +491,9 @@ async def stream_generator(
                         tools=tools,
                         mcp_client=mcp_client,
                         files=files,
-                        user_id=user_id
+                        user_id=user_id,
+                        conversation_id=conversation_id,
+                        state_manager=state_manager
                     ):
                         # Check for client disconnection
                         if await request.is_disconnected():
@@ -870,7 +874,7 @@ async def stream_generator(
                         emit_status("Composing response...", icon="🧠")
 
                     # Stream final response anyway
-                    async for event in llm_client.stream_chat_completion(conversation_messages, tools=tools, mcp_client=mcp_client, files=files, user_id=user_id):
+                    async for event in llm_client.stream_chat_completion(conversation_messages, tools=tools, mcp_client=mcp_client, files=files, user_id=user_id, conversation_id=conversation_id, state_manager=state_manager):
                         if await request.is_disconnected():
                             break
 

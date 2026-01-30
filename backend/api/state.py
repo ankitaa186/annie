@@ -19,7 +19,7 @@ import json
 import os
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 import redis.asyncio as redis
@@ -1188,8 +1188,8 @@ class StateManager:
             if role == "tool":
                 tool_name = msg.get("tool_name", "unknown_tool")
                 # Truncate long tool results
-                if len(content) > 500:
-                    content = content[:500] + "... [truncated]"
+                if len(content) > 10000:
+                    content = content[:10000] + "... [truncated]"
                 lines.append(f"[Tool: {tool_name}] {content}")
             elif role == "assistant" and msg.get("is_tool_call"):
                 tool_calls = msg.get("tool_calls", [])
@@ -1200,28 +1200,36 @@ class StateManager:
                 continue
             else:
                 # User or assistant text
-                if len(content) > 500:
-                    content = content[:500] + "... [truncated]"
+                if role == "assistant" and len(content) > 20000:
+                    content = content[:20000] + "... [truncated]"
                 label = role.capitalize()
                 lines.append(f"{label}: {content}")
 
         return "\n".join(lines)
 
-    async def _generate_summary(self, messages: List[Dict[str, Any]]) -> Optional[str]:
+    async def _generate_summary(
+        self,
+        messages: List[Dict[str, Any]],
+        conversation_id: Optional[str] = None
+    ) -> Optional[str]:
         """
         Generate a summary of messages using an LLM call.
 
         Uses SUMMARY_LLM_PROVIDER if configured, otherwise the default provider.
+        Injects user profile into the prompt for personalized summaries.
 
         Args:
             messages: Messages to summarize
+            conversation_id: Optional conversation ID for profile lookup
 
         Returns:
             Summary text string, or None on failure
         """
         try:
-            from api.prompts import SUMMARY_SYSTEM_PROMPT
+            from api.prompts import SUMMARY_SYSTEM_PROMPT, format_profile_for_prompt
             from api.llm_client import LLMClient
+            from api.mcp_client import MCPClient
+            from api.profile import ProfileManager
 
             config = get_config()
             provider_override = config.get("SUMMARY_LLM_PROVIDER")
@@ -1230,13 +1238,47 @@ class StateManager:
             if not transcript.strip():
                 return None
 
+            # Load user profile for context
+            profile_section = ""
+            if conversation_id:
+                try:
+                    user_id = await self.get_user_id_for_conversation(conversation_id)
+                    if user_id:
+                        profile_mgr = ProfileManager(redis_client=self.redis_client)
+                        profile = await profile_mgr.fetch_profile(user_id)
+                        if profile and profile.get("completeness", profile.get("completeness_pct", 0)) > 0:
+                            profile_text = format_profile_for_prompt(profile)
+                            if profile_text:
+                                profile_section = f"\n\n## User Profile\n{profile_text}\n"
+                except Exception as e:
+                    logger.debug(
+                        "Could not load profile for summary (continuing without)",
+                        extra={"conversation_id": conversation_id, "error": str(e)}
+                    )
+
+            system_prompt = SUMMARY_SYSTEM_PROMPT
+            if profile_section:
+                system_prompt += profile_section
+
             llm_messages = [
-                {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": f"Summarize this conversation:\n\n{transcript}"}
             ]
 
-            async with LLMClient(provider_override=provider_override) as client:
-                response = await client.chat_completion(llm_messages)
+            async with LLMClient(provider_override=provider_override) as client, MCPClient() as mcp_client:
+                # Load tools so the summarizer can call them if needed
+                tools = None
+                try:
+                    mcp_tools = await mcp_client.list_tools()
+                    if mcp_tools:
+                        tools = client.convert_mcp_tools_to_functions(mcp_tools)
+                except Exception as e:
+                    logger.debug(
+                        "Could not load tools for summary (continuing without)",
+                        extra={"error": str(e)}
+                    )
+
+                response = await client.chat_completion(llm_messages, tools=tools, mcp_client=mcp_client)
 
             # Extract content from response
             choices = response.get("choices", [])
@@ -1309,7 +1351,7 @@ class StateManager:
                 )
 
         # Generate new summary
-        summary_text = await self._generate_summary(messages_to_summarize)
+        summary_text = await self._generate_summary(messages_to_summarize, conversation_id)
         if not summary_text:
             return None
 
@@ -1334,79 +1376,126 @@ class StateManager:
 
         # Fire-and-forget: echo summary to agentic-memories
         asyncio.ensure_future(
-            self._echo_summary_to_memories(conversation_id, summary_text)
+            self._echo_summary_to_memories(conversation_id, summary_text, messages_to_summarize)
         )
 
         return summary_text
 
     @staticmethod
-    def _extract_echoes(summary_text: str) -> Optional[str]:
+    def _extract_long_term_content(summary_text: str) -> Optional[str]:
         """
-        Extract the Echoes section from a tiered summary.
+        Extract content worth persisting to long-term memory from a summary.
 
-        The summary is structured with ## Ripples and ## Echoes sections.
-        Echoes are the deeper layer (decisions, preferences, emotional moments)
-        that should persist in long-term memory.
+        Extracts the "What was on their mind" (emotional context) and
+        "What matters going forward" (decisions, preferences, action items)
+        sections. Skips casual conversations with nothing noteworthy.
 
         Args:
-            summary_text: Full tiered summary text
+            summary_text: Full summary text with structured sections
 
         Returns:
-            Echoes section text, or None if not found or empty
+            Combined sections text, or None if nothing worth persisting
         """
         if not summary_text:
             return None
 
-        # Find the ## Echoes section
-        echoes_start = summary_text.find("## Echoes")
-        if echoes_start == -1:
-            # Fallback: no structured format, return full text
-            return summary_text
+        sections_to_keep = ["## What was on their mind", "## What matters going forward"]
+        extracted = []
 
-        # Extract from "## Echoes" to end (or next ## heading)
-        echoes_content = summary_text[echoes_start + len("## Echoes"):]
+        for header in sections_to_keep:
+            start = summary_text.find(header)
+            if start == -1:
+                continue
+            content_after = summary_text[start:]
+            next_section = content_after.find("\n## ", len(header))
+            section_text = (content_after[:next_section] if next_section != -1 else content_after).strip()
 
-        # Check if there's another section after Echoes
-        next_section = echoes_content.find("\n## ")
-        if next_section != -1:
-            echoes_content = echoes_content[:next_section]
+            body = section_text[len(header):].strip()
+            if body and "nothing specific" not in body.lower() and "casual conversation" not in body.lower():
+                extracted.append(section_text)
 
-        echoes_content = echoes_content.strip()
-
-        # Strip the parenthetical description line if present
-        lines = echoes_content.split("\n")
-        filtered = [
-            line for line in lines
-            if not line.strip().startswith("(") or not line.strip().endswith(")")
-        ]
-        echoes_content = "\n".join(filtered).strip()
-
-        if not echoes_content or "no significant decisions" in echoes_content.lower():
+        if not extracted:
             return None
 
-        return echoes_content
+        return "\n\n".join(extracted)
+
+    @staticmethod
+    def _parse_summary_metadata(
+        summary_text: str,
+        conversation_id: str,
+        user_id: str,
+        user_name: Optional[str],
+        message_count: int
+    ) -> Dict[str, Any]:
+        """
+        Parse LLM-generated metadata from summary and merge with system fields.
+
+        Extracts the JSON block from the ## Metadata section produced by the
+        summarizer LLM, then merges with known system fields (user_id, user_name,
+        conversation_id, timestamp, message_count).
+
+        Args:
+            summary_text: Full summary text containing ## Metadata section
+            conversation_id: Conversation identifier
+            user_id: User identifier
+            user_name: User's display name (from profile), or None
+            message_count: Number of messages in the conversation
+
+        Returns:
+            Merged metadata dictionary with system + LLM-generated fields
+        """
+        PST = timezone(timedelta(hours=-8))
+        metadata: Dict[str, Any] = {
+            "conversation_id": conversation_id,
+            "user_id": user_id,
+            "source": "session_summary",
+            "timestamp": datetime.now(PST).isoformat(),
+            "message_count": message_count,
+        }
+        if user_name:
+            metadata["user_name"] = user_name
+
+        # Parse the JSON block from ## Metadata section
+        try:
+            meta_start = summary_text.find("## Metadata")
+            if meta_start != -1:
+                json_start = summary_text.find("```json", meta_start)
+                json_end = summary_text.find("```", json_start + 7) if json_start != -1 else -1
+                if json_start != -1 and json_end != -1:
+                    json_str = summary_text[json_start + 7:json_end].strip()
+                    llm_metadata = json.loads(json_str)
+                    # Merge LLM-generated fields
+                    for key in ("topics", "mood", "category", "people_mentioned", "has_unresolved"):
+                        if key in llm_metadata:
+                            metadata[key] = llm_metadata[key]
+        except (json.JSONDecodeError, Exception) as e:
+            logger.debug(
+                "Could not parse LLM metadata (continuing without)",
+                extra={"error": str(e)}
+            )
+
+        return metadata
 
     async def _echo_summary_to_memories(
         self,
         conversation_id: str,
-        summary_text: str
+        summary_text: str,
+        messages: Optional[List[Dict[str, Any]]] = None
     ) -> None:
         """
-        Fire-and-forget: send the Echoes layer to agentic-memories for long-term recall.
+        Fire-and-forget: send long-term content to agentic-memories for recall.
 
-        The summary follows the Tiered Echo Model:
-        - Ripples (surface topics) stay in Redis context only — they fade naturally.
-        - Echoes (decisions, preferences, emotional moments) persist in agentic-memories.
-        - Imprints (identity patterns) are handled separately by the profile system.
-
-        Only the Echoes section is sent to long-term memory, not the full summary.
+        Extracts the "What was on their mind" and "What matters going forward"
+        sections for persistence, along with LLM-generated metadata (topics,
+        mood, category) and system fields (user_id, user_name, conversation_id).
 
         Args:
             conversation_id: Conversation identifier
-            summary_text: The full tiered summary text (with ## Ripples and ## Echoes)
+            summary_text: The full structured summary text
+            messages: Optional list of conversation messages (for message_count)
         """
         try:
-            from api.memory import MemoryManager
+            from api.memory_client import MemoryClient
 
             # Look up user_id for this conversation
             user_id = await self.get_user_id_for_conversation(conversation_id)
@@ -1417,31 +1506,59 @@ class StateManager:
                 )
                 return
 
-            # Extract just the Echoes layer for long-term storage
-            echoes = self._extract_echoes(summary_text)
-            if not echoes:
+            # Extract long-term content (mind + forward sections)
+            content = self._extract_long_term_content(summary_text)
+            if not content:
                 logger.debug(
-                    "No echoes to persist (informational exchange only)",
+                    "No long-term content to persist (casual conversation)",
                     extra={"conversation_id": conversation_id}
                 )
                 return
 
-            memory_manager = MemoryManager()
-            await memory_manager.store_conversation_memory(
-                user_id=user_id,
-                conversation_id=conversation_id,
-                conversation_history=[{
-                    "role": "assistant",
-                    "content": echoes
-                }]
+            # Load user_name from profile cache (non-blocking)
+            user_name = None
+            try:
+                from api.profile import ProfileManager
+                profile_mgr = ProfileManager(redis_client=self.redis_client)
+                profile = await profile_mgr.load_profile_from_cache(user_id)
+                if profile:
+                    user_name = profile.get("basics", {}).get("name")
+            except Exception:
+                pass  # non-blocking
+
+            # Build metadata with LLM-generated + system fields
+            metadata = self._parse_summary_metadata(
+                summary_text, conversation_id, user_id, user_name, len(messages or [])
             )
+
+            # Dynamic tags from LLM-generated metadata
+            tags = ["conversation_summary"]
+            if metadata.get("has_unresolved"):
+                tags.append("has_unresolved")
+            if metadata.get("category"):
+                tags.append(metadata["category"])
+            for topic in metadata.get("topics", []):
+                tags.append(topic)
+
+            # Store via direct API (no LLM extraction/fragmentation)
+            async with MemoryClient() as memory_client:
+                result = await memory_client.store_direct(
+                    user_id=user_id,
+                    content=content,
+                    layer="long-term",
+                    memory_type="explicit",
+                    tags=tags,
+                    metadata=metadata
+                )
             logger.info(
-                "Echoes persisted to agentic-memories",
+                "Summary persisted to agentic-memories",
                 extra={
                     "conversation_id": conversation_id,
                     "user_id": user_id,
-                    "echoes_length": len(echoes),
-                    "full_summary_length": len(summary_text)
+                    "memory_id": result.get("id"),
+                    "content_length": len(content),
+                    "full_summary_length": len(summary_text),
+                    "tags": tags
                 }
             )
         except Exception as e:

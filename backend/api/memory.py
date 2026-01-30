@@ -602,6 +602,64 @@ class MemoryManager:
                                     flush=True
                                 )
 
+                                # Generate summary and echo to agentic-memories before expiry
+                                try:
+                                    conversation_history = await state_manager.get_conversation_history(
+                                        conversation_id, limit=state_manager.MAX_MESSAGES
+                                    )
+                                    if len(conversation_history) >= 4:  # Skip trivial conversations
+                                        summary_text = await state_manager.get_or_create_summary(
+                                            conversation_id,
+                                            conversation_history,
+                                            len(conversation_history)
+                                        )
+                                        if summary_text:
+                                            logger.info(
+                                                "Summary generated on session flush",
+                                                extra={
+                                                    "conversation_id": conversation_id,
+                                                    "user_id": user_id,
+                                                    "summary_length": len(summary_text)
+                                                }
+                                            )
+                                            # Queue summary notification for Telegram delivery
+                                            # The proactive-worker drains this outbox each poll cycle
+                                            try:
+                                                from zoneinfo import ZoneInfo
+                                                pst_now = datetime.now(ZoneInfo("America/Los_Angeles"))
+                                                outbox_payload = json.dumps({
+                                                    "user_id": user_id,
+                                                    "message": f"<i>Session summarized and saved to memory.</i>\n\n<blockquote>{summary_text}</blockquote>",
+                                                    "trigger_id": f"session_flush:{conversation_id}",
+                                                    "is_html": True,
+                                                    "metadata": {
+                                                        "conversation_id": conversation_id,
+                                                        "user_id": user_id,
+                                                        "timestamp": pst_now.strftime("%Y-%m-%d %I:%M:%S %p %Z"),
+                                                    },
+                                                })
+                                                await state_manager.redis_client.rpush("telegram:outbox", outbox_payload)
+                                                logger.info(
+                                                    "Queued summary notification for Telegram delivery",
+                                                    extra={"conversation_id": conversation_id, "user_id": user_id}
+                                                )
+                                            except Exception as notify_err:
+                                                logger.warning(
+                                                    "Failed to queue summary notification (non-blocking)",
+                                                    extra={
+                                                        "conversation_id": conversation_id,
+                                                        "error": str(notify_err)
+                                                    }
+                                                )
+                                except Exception as e:
+                                    logger.warning(
+                                        "Failed to generate summary on session flush (non-blocking)",
+                                        extra={
+                                            "conversation_id": conversation_id,
+                                            "error": str(e)
+                                        }
+                                    )
+
                                 # Mark as flushed to avoid double-flush
                                 await state_manager.redis_client.setex(
                                     flush_marker_key,

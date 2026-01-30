@@ -410,6 +410,126 @@ class MemoryClient:
             # Graceful degradation: return empty list on HTTP error
             return []
 
+    async def store_direct(
+        self,
+        user_id: str,
+        content: str,
+        layer: str = "long-term",
+        memory_type: str = "explicit",
+        tags: Optional[list[str]] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Store a memory directly in agentic-memories without LLM extraction.
+
+        Content is stored as-is — no fragmentation or processing.
+        Use this for pre-processed content like conversation summaries.
+
+        Args:
+            user_id: User identifier
+            content: Memory content text (max 5000 chars)
+            layer: Memory layer: 'short-term', 'semantic', 'long-term' (default: 'long-term')
+            memory_type: Memory type: 'explicit' or 'implicit' (default: 'explicit')
+            tags: Optional list of tags for categorization
+            metadata: Optional metadata dict
+
+        Returns:
+            dict: Response from agentic-memories with memory ID
+
+        Raises:
+            MemoryNetworkError: If service is unreachable
+            MemoryAPIError: If API returns an error
+        """
+        start_time = time.time()
+        url = f"{self.memories_url}/v1/memories/direct"
+
+        try:
+            payload: Dict[str, Any] = {
+                "user_id": user_id,
+                "content": content,
+                "layer": layer,
+                "type": memory_type,
+            }
+            if tags:
+                payload["tags"] = tags
+            if metadata:
+                payload["metadata"] = metadata
+
+            logger.debug(
+                "Storing direct memory in agentic-memories",
+                extra={
+                    "user_id": user_id,
+                    "url": url,
+                    "content_length": len(content),
+                    "layer": layer
+                }
+            )
+
+            response = await self.client.post(url, json=payload)
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            if response.status_code not in (200, 201):
+                error_msg = f"HTTP {response.status_code}"
+                try:
+                    error_data = response.json()
+                    error_msg = error_data.get("detail", error_data.get("message", error_msg))
+                except Exception:
+                    error_msg = response.text or error_msg
+
+                logger.error(
+                    "Direct memory storage failed",
+                    extra={
+                        "user_id": user_id,
+                        "status_code": response.status_code,
+                        "error": error_msg,
+                        "duration_ms": duration_ms
+                    }
+                )
+                raise MemoryAPIError(
+                    message=error_msg,
+                    status_code=response.status_code,
+                    response_data=error_data if 'error_data' in locals() else None
+                )
+
+            response_data = response.json()
+
+            logger.info(
+                "Direct memory stored successfully",
+                extra={
+                    "user_id": user_id,
+                    "memory_id": response_data.get("id"),
+                    "layer": layer,
+                    "content_length": len(content),
+                    "duration_ms": duration_ms
+                }
+            )
+
+            return response_data
+
+        except httpx.TimeoutException as e:
+            duration_ms = int((time.time() - start_time) * 1000)
+            logger.error(
+                "Direct memory storage timed out",
+                extra={"user_id": user_id, "url": url, "duration_ms": duration_ms}
+            )
+            raise MemoryNetworkError(f"Request timed out after {self.timeout}s", original_error=e)
+
+        except (httpx.NetworkError, httpx.ConnectError) as e:
+            duration_ms = int((time.time() - start_time) * 1000)
+            logger.error(
+                "Failed to connect to agentic-memories for direct storage",
+                extra={"user_id": user_id, "url": url, "error": str(e), "duration_ms": duration_ms}
+            )
+            raise MemoryNetworkError(f"Failed to connect: {str(e)}", original_error=e)
+
+        except httpx.HTTPError as e:
+            duration_ms = int((time.time() - start_time) * 1000)
+            logger.error(
+                "HTTP error during direct memory storage",
+                extra={"user_id": user_id, "url": url, "error": str(e), "duration_ms": duration_ms}
+            )
+            raise MemoryNetworkError(f"HTTP error: {str(e)}", original_error=e)
+
     async def stream_message(
         self,
         conversation_id: str,

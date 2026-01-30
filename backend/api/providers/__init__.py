@@ -10,13 +10,14 @@ Available Providers:
 - GeminiProvider: Gemini 3 Pro implementation (Google AI API) - Story 9.2
 """
 
-from api.providers.base import BaseProvider
+from api.providers.base import BaseProvider, ContextLengthError
 from api.providers.grok_provider import GrokProvider, ProviderError, RateLimitError
 from api.providers.chatgpt_provider import ChatGPTProvider
 from api.providers.gemini_provider import GeminiProvider
 
 __all__ = [
     "BaseProvider",
+    "ContextLengthError",
     "GrokProvider",
     "ChatGPTProvider",
     "GeminiProvider",

@@ -17,7 +17,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 import httpx
 from api.config import get_config
 from api.logging import get_logger
-from api.providers.base import BaseProvider
+from api.providers.base import BaseProvider, ContextLengthError
 from api.observability.tracing import get_current_trace
 from api.observability.cost import calculate_llm_cost
 from api.utils import inject_user_id
@@ -301,6 +301,11 @@ class ChatGPTProvider(BaseProvider):
                         error_msg = error_data.get("error", {}).get("message", error_msg)
                     except Exception:
                         pass
+
+                    # Detect context window overflow
+                    error_lower = error_msg.lower()
+                    if "context_length_exceeded" in error_lower or "maximum context length" in error_lower:
+                        raise ContextLengthError("chatgpt-5", error_msg)
 
                     raise ProviderError("chatgpt-5", error_msg)
 
@@ -608,6 +613,10 @@ class ChatGPTProvider(BaseProvider):
 
         except RateLimitError:
             # Re-raise rate limit errors as-is
+            raise
+
+        except ContextLengthError:
+            # Re-raise context length errors as-is
             raise
 
         except Exception as e:

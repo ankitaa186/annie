@@ -322,95 +322,241 @@ class TestFormatMessagesForSummary:
         assert "Annie" not in result
         assert "User: Hello" in result
 
-    def test_long_content_truncated(self):
+    def test_long_user_content_not_truncated(self):
         long_content = "x" * 1000
         messages = [
             {"role": "user", "content": long_content}
         ]
         result = StateManager._format_messages_for_summary(messages)
+        assert "[truncated]" not in result
+        assert long_content in result
+
+    def test_long_assistant_content_truncated_at_20k(self):
+        long_content = "x" * 25000
+        messages = [
+            {"role": "assistant", "content": long_content}
+        ]
+        result = StateManager._format_messages_for_summary(messages)
         assert "[truncated]" in result
-        assert len(result) < 600  # 500 chars + label + truncation marker
+        assert len(result) < 20100  # 20000 chars + label + truncation marker
+
+    def test_long_tool_content_truncated_at_10k(self):
+        long_content = "x" * 15000
+        messages = [
+            {"role": "tool", "tool_name": "web_search", "content": long_content}
+        ]
+        result = StateManager._format_messages_for_summary(messages)
+        assert "[truncated]" in result
+        assert len(result) < 10100  # 10000 chars + label + truncation marker
 
 
 # =========================================================================
-# _extract_echoes tests (pure function)
+# _extract_long_term_content tests (pure function)
 # =========================================================================
 
-class TestExtractEchoes:
-    """Tests for extracting the Echoes layer from tiered summaries."""
+class TestExtractLongTermContent:
+    """Tests for extracting long-term content from structured summaries."""
 
-    def test_extracts_echoes_section(self):
-        summary = """## Ripples
-- User asked about NVDA stock price
-- web_search tool returned current price of $130
+    def test_extracts_both_sections(self):
+        summary = """## What was on their mind
+The user was stressed about their portfolio dropping and wanted reassurance about holding NVDA long-term.
 
-## Echoes
+## What we talked about
+- Checked NVDA stock price using web_search
+- Discussed long-term investment strategy
+- Reviewed portfolio diversification
+
+## What matters going forward
 - User decided to hold NVDA despite the dip, citing long-term conviction
 - User expressed preference for weekly portfolio updates rather than daily
+
+## Metadata
+```json
+{"topics": ["investing", "nvda"], "mood": "stressed", "category": "advice", "people_mentioned": [], "has_unresolved": false}
+```
 """
-        result = StateManager._extract_echoes(summary)
+        result = StateManager._extract_long_term_content(summary)
         assert result is not None
+        assert "stressed about their portfolio" in result
         assert "hold NVDA" in result
         assert "weekly portfolio updates" in result
-        # Should not contain ripples
+        # Should not contain "What we talked about" content
         assert "web_search" not in result
 
-    def test_strips_parenthetical_description(self):
-        summary = """## Ripples
-- Some ripple
-
-## Echoes
-(Deeper layer: decisions made, preferences expressed, emotional moments.)
-- Decided to invest in index funds
-"""
-        result = StateManager._extract_echoes(summary)
-        assert result is not None
-        assert "index funds" in result
-        assert "(Deeper layer" not in result
-
-    def test_returns_none_for_no_decisions(self):
-        summary = """## Ripples
-- User asked what time it is
-
-## Echoes
-No significant decisions or preferences expressed.
-"""
-        result = StateManager._extract_echoes(summary)
-        assert result is None
-
-    def test_returns_full_text_when_no_structure(self):
-        """Fallback: if no ## Echoes heading, return full text."""
-        summary = "User discussed stocks. Decided to hold NVDA."
-        result = StateManager._extract_echoes(summary)
-        assert result == summary
-
-    def test_returns_none_for_empty(self):
-        assert StateManager._extract_echoes("") is None
-        assert StateManager._extract_echoes(None) is None
-
-    def test_handles_echoes_at_end(self):
-        summary = """## Ripples
+    def test_extracts_forward_section_only(self):
+        """If 'What was on their mind' is missing, still extract forward section."""
+        summary = """## What we talked about
 - Discussed weather
 
-## Echoes
+## What matters going forward
 - User prefers morning notifications over evening
-- User is risk-averse with crypto investments"""
-        result = StateManager._extract_echoes(summary)
+"""
+        result = StateManager._extract_long_term_content(summary)
+        assert result is not None
         assert "morning notifications" in result
+
+    def test_extracts_mind_section_only(self):
+        """If forward section is casual, still extract mind section if substantive."""
+        summary = """## What was on their mind
+The user was dealing with a tough day at work and needed someone to talk to about their frustrations with their manager.
+
+## What we talked about
+- Vented about work situation
+
+## What matters going forward
+Nothing specific — casual conversation.
+"""
+        result = StateManager._extract_long_term_content(summary)
+        assert result is not None
+        assert "tough day at work" in result
+        # Forward section excluded because it's casual
+        assert "Nothing specific" not in result
+
+    def test_returns_none_for_casual_conversation(self):
+        """Both sections are casual/empty — nothing to persist."""
+        summary = """## What was on their mind
+Nothing specific — casual conversation.
+
+## What we talked about
+- Chatted about the weather
+
+## What matters going forward
+Nothing specific — casual conversation.
+"""
+        result = StateManager._extract_long_term_content(summary)
+        assert result is None
+
+    def test_returns_none_for_empty(self):
+        assert StateManager._extract_long_term_content("") is None
+        assert StateManager._extract_long_term_content(None) is None
+
+    def test_returns_none_when_no_structure(self):
+        """No recognized section headers — nothing to extract."""
+        summary = "User discussed stocks. Decided to hold NVDA."
+        result = StateManager._extract_long_term_content(summary)
+        assert result is None
+
+    def test_handles_forward_at_end_of_text(self):
+        summary = """## What was on their mind
+User was curious about crypto trends.
+
+## What we talked about
+- Looked up Bitcoin price
+
+## What matters going forward
+- User is risk-averse with crypto investments
+- Wants to revisit in a month"""
+        result = StateManager._extract_long_term_content(summary)
         assert "risk-averse" in result
+        assert "revisit in a month" in result
+        assert "curious about crypto" in result
 
-    def test_handles_extra_sections_after_echoes(self):
-        summary = """## Ripples
-- Topics discussed
+    def test_handles_metadata_after_forward_section(self):
+        summary = """## What was on their mind
+User wanted to plan a vacation.
 
-## Echoes
-- Made a key decision about portfolio allocation
+## What we talked about
+- Researched destinations
 
-## Notes
-- Some extra section"""
-        result = StateManager._extract_echoes(summary)
-        assert "portfolio allocation" in result
-        assert "extra section" not in result
+## What matters going forward
+- Made a key decision about vacation to Japan in March
+
+## Metadata
+```json
+{"topics": ["travel"], "mood": "excited", "category": "planning", "people_mentioned": [], "has_unresolved": false}
+```"""
+        result = StateManager._extract_long_term_content(summary)
+        assert "vacation to Japan" in result
+        # Should not include metadata section
+        assert "```json" not in result
+
+
+# =========================================================================
+# _parse_summary_metadata tests (pure function)
+# =========================================================================
+
+class TestParseSummaryMetadata:
+    """Tests for parsing LLM-generated metadata and merging with system fields."""
+
+    def test_parses_valid_metadata(self):
+        summary = """## What was on their mind
+User wanted advice.
+
+## Metadata
+```json
+{"topics": ["investing", "nvda"], "mood": "stressed", "category": "advice", "people_mentioned": ["Sarah"], "has_unresolved": true}
+```
+"""
+        result = StateManager._parse_summary_metadata(
+            summary, "conv_123", "user_456", "Ankit", 15
+        )
+        # System fields
+        assert result["conversation_id"] == "conv_123"
+        assert result["user_id"] == "user_456"
+        assert result["user_name"] == "Ankit"
+        assert result["source"] == "session_summary"
+        assert result["message_count"] == 15
+        assert "-08:00" in result["timestamp"]
+        # LLM fields
+        assert result["topics"] == ["investing", "nvda"]
+        assert result["mood"] == "stressed"
+        assert result["category"] == "advice"
+        assert result["people_mentioned"] == ["Sarah"]
+        assert result["has_unresolved"] is True
+
+    def test_handles_missing_metadata_section(self):
+        summary = """## What was on their mind
+User just chatted.
+"""
+        result = StateManager._parse_summary_metadata(
+            summary, "conv_1", "user_1", None, 5
+        )
+        # System fields present
+        assert result["conversation_id"] == "conv_1"
+        assert result["user_id"] == "user_1"
+        assert result["message_count"] == 5
+        # No LLM fields
+        assert "topics" not in result
+        assert "mood" not in result
+        # No user_name if None
+        assert "user_name" not in result
+
+    def test_handles_malformed_json_gracefully(self):
+        summary = """## Metadata
+```json
+{not valid json!!!}
+```
+"""
+        result = StateManager._parse_summary_metadata(
+            summary, "conv_2", "user_2", "Test", 3
+        )
+        # System fields still present
+        assert result["conversation_id"] == "conv_2"
+        assert result["user_id"] == "user_2"
+        assert result["user_name"] == "Test"
+        # No LLM fields (parsing failed gracefully)
+        assert "topics" not in result
+
+    def test_handles_partial_llm_metadata(self):
+        """Only some LLM fields present."""
+        summary = """## Metadata
+```json
+{"topics": ["stocks"], "mood": "neutral"}
+```
+"""
+        result = StateManager._parse_summary_metadata(
+            summary, "conv_3", "user_3", None, 10
+        )
+        assert result["topics"] == ["stocks"]
+        assert result["mood"] == "neutral"
+        assert "category" not in result
+        assert "has_unresolved" not in result
+
+    def test_user_name_omitted_when_none(self):
+        result = StateManager._parse_summary_metadata(
+            "no metadata", "conv_4", "user_4", None, 2
+        )
+        assert "user_name" not in result
 
 
 # =========================================================================
@@ -658,3 +804,244 @@ class TestBuildLLMContextSummarization:
         if tool_msgs:
             # The old tool result should have been pruned
             assert "_pruned" in tool_msgs[0] or "[Returned" in tool_msgs[0].get("content", "")
+
+
+# =========================================================================
+# _echo_summary_to_memories tests (verifies store_direct integration)
+# =========================================================================
+
+class TestEchoSummaryToMemories:
+    """Tests for _echo_summary_to_memories using store_direct."""
+
+    @pytest.mark.asyncio
+    async def test_echo_calls_store_direct_with_long_term_content(self):
+        """Should extract long-term content and call store_direct with correct params."""
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value="user_123")
+        mock_redis.ping = AsyncMock(return_value=True)
+
+        state = StateManager(redis_client=mock_redis)
+        state._is_healthy = True
+
+        summary = """## What was on their mind
+The user was stressed about their portfolio and wanted reassurance about holding NVDA.
+
+## What we talked about
+- Checked NVDA stock price using web_search
+- Discussed long-term investment strategy
+
+## What matters going forward
+- User decided to hold NVDA despite the dip, citing long-term conviction
+- User prefers weekly portfolio updates rather than daily
+
+## Metadata
+```json
+{"topics": ["investing", "nvda"], "mood": "stressed", "category": "advice", "people_mentioned": [], "has_unresolved": false}
+```
+"""
+        mock_store_direct = AsyncMock(return_value={"id": "mem_1"})
+        messages = [{"role": "user", "content": "msg"}] * 10
+
+        with patch("api.memory_client.MemoryClient") as MockClient:
+            mock_client_instance = AsyncMock()
+            mock_client_instance.store_direct = mock_store_direct
+            mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
+            mock_client_instance.__aexit__ = AsyncMock(return_value=False)
+            MockClient.return_value = mock_client_instance
+
+            with patch("api.profile.ProfileManager") as MockProfile:
+                mock_profile_instance = AsyncMock()
+                mock_profile_instance.load_profile_from_cache = AsyncMock(
+                    return_value={"basics": {"name": "Ankit"}}
+                )
+                MockProfile.return_value = mock_profile_instance
+
+                await state._echo_summary_to_memories("conv_abc", summary, messages)
+
+            # Verify store_direct was called
+            mock_store_direct.assert_called_once()
+            call_kwargs = mock_store_direct.call_args[1]
+            assert call_kwargs["user_id"] == "user_123"
+            assert "hold NVDA" in call_kwargs["content"]
+            assert "stressed about their portfolio" in call_kwargs["content"]
+            assert call_kwargs["layer"] == "long-term"
+            assert call_kwargs["memory_type"] == "explicit"
+            # Tags
+            assert "conversation_summary" in call_kwargs["tags"]
+            assert "advice" in call_kwargs["tags"]
+            assert "investing" in call_kwargs["tags"]
+            assert "nvda" in call_kwargs["tags"]
+            # Metadata
+            assert call_kwargs["metadata"]["conversation_id"] == "conv_abc"
+            assert call_kwargs["metadata"]["source"] == "session_summary"
+            assert call_kwargs["metadata"]["user_id"] == "user_123"
+            assert call_kwargs["metadata"]["user_name"] == "Ankit"
+            assert call_kwargs["metadata"]["message_count"] == 10
+            assert call_kwargs["metadata"]["mood"] == "stressed"
+            assert call_kwargs["metadata"]["category"] == "advice"
+            assert "-08:00" in call_kwargs["metadata"]["timestamp"]
+
+    @pytest.mark.asyncio
+    async def test_echo_skips_when_no_user_id(self):
+        """Should skip when no user_id mapping found."""
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=None)
+        mock_redis.ping = AsyncMock(return_value=True)
+
+        state = StateManager(redis_client=mock_redis)
+        state._is_healthy = True
+
+        with patch("api.memory_client.MemoryClient") as MockClient:
+            await state._echo_summary_to_memories(
+                "conv_no_user",
+                "## What matters going forward\n- Some decision"
+            )
+            MockClient.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_echo_skips_when_casual_conversation(self):
+        """Should skip when summary has no significant content."""
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value="user_123")
+        mock_redis.ping = AsyncMock(return_value=True)
+
+        state = StateManager(redis_client=mock_redis)
+        state._is_healthy = True
+
+        summary = """## What was on their mind
+Nothing specific — casual conversation.
+
+## What we talked about
+- Chatted about the weather
+
+## What matters going forward
+Nothing specific — casual conversation.
+"""
+        with patch("api.memory_client.MemoryClient") as MockClient:
+            await state._echo_summary_to_memories("conv_trivial", summary)
+            MockClient.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_echo_handles_store_direct_failure_gracefully(self):
+        """Should not raise on store_direct failure (fire-and-forget)."""
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value="user_123")
+        mock_redis.ping = AsyncMock(return_value=True)
+
+        state = StateManager(redis_client=mock_redis)
+        state._is_healthy = True
+
+        summary = """## What was on their mind
+User wanted to switch investment strategy.
+
+## What matters going forward
+- User decided to switch to index funds
+"""
+        with patch("api.memory_client.MemoryClient") as MockClient:
+            mock_client_instance = AsyncMock()
+            mock_client_instance.store_direct = AsyncMock(
+                side_effect=Exception("Network failure")
+            )
+            mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
+            mock_client_instance.__aexit__ = AsyncMock(return_value=False)
+            MockClient.return_value = mock_client_instance
+
+            with patch("api.profile.ProfileManager") as MockProfile:
+                mock_profile_instance = AsyncMock()
+                mock_profile_instance.load_profile_from_cache = AsyncMock(return_value=None)
+                MockProfile.return_value = mock_profile_instance
+
+                # Should not raise
+                await state._echo_summary_to_memories("conv_fail", summary)
+
+    @pytest.mark.asyncio
+    async def test_echo_excludes_talked_about_section(self):
+        """Should only store mind + forward sections, not 'What we talked about'."""
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value="user_123")
+        mock_redis.ping = AsyncMock(return_value=True)
+
+        state = StateManager(redis_client=mock_redis)
+        state._is_healthy = True
+
+        summary = """## What was on their mind
+User was curious about vacation destinations.
+
+## What we talked about
+- User asked about the weather in NYC
+- web_search tool returned forecast
+
+## What matters going forward
+- User expressed preference for sunny vacation destinations
+
+## Metadata
+```json
+{"topics": ["travel"], "mood": "curious", "category": "planning", "people_mentioned": [], "has_unresolved": false}
+```
+"""
+        mock_store_direct = AsyncMock(return_value={"id": "mem_2"})
+
+        with patch("api.memory_client.MemoryClient") as MockClient:
+            mock_client_instance = AsyncMock()
+            mock_client_instance.store_direct = mock_store_direct
+            mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
+            mock_client_instance.__aexit__ = AsyncMock(return_value=False)
+            MockClient.return_value = mock_client_instance
+
+            with patch("api.profile.ProfileManager") as MockProfile:
+                mock_profile_instance = AsyncMock()
+                mock_profile_instance.load_profile_from_cache = AsyncMock(return_value=None)
+                MockProfile.return_value = mock_profile_instance
+
+                await state._echo_summary_to_memories("conv_weather", summary)
+
+            content = mock_store_direct.call_args[1]["content"]
+            assert "sunny vacation" in content
+            assert "curious about vacation" in content
+            assert "weather in NYC" not in content
+            assert "web_search" not in content
+
+    @pytest.mark.asyncio
+    async def test_echo_dynamic_tags_from_metadata(self):
+        """Should generate dynamic tags from LLM metadata."""
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value="user_123")
+        mock_redis.ping = AsyncMock(return_value=True)
+
+        state = StateManager(redis_client=mock_redis)
+        state._is_healthy = True
+
+        summary = """## What was on their mind
+User needed help with a work problem that's been bugging them.
+
+## What matters going forward
+- Decided to talk to manager about workload
+- Left unresolved: whether to ask for a raise
+
+## Metadata
+```json
+{"topics": ["work", "career"], "mood": "frustrated", "category": "advice", "people_mentioned": ["manager"], "has_unresolved": true}
+```
+"""
+        mock_store_direct = AsyncMock(return_value={"id": "mem_3"})
+
+        with patch("api.memory_client.MemoryClient") as MockClient:
+            mock_client_instance = AsyncMock()
+            mock_client_instance.store_direct = mock_store_direct
+            mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
+            mock_client_instance.__aexit__ = AsyncMock(return_value=False)
+            MockClient.return_value = mock_client_instance
+
+            with patch("api.profile.ProfileManager") as MockProfile:
+                mock_profile_instance = AsyncMock()
+                mock_profile_instance.load_profile_from_cache = AsyncMock(return_value=None)
+                MockProfile.return_value = mock_profile_instance
+
+                await state._echo_summary_to_memories("conv_work", summary)
+
+            tags = mock_store_direct.call_args[1]["tags"]
+            assert "conversation_summary" in tags
+            assert "has_unresolved" in tags
+            assert "advice" in tags
+            assert "work" in tags
+            assert "career" in tags

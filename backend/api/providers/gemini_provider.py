@@ -13,7 +13,7 @@ import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from api.config import get_config
 from api.logging import get_logger
-from api.providers.base import BaseProvider
+from api.providers.base import BaseProvider, ContextLengthError
 from api.providers.grok_provider import ProviderError, RateLimitError
 from api.providers.gemini_tool_adapter import GeminiToolAdapter
 from api.observability.tracing import get_current_trace
@@ -1106,8 +1106,20 @@ class GeminiProvider(BaseProvider):
                         return
 
                 except Exception as e:
-                    # Check for quota/rate limit errors
                     error_str = str(e).lower()
+
+                    # Check for context window overflow
+                    if ("resource_exhausted" in error_str or "resource exhausted" in error_str) and ("token" in error_str and "limit" in error_str):
+                        logger.warning(
+                            "Gemini context length exceeded",
+                            extra={
+                                "provider": self.model_name,
+                                "error": str(e)
+                            }
+                        )
+                        raise ContextLengthError(self.model_name, str(e), e)
+
+                    # Check for quota/rate limit errors
                     if "quota" in error_str or "resource exhausted" in error_str or "429" in error_str:
                         logger.warning(
                             "Gemini quota/rate limit exceeded",
@@ -1139,6 +1151,10 @@ class GeminiProvider(BaseProvider):
 
         except RateLimitError:
             # Re-raise rate limit errors as-is
+            raise
+
+        except ContextLengthError:
+            # Re-raise context length errors as-is
             raise
 
         except Exception as e:

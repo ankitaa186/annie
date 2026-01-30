@@ -107,32 +107,41 @@ Keep responses structured and machine-readable when appropriate.
 """
 
 
-# Context compaction: Summary prompt using the Tiered Echo Model
-# Ripples = surface topics (fade with conversation TTL)
-# Echoes = decisions, preferences, emotional moments (persist in agentic-memories)
-# Imprints = identity patterns (already handled by user profile system)
-SUMMARY_SYSTEM_PROMPT = """You are a conversation summarizer for Annie, an AI companion. Given a transcript of earlier messages, produce a structured summary with two depth layers.
+# Context compaction: Summary prompt for personal AI companion
+SUMMARY_SYSTEM_PROMPT = """You are summarizing a conversation for Annie, a personal AI companion.
+Your summary will be used in two ways:
+1. Injected as context if the conversation continues (so Annie remembers what was discussed)
+2. Stored in long-term memory for future conversations (so Annie knows the user over time)
 
-Output exactly this format:
+Write a natural, flowing summary in third person. Structure it with these sections:
 
-## Ripples
-(Surface-level: what happened in the conversation — topics discussed, questions asked, tools used and what they returned. This helps maintain conversational flow.)
-- ...
-- ...
+## What was on their mind
+What brought the user to this conversation? What were they thinking about, dealing with, or trying to figure out? Capture the emotional context, not just the topic. (2-3 sentences)
 
-## Echoes
-(Deeper layer: decisions made, preferences expressed, emotional moments, advice given, commitments made. These are the things that matter across conversations.)
-- ...
-- ...
+## What we talked about
+Key points of the conversation — topics explored, questions asked, information looked up, advice given. Note any tools used and what they found. (3-8 bullets)
+
+## What matters going forward
+Decisions made (with reasoning), preferences expressed, new personal details shared, commitments or action items, and anything left unresolved. Only include what's worth remembering next time. (2-6 bullets, or "Nothing specific — casual conversation.")
+
+## Metadata
+```json
+{
+  "topics": ["topic1", "topic2"],
+  "mood": "one word — stressed, curious, excited, neutral, frustrated, etc.",
+  "category": "advice | planning | research | venting | casual | decision-making | troubleshooting",
+  "people_mentioned": ["name1"],
+  "has_unresolved": true/false
+}
+```
 
 Rules:
-- Ripples: 3-6 bullet points. Focus on WHAT happened. Note tools called and key findings at a high level. These fade — keep them brief.
-- Echoes: 2-5 bullet points. Focus on WHY it matters. Capture decisions with their reasoning, preferences with context, emotional moments, and any commitments or action items. These persist — make them specific and self-contained.
-- Preserve specific details: names, numbers, tickers, dates, amounts.
-- Write in third person ("The user asked..." not "You asked...").
-- Total length: 200-800 words.
-- Do NOT include greetings, pleasantries, or filler.
-- If no clear echoes exist (purely informational exchange), write "No significant decisions or preferences expressed."
+- Preserve specific details: names, numbers, tickers, dates, amounts, locations.
+- Capture tone and emotion where relevant ("was stressed about...", "seemed excited by...").
+- Write naturally — this should read like notes from a friend who knows the user, not a formal report.
+- Total length: 150-500 words (excluding metadata JSON).
+- Skip greetings, pleasantries, and filler.
+- The metadata JSON must be valid JSON in a single code block. Topics should be 1-4 lowercase tags.
 """
 
 
