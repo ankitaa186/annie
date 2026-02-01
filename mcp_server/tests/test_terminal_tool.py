@@ -2,6 +2,7 @@
 Tests for Terminal Command Execution Tool
 
 Tests cover:
+- Admin authorization check
 - Handler function with user_id parameter
 - Successful command execution via proxy
 - Error handling (timeout, connection, general errors)
@@ -17,6 +18,114 @@ from mcp_server.tools.terminal import (
     execute_command_tool,
     HOST_TERMINAL_URL,
 )
+from mcp_server.config import is_admin
+
+
+class TestIsAdminFunction:
+    """Tests for is_admin function in config."""
+
+    def test_is_admin_with_admin_user(self):
+        """Admin user returns True."""
+        with patch("mcp_server.config.ADMIN_USER_IDS", {"123", "456"}):
+            # Need to reimport to get patched value
+            from mcp_server import config
+            config.ADMIN_USER_IDS = {"123", "456"}
+            assert config.is_admin("123") is True
+            assert config.is_admin("456") is True
+
+    def test_is_admin_with_non_admin_user(self):
+        """Non-admin user returns False."""
+        with patch("mcp_server.config.ADMIN_USER_IDS", {"123"}):
+            from mcp_server import config
+            config.ADMIN_USER_IDS = {"123"}
+            assert config.is_admin("999") is False
+
+    def test_is_admin_with_empty_user_id(self):
+        """Empty user_id returns False."""
+        assert is_admin("") is False
+        assert is_admin(None) is False
+
+    def test_is_admin_with_empty_admin_list(self):
+        """Empty admin list means no one is admin."""
+        with patch("mcp_server.config.ADMIN_USER_IDS", set()):
+            from mcp_server import config
+            config.ADMIN_USER_IDS = set()
+            assert config.is_admin("123") is False
+
+    def test_is_admin_strips_whitespace(self):
+        """User ID with whitespace is handled correctly."""
+        with patch("mcp_server.config.ADMIN_USER_IDS", {"123"}):
+            from mcp_server import config
+            config.ADMIN_USER_IDS = {"123"}
+            assert config.is_admin(" 123 ") is True
+
+
+class TestAdminAuthorization:
+    """Tests for admin authorization check."""
+
+    @pytest.mark.asyncio
+    async def test_non_admin_user_rejected(self):
+        """Non-admin user receives UNAUTHORIZED error."""
+        with patch("mcp_server.tools.terminal.is_admin", return_value=False):
+            result = await execute_command_tool_handler(
+                command="ls",
+                user_id="non_admin_user",
+            )
+
+            assert result["status"] == "error"
+            assert result["error_code"] == "UNAUTHORIZED"
+            assert "admin users only" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_admin_user_allowed(self):
+        """Admin user can execute commands."""
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"status": "success", "stdout": "output"}
+        mock_response.raise_for_status = MagicMock()
+
+        with patch("mcp_server.tools.terminal.is_admin", return_value=True), \
+             patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = None
+            mock_client.post.return_value = mock_response
+            mock_client_class.return_value = mock_client
+
+            result = await execute_command_tool_handler(
+                command="ls",
+                user_id="admin_user",
+            )
+
+            assert result["status"] == "success"
+
+    @pytest.mark.asyncio
+    async def test_empty_user_id_rejected(self):
+        """Empty user_id is rejected."""
+        with patch("mcp_server.tools.terminal.is_admin", return_value=False):
+            result = await execute_command_tool_handler(
+                command="ls",
+                user_id="",
+            )
+
+            assert result["status"] == "error"
+            assert result["error_code"] == "UNAUTHORIZED"
+
+    @pytest.mark.asyncio
+    async def test_unauthorized_attempt_logged(self):
+        """Unauthorized access attempts are logged."""
+        with patch("mcp_server.tools.terminal.is_admin", return_value=False), \
+             patch("mcp_server.tools.terminal.logger") as mock_logger:
+            await execute_command_tool_handler(
+                command="rm -rf /",
+                user_id="hacker_123",
+            )
+
+            mock_logger.warning.assert_called_once()
+            call_args = mock_logger.warning.call_args
+            assert "Unauthorized" in call_args.args[0]
+            extra = call_args.kwargs.get("extra", {})
+            assert extra["user_id"] == "hacker_123"
+            assert extra["command"] == "rm -rf /"
 
 
 class TestExecuteCommandHandler:
@@ -34,7 +143,8 @@ class TestExecuteCommandHandler:
         }
         mock_response.raise_for_status = MagicMock()
 
-        with patch("httpx.AsyncClient") as mock_client_class:
+        with patch("mcp_server.tools.terminal.is_admin", return_value=True), \
+             patch("httpx.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -63,7 +173,8 @@ class TestExecuteCommandHandler:
         }
         mock_response.raise_for_status = MagicMock()
 
-        with patch("httpx.AsyncClient") as mock_client_class:
+        with patch("mcp_server.tools.terminal.is_admin", return_value=True), \
+             patch("httpx.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -90,7 +201,8 @@ class TestExecuteCommandHandler:
         mock_response.json.return_value = {"status": "success"}
         mock_response.raise_for_status = MagicMock()
 
-        with patch("httpx.AsyncClient") as mock_client_class, \
+        with patch("mcp_server.tools.terminal.is_admin", return_value=True), \
+             patch("httpx.AsyncClient") as mock_client_class, \
              patch("mcp_server.tools.terminal.logger") as mock_logger:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
@@ -116,7 +228,8 @@ class TestErrorHandling:
     @pytest.mark.asyncio
     async def test_timeout_error(self):
         """Timeout returns appropriate error message."""
-        with patch("httpx.AsyncClient") as mock_client_class:
+        with patch("mcp_server.tools.terminal.is_admin", return_value=True), \
+             patch("httpx.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -134,7 +247,8 @@ class TestErrorHandling:
     @pytest.mark.asyncio
     async def test_connection_error(self):
         """Connection error returns helpful message."""
-        with patch("httpx.AsyncClient") as mock_client_class:
+        with patch("mcp_server.tools.terminal.is_admin", return_value=True), \
+             patch("httpx.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -153,7 +267,8 @@ class TestErrorHandling:
     @pytest.mark.asyncio
     async def test_general_exception(self):
         """General exception returns error string."""
-        with patch("httpx.AsyncClient") as mock_client_class:
+        with patch("mcp_server.tools.terminal.is_admin", return_value=True), \
+             patch("httpx.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
@@ -185,7 +300,8 @@ class TestToolSchema:
     def test_tool_has_admin_restriction(self):
         """Tool description mentions admin restriction."""
         desc = execute_command_tool["description"]
-        assert "admin" in desc.lower() or "YOUR_USER_ID" in desc
+        assert "admin" in desc.lower()
+        assert "ADMIN_USER_IDS" in desc
 
     def test_tool_has_input_schema(self):
         """Tool has inputSchema with correct structure."""

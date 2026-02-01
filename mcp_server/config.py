@@ -76,6 +76,29 @@ SENSITIVE_VARS = [
 ]
 
 
+# Admin User IDs (for elevated privileges like terminal access)
+# Comma-separated list of Telegram user IDs
+ADMIN_USER_IDS_RAW = os.getenv("ADMIN_USER_IDS", "")
+ADMIN_USER_IDS: set = set(
+    uid.strip() for uid in ADMIN_USER_IDS_RAW.split(",") if uid.strip()
+)
+
+
+def is_admin(user_id: str) -> bool:
+    """
+    Check if a user has admin privileges.
+
+    Args:
+        user_id: The user ID to check (as string)
+
+    Returns:
+        True if user is an admin, False otherwise
+    """
+    if not user_id:
+        return False
+    return str(user_id).strip() in ADMIN_USER_IDS
+
+
 # Epic 16: Home Assistant Configuration
 # These are loaded at module level for easy access by HA tools
 HA_URL = os.getenv("HA_URL", "")

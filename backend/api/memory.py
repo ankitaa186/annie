@@ -607,7 +607,11 @@ class MemoryManager:
                                     conversation_history = await state_manager.get_conversation_history(
                                         conversation_id, limit=state_manager.MAX_MESSAGES
                                     )
-                                    if len(conversation_history) >= 4:  # Skip trivial conversations
+                                    # Count only user messages (not tool calls/results)
+                                    user_message_count = sum(
+                                        1 for msg in conversation_history if msg.get("role") == "user"
+                                    )
+                                    if user_message_count >= 3:  # Skip single-question conversations
                                         summary_text = await state_manager.get_or_create_summary(
                                             conversation_id,
                                             conversation_history,
@@ -619,6 +623,8 @@ class MemoryManager:
                                                 extra={
                                                     "conversation_id": conversation_id,
                                                     "user_id": user_id,
+                                                    "user_message_count": user_message_count,
+                                                    "total_messages": len(conversation_history),
                                                     "summary_length": len(summary_text)
                                                 }
                                             )

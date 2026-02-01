@@ -96,6 +96,7 @@ services:
       - BROWSER_SERVICE_URL=http://browser:8003
       # Host Terminal (host-terminal-mcp HTTP bridge)
       - HOST_TERMINAL_URL=${HOST_TERMINAL_URL:-http://host.docker.internal:8099}
+      - ADMIN_USER_IDS=${ADMIN_USER_IDS:-YOUR_USER_ID}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:

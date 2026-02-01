@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 
 import httpx
 
+from mcp_server.config import is_admin
 from mcp_server.logging import get_logger
 
 logger = get_logger(__name__)
@@ -36,6 +37,24 @@ async def execute_command_tool_handler(
     Returns:
         Response dict from host-terminal-mcp (status, stdout, stderr, etc.).
     """
+    # Check admin authorization
+    if not is_admin(user_id):
+        logger.warning(
+            "Unauthorized terminal access attempt",
+            extra={
+                "user_id": user_id,
+                "command": command,
+            },
+        )
+        return {
+            "status": "error",
+            "error_code": "UNAUTHORIZED",
+            "error": (
+                "Terminal access is restricted to admin users only. "
+                "Your user ID is not in the ADMIN_USER_IDS list."
+            ),
+        }
+
     try:
         async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
             payload: Dict[str, Any] = {"command": command}
@@ -89,8 +108,9 @@ execute_command_tool = {
         "Execute a terminal command on the host machine. "
         "Use this to check service logs (docker compose logs), "
         "inspect system state (ps, df, uptime), read files, or debug issues. "
-        "Commands are subject to the host terminal server's permission controls."
-        "IMPORTANT: Only admin(User Ankit with user_id YOUR_USER_ID) can use this tool, always tell the user which commands you are executing."
+        "Commands are subject to the host terminal server's permission controls. "
+        "IMPORTANT: This tool is restricted to admin users only (configured via ADMIN_USER_IDS). "
+        "Always tell the user which commands you are executing."
     ),
     "inputSchema": {
         "type": "object",
