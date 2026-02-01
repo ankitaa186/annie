@@ -591,7 +591,7 @@ class TestStoreDirect:
                 content="User decided to hold NVDA despite the dip",
                 layer="long-term",
                 memory_type="explicit",
-                tags=["conversation_summary", "echoes"],
+                persona_tags=["conversation_summary", "echoes"],
                 metadata={"conversation_id": "conv_789", "source": "session_flush_summary"}
             )
 
@@ -606,7 +606,7 @@ class TestStoreDirect:
             assert payload["content"] == "User decided to hold NVDA despite the dip"
             assert payload["layer"] == "long-term"
             assert payload["type"] == "explicit"
-            assert payload["tags"] == ["conversation_summary", "echoes"]
+            assert payload["persona_tags"] == ["conversation_summary", "echoes"]
             assert payload["metadata"]["conversation_id"] == "conv_789"
 
     @pytest.mark.asyncio

@@ -864,13 +864,13 @@ The user was stressed about their portfolio and wanted reassurance about holding
             assert call_kwargs["user_id"] == "user_123"
             assert "hold NVDA" in call_kwargs["content"]
             assert "stressed about their portfolio" in call_kwargs["content"]
-            assert call_kwargs["layer"] == "long-term"
+            assert call_kwargs["layer"] == "episodic"
             assert call_kwargs["memory_type"] == "explicit"
             # Tags
-            assert "conversation_summary" in call_kwargs["tags"]
-            assert "advice" in call_kwargs["tags"]
-            assert "investing" in call_kwargs["tags"]
-            assert "nvda" in call_kwargs["tags"]
+            assert "conversation_summary" in call_kwargs["persona_tags"]
+            assert "advice" in call_kwargs["persona_tags"]
+            assert "investing" in call_kwargs["persona_tags"]
+            assert "nvda" in call_kwargs["persona_tags"]
             # Metadata
             assert call_kwargs["metadata"]["conversation_id"] == "conv_abc"
             assert call_kwargs["metadata"]["source"] == "session_summary"
@@ -1039,7 +1039,7 @@ User needed help with a work problem that's been bugging them.
 
                 await state._echo_summary_to_memories("conv_work", summary)
 
-            tags = mock_store_direct.call_args[1]["tags"]
+            tags = mock_store_direct.call_args[1]["persona_tags"]
             assert "conversation_summary" in tags
             assert "has_unresolved" in tags
             assert "advice" in tags

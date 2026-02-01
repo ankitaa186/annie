@@ -157,7 +157,7 @@ async def gather_dynamic_state(user_id: str, timezone: str = "America/Los_Angele
             logger.warning(f"Failed to get last activity from Redis: {e}")
             hours_since = 24.0  # Default on error
         finally:
-            await redis_client.aclose()
+            await redis_client.close()
 
         # Get recent conversation summary from agentic-memories
         # Uses 24h lookback for tone adjustment

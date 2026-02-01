@@ -370,7 +370,7 @@ async def check_proactive_worker_health() -> Dict[str, Any]:
         )
 
         heartbeat_json = await redis_client.get(HEARTBEAT_KEY)
-        await redis_client.aclose()
+        await redis_client.close()
 
         if not heartbeat_json:
             return {

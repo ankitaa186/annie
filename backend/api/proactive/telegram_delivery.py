@@ -383,7 +383,7 @@ class TelegramDelivery:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async context manager exit - cleanup resources."""
         if self._should_close_redis and self.redis_client:
-            await self.redis_client.aclose()
+            await self.redis_client.close()
 
     @observe(name="send_proactive_message", as_type="span")
     async def send_proactive_message(

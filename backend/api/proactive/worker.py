@@ -624,7 +624,7 @@ async def update_heartbeat() -> None:
             "worker": "proactive-worker"
         })
         await redis_client.set(HEARTBEAT_KEY, heartbeat_data, ex=HEARTBEAT_TTL)
-        await redis_client.aclose()
+        await redis_client.close()
     except Exception as e:
         logger.warning(f"Failed to update heartbeat: {e}")
 
@@ -638,7 +638,7 @@ async def check_heartbeat() -> bool:
             decode_responses=True
         )
         heartbeat_json = await redis_client.get(HEARTBEAT_KEY)
-        await redis_client.aclose()
+        await redis_client.close()
 
         if not heartbeat_json:
             return False
@@ -824,7 +824,7 @@ async def poll_triggers(ctx: Dict[str, Any]) -> None:
             if outbox_count:
                 logger.info("Drained telegram outbox", extra={"delivered": outbox_count})
         finally:
-            await outbox_redis.aclose()
+            await outbox_redis.close()
 
         # Fetch all pending intents (no filter)
         pending = await intents_client.get_pending()
