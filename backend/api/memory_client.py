@@ -416,8 +416,16 @@ class MemoryClient:
         content: str,
         layer: str = "long-term",
         memory_type: str = "explicit",
-        tags: Optional[list[str]] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        persona_tags: Optional[list[str]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        importance: Optional[float] = None,
+        confidence: Optional[float] = None,
+        event_timestamp: Optional[str] = None,
+        participants: Optional[list[str]] = None,
+        event_type: Optional[str] = None,
+        emotional_state: Optional[str] = None,
+        valence: Optional[float] = None,
+        arousal: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         Store a memory directly in agentic-memories without LLM extraction.
@@ -428,10 +436,19 @@ class MemoryClient:
         Args:
             user_id: User identifier
             content: Memory content text (max 5000 chars)
-            layer: Memory layer: 'short-term', 'semantic', 'long-term' (default: 'long-term')
+            layer: Memory layer: 'short-term', 'semantic', 'long-term',
+                   'episodic', 'procedural', 'emotional'
             memory_type: Memory type: 'explicit' or 'implicit' (default: 'explicit')
-            tags: Optional list of tags for categorization
+            persona_tags: Optional tags for categorization (max 10)
             metadata: Optional metadata dict
+            importance: Importance score 0.0-1.0 (default: server decides)
+            confidence: Confidence score 0.0-1.0 (default: server decides)
+            event_timestamp: ISO8601 timestamp — routes to episodic_memories table
+            participants: People involved in the event
+            event_type: Type of event (e.g. 'conversation', 'meeting')
+            emotional_state: Primary emotion — routes to emotional_memories table
+            valence: Emotional valence -1.0 (negative) to 1.0 (positive)
+            arousal: Emotional arousal 0.0 (calm) to 1.0 (intense)
 
         Returns:
             dict: Response from agentic-memories with memory ID
@@ -450,10 +467,26 @@ class MemoryClient:
                 "layer": layer,
                 "type": memory_type,
             }
-            if tags:
-                payload["tags"] = tags
+            if persona_tags:
+                payload["persona_tags"] = persona_tags
             if metadata:
                 payload["metadata"] = metadata
+            if importance is not None:
+                payload["importance"] = importance
+            if confidence is not None:
+                payload["confidence"] = confidence
+            if event_timestamp:
+                payload["event_timestamp"] = event_timestamp
+            if participants:
+                payload["participants"] = participants
+            if event_type:
+                payload["event_type"] = event_type
+            if emotional_state:
+                payload["emotional_state"] = emotional_state
+            if valence is not None:
+                payload["valence"] = valence
+            if arousal is not None:
+                payload["arousal"] = arousal
 
             logger.debug(
                 "Storing direct memory in agentic-memories",

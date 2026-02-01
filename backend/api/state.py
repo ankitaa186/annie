@@ -19,7 +19,7 @@ import json
 import os
 import time
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import redis.asyncio as redis
@@ -1444,12 +1444,13 @@ class StateManager:
         Returns:
             Merged metadata dictionary with system + LLM-generated fields
         """
-        PST = timezone(timedelta(hours=-8))
+        from zoneinfo import ZoneInfo
+        pst_now = datetime.now(ZoneInfo("America/Los_Angeles"))
         metadata: Dict[str, Any] = {
             "conversation_id": conversation_id,
             "user_id": user_id,
             "source": "session_summary",
-            "timestamp": datetime.now(PST).isoformat(),
+            "timestamp": pst_now.isoformat(),
             "message_count": message_count,
         }
         if user_name:
@@ -1464,10 +1465,22 @@ class StateManager:
                 if json_start != -1 and json_end != -1:
                     json_str = summary_text[json_start + 7:json_end].strip()
                     llm_metadata = json.loads(json_str)
-                    # Merge LLM-generated fields
-                    for key in ("topics", "mood", "category", "people_mentioned", "has_unresolved"):
+                    # Merge LLM-generated fields (ensure lists stay as lists)
+                    for key in ("mood", "category", "has_unresolved"):
                         if key in llm_metadata:
                             metadata[key] = llm_metadata[key]
+                    # List fields — defensive: parse if LLM returned a string
+                    for key in ("topics", "people_mentioned"):
+                        val = llm_metadata.get(key)
+                        if val is None:
+                            continue
+                        if isinstance(val, str):
+                            try:
+                                val = json.loads(val)
+                            except (json.JSONDecodeError, ValueError):
+                                val = [val]
+                        if isinstance(val, list):
+                            metadata[key] = val
         except (json.JSONDecodeError, Exception) as e:
             logger.debug(
                 "Could not parse LLM metadata (continuing without)",
@@ -1476,6 +1489,30 @@ class StateManager:
 
         return metadata
 
+    # Importance by category — decisions/planning are more valuable than casual chat
+    _IMPORTANCE_BY_CATEGORY: Dict[str, float] = {
+        "decision-making": 0.95,
+        "planning": 0.9,
+        "advice": 0.85,
+        "troubleshooting": 0.85,
+        "research": 0.8,
+        "venting": 0.7,
+        "casual": 0.5,
+    }
+
+    # Valence by mood — rough mapping for emotional memory routing
+    _VALENCE_BY_MOOD: Dict[str, float] = {
+        "excited": 0.8,
+        "happy": 0.7,
+        "curious": 0.5,
+        "neutral": 0.0,
+        "stressed": -0.4,
+        "frustrated": -0.6,
+        "anxious": -0.5,
+        "sad": -0.7,
+        "angry": -0.8,
+    }
+
     async def _echo_summary_to_memories(
         self,
         conversation_id: str,
@@ -1483,11 +1520,19 @@ class StateManager:
         messages: Optional[List[Dict[str, Any]]] = None
     ) -> None:
         """
-        Fire-and-forget: send long-term content to agentic-memories for recall.
+        Fire-and-forget: send episodic memory to agentic-memories for recall.
 
         Extracts the "What was on their mind" and "What matters going forward"
         sections for persistence, along with LLM-generated metadata (topics,
         mood, category) and system fields (user_id, user_name, conversation_id).
+
+        Uses the full DirectMemoryRequest schema:
+        - layer=episodic (conversations are events, not static facts)
+        - persona_tags for filterable tags
+        - event_timestamp to route into episodic_memories table
+        - emotional_state/valence from mood for emotional_memories table
+        - participants from people_mentioned
+        - importance scaled by category
 
         Args:
             conversation_id: Conversation identifier
@@ -1531,24 +1576,51 @@ class StateManager:
                 summary_text, conversation_id, user_id, user_name, len(messages or [])
             )
 
-            # Dynamic tags from LLM-generated metadata
-            tags = ["conversation_summary"]
+            # Build deduplicated persona_tags from metadata
+            tag_set: dict[str, None] = {}  # ordered set via dict keys
+            tag_set["conversation_summary"] = None
             if metadata.get("has_unresolved"):
-                tags.append("has_unresolved")
+                tag_set["has_unresolved"] = None
             if metadata.get("category"):
-                tags.append(metadata["category"])
+                tag_set[metadata["category"]] = None
             for topic in metadata.get("topics", []):
-                tags.append(topic)
+                tag_set[topic] = None
+            persona_tags = list(tag_set)[:10]  # API max is 10
 
-            # Store via direct API (no LLM extraction/fragmentation)
+            # Dynamic importance based on category
+            category = metadata.get("category", "casual")
+            importance = self._IMPORTANCE_BY_CATEGORY.get(category, 0.7)
+            if metadata.get("has_unresolved"):
+                importance = min(importance + 0.1, 1.0)
+
+            # Emotional fields from mood
+            mood = metadata.get("mood")
+            emotional_state = mood if mood and mood != "neutral" else None
+            valence = self._VALENCE_BY_MOOD.get(mood, None) if mood else None
+
+            # Participants from people_mentioned
+            people = metadata.get("people_mentioned", [])
+            participants = people if people else None
+
+            # Event timestamp (ISO8601) — routes to episodic_memories table
+            event_timestamp = metadata.get("timestamp")
+
+            # Store via direct API with full typed fields
             async with MemoryClient() as memory_client:
                 result = await memory_client.store_direct(
                     user_id=user_id,
                     content=content,
-                    layer="long-term",
+                    layer="episodic",
                     memory_type="explicit",
-                    tags=tags,
-                    metadata=metadata
+                    persona_tags=persona_tags,
+                    metadata=metadata,
+                    importance=importance,
+                    confidence=0.9,
+                    event_timestamp=event_timestamp,
+                    participants=participants,
+                    event_type="conversation",
+                    emotional_state=emotional_state,
+                    valence=valence,
                 )
             logger.info(
                 "Summary persisted to agentic-memories",
@@ -1558,7 +1630,10 @@ class StateManager:
                     "memory_id": result.get("id"),
                     "content_length": len(content),
                     "full_summary_length": len(summary_text),
-                    "tags": tags
+                    "layer": "episodic",
+                    "persona_tags": persona_tags,
+                    "importance": importance,
+                    "emotional_state": emotional_state,
                 }
             )
         except Exception as e:
