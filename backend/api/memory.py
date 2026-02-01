@@ -624,12 +624,13 @@ class MemoryManager:
                                             )
                                             # Queue summary notification for Telegram delivery
                                             # The proactive-worker drains this outbox each poll cycle
+                                            #"message": f"<i>Session summarized and saved to memory.</i>\n\n<blockquote>{summary_text}</blockquote>",
                                             try:
                                                 from zoneinfo import ZoneInfo
                                                 pst_now = datetime.now(ZoneInfo("America/Los_Angeles"))
                                                 outbox_payload = json.dumps({
                                                     "user_id": user_id,
-                                                    "message": f"<i>Session summarized and saved to memory.</i>\n\n<blockquote>{summary_text}</blockquote>",
+                                                    "message": f"<i>Session summarized and saved to memory.</i>\n",
                                                     "trigger_id": f"session_flush:{conversation_id}",
                                                     "is_html": True,
                                                     "metadata": {
