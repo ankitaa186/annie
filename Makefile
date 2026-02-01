@@ -1,7 +1,7 @@
 # Annie Makefile
 # Development commands for managing Annie services
 
-.PHONY: help install venv test test-unit test-integration test-backend test-mcp test-telegram coverage start stop logs clean clean-venv clean-all rebuild restart health shell check-loki lint format format-check gh gh-read gh-diff gh-write gh-update
+.PHONY: help install venv test test-unit test-integration test-backend test-mcp test-telegram coverage start stop logs clean clean-venv clean-all rebuild restart health shell check-loki lint format format-check gh gh-read gh-diff gh-write gh-update terminal-start terminal-stop terminal-logs
 
 # Detect Docker Compose command (v2 or v1)
 COMPOSE_CMD := $(shell if docker compose version >/dev/null 2>&1; then echo "docker compose"; else echo "docker-compose"; fi)
@@ -39,6 +39,9 @@ help: ## Show this help message
 	@echo ""
 	@echo "  Docker:"
 	@grep -E '^(logs|rebuild|restart|health|shell):.*## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "    \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@echo ""
+	@echo "  Host Terminal:"
+	@grep -E '^terminal[a-zA-Z0-9_-]*:.*## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "    \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "  GitHub (use ENV=prod for production):"
 	@grep -E '^gh[a-zA-Z0-9_-]*:.*## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "    \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -82,6 +85,8 @@ start: ## Start all Docker services
 stop: ## Stop all Docker services (use ENV=prod for production)
 	@echo "Stopping Annie services..."
 	@$(COMPOSE_CMD) $(COMPOSE_FILES) down
+	@echo "Stopping host-terminal-mcp..."
+	@pkill -f "host-terminal-mcp" 2>/dev/null || true
 	@echo "Services stopped."
 
 clean: ## Clean up Docker resources and caches
@@ -235,3 +240,37 @@ gh-upload: ## Upload local .env to GitHub (local → GitHub)
 
 gh-write: ## Write all .env values to GitHub (creates & overwrites)
 	@python3 scripts/github_env.py write --env $(ENV)
+
+# ============================================================
+# HOST TERMINAL MCP
+# ============================================================
+
+terminal-start: ## Start host-terminal-mcp server
+	@echo "Starting host-terminal-mcp..."
+	@pkill -f "host-terminal-mcp" 2>/dev/null || true
+	@sleep 1
+	@if command -v uv >/dev/null 2>&1; then \
+		uv tool install --force 'host-terminal-mcp[http]' >/dev/null 2>&1; \
+		PORT=$${HOST_TERMINAL_PORT:-8099}; \
+		MODE=$${HOST_TERMINAL_MODE:-allowlist}; \
+		nohup host-terminal-mcp --http --port $$PORT --mode $$MODE > /tmp/host-terminal-mcp.log 2>&1 & \
+		sleep 2; \
+		if curl -s "http://localhost:$$PORT/health" >/dev/null 2>&1; then \
+			echo "✓ host-terminal-mcp running on port $$PORT (mode: $$MODE)"; \
+		else \
+			echo "✗ Failed to start. Check /tmp/host-terminal-mcp.log"; \
+		fi; \
+	else \
+		echo "Error: uv not installed. Install with: curl -LsSf https://astral.sh/uv/install.sh | sh"; \
+	fi
+
+terminal-stop: ## Stop host-terminal-mcp server
+	@echo "Stopping host-terminal-mcp..."
+	@pkill -f "host-terminal-mcp" 2>/dev/null && echo "✓ Stopped" || echo "Not running"
+
+terminal-logs: ## View host-terminal-mcp logs
+	@if [ -f /tmp/host-terminal-mcp.log ]; then \
+		tail -f /tmp/host-terminal-mcp.log; \
+	else \
+		echo "No log file found at /tmp/host-terminal-mcp.log"; \
+	fi

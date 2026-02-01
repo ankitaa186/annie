@@ -202,6 +202,65 @@ validate_prod_env() {
     echo -e "${GREEN}✓ LOKI_URL configured${NC}"
 }
 
+# Function: Manage host-terminal-mcp server (for execute_command tool)
+manage_host_terminal_mcp() {
+    echo ""
+    echo -e "${GREEN}Managing host-terminal-mcp server...${NC}"
+    
+    # Configuration
+    HOST_TERMINAL_PORT="${HOST_TERMINAL_PORT:-8099}"
+    HOST_TERMINAL_MODE="${HOST_TERMINAL_MODE:-allowlist}"
+    HOST_TERMINAL_LOG="/tmp/host-terminal-mcp.log"
+    
+    # Stop any existing host-terminal-mcp processes
+    if pgrep -f "host-terminal-mcp" > /dev/null 2>&1; then
+        echo -e "${YELLOW}Stopping existing host-terminal-mcp server...${NC}"
+        pkill -f "host-terminal-mcp" 2>/dev/null || true
+        sleep 1
+        # Force kill if still running
+        if pgrep -f "host-terminal-mcp" > /dev/null 2>&1; then
+            pkill -9 -f "host-terminal-mcp" 2>/dev/null || true
+            sleep 1
+        fi
+        echo -e "${GREEN}✓ Stopped existing server${NC}"
+    fi
+    
+    # Check if uv is available
+    if ! command -v uv &> /dev/null; then
+        echo -e "${YELLOW}Warning: uv not installed, skipping host-terminal-mcp${NC}"
+        echo "Install uv: curl -LsSf https://astral.sh/uv/install.sh | sh"
+        echo "Then restart Annie to enable terminal access"
+        return 0
+    fi
+    
+    # Install/update host-terminal-mcp with HTTP extras
+    echo "Installing/updating host-terminal-mcp..."
+    if uv tool install --force 'host-terminal-mcp[http]' > /dev/null 2>&1; then
+        echo -e "${GREEN}✓ host-terminal-mcp installed/updated${NC}"
+    else
+        echo -e "${YELLOW}Warning: Failed to install host-terminal-mcp${NC}"
+        echo "Terminal command execution will be unavailable"
+        return 0
+    fi
+    
+    # Start server in background
+    echo "Starting host-terminal-mcp on port $HOST_TERMINAL_PORT (mode: $HOST_TERMINAL_MODE)..."
+    nohup host-terminal-mcp --http --port "$HOST_TERMINAL_PORT" --mode "$HOST_TERMINAL_MODE" > "$HOST_TERMINAL_LOG" 2>&1 &
+    
+    # Wait for server to start
+    sleep 2
+    
+    # Verify server is running
+    if curl -s "http://localhost:$HOST_TERMINAL_PORT/health" > /dev/null 2>&1; then
+        echo -e "${GREEN}✓ host-terminal-mcp running on port $HOST_TERMINAL_PORT${NC}"
+        echo "  Log file: $HOST_TERMINAL_LOG"
+    else
+        echo -e "${YELLOW}Warning: host-terminal-mcp may not have started correctly${NC}"
+        echo "  Check log: $HOST_TERMINAL_LOG"
+        echo "  Terminal command execution may be unavailable"
+    fi
+}
+
 # Function: Start Docker services
 start_services() {
     echo ""
@@ -246,6 +305,9 @@ main() {
         check_loki_plugin
         validate_prod_env
     fi
+
+    # Start host-terminal-mcp server (runs on host, not in Docker)
+    manage_host_terminal_mcp
 
     # Start services with any additional arguments passed to script
     start_services "$@"
