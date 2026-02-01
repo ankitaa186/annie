@@ -123,6 +123,12 @@ from .browser import (
     browser_action_handler,
 )
 
+# Terminal Command Execution Tool (host-terminal-mcp proxy)
+from .terminal import (
+    execute_command_tool,
+    execute_command_tool_handler,
+)
+
 # Home Assistant Tools (Epic 16 - Stories 16.1, 16.2, 16.6)
 from .home_assistant import (
     home_assistant_query_tool,
@@ -236,6 +242,10 @@ __all__ = [
     # Browser Automation
     "browser_action_tool",
     "browser_action_handler",
+
+    # Terminal
+    "execute_command_tool",
+    "execute_command_tool_handler",
 
     # Home Assistant
     "home_assistant_query_tool",

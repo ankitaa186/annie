@@ -94,6 +94,8 @@ services:
       - HA_TIMEOUT=${HA_TIMEOUT:-10}
       # Browser Automation
       - BROWSER_SERVICE_URL=http://browser:8003
+      # Host Terminal (host-terminal-mcp HTTP bridge)
+      - HOST_TERMINAL_URL=${HOST_TERMINAL_URL:-http://host.docker.internal:8099}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
@@ -194,7 +196,7 @@ services:
       backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:80/health"]
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:80/health"]
       interval: 30s
       timeout: 10s
       retries: 3
