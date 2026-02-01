@@ -19,7 +19,7 @@ logger = get_logger(__name__)
 HOST_TERMINAL_URL = os.getenv("HOST_TERMINAL_URL", "http://host.docker.internal:8099")
 
 # Timeout slightly above host-terminal-mcp's 300s default
-_HTTP_TIMEOUT = 135.0
+_HTTP_TIMEOUT = 305.0
 
 
 async def execute_command_tool_handler(
