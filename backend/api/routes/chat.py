@@ -311,6 +311,7 @@ async def create_chat(
             user_id=http_request.state.user_id,
             platform=request.platform,
             message=request.message,
+            conversation_id=request.conversation_id,
             context=request.context,
             files=request.files
         )

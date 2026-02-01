@@ -28,6 +28,32 @@ RATE_LIMIT_REQUESTS = 60  # requests per window
 RATE_LIMIT_WINDOW = 60     # window in seconds (1 minute)
 RATE_LIMIT_KEY_PREFIX = "ratelimit"
 
+# Module-level shared Redis client, initialised once on first use.
+_shared_redis: Optional[redis.Redis] = None
+
+
+def _get_shared_redis() -> redis.Redis:
+    """Return the module-level shared Redis client, creating it on first call."""
+    global _shared_redis
+    if _shared_redis is None:
+        try:
+            config = get_config()
+            redis_host = config.get("REDIS_HOST", "redis")
+            redis_port = int(config.get("REDIS_PORT", 6379))
+        except Exception:
+            redis_host = "redis"
+            redis_port = 6379
+
+        _shared_redis = redis.Redis(
+            host=redis_host,
+            port=redis_port,
+            db=0,
+            decode_responses=True,
+            socket_connect_timeout=2,
+            socket_timeout=2,
+        )
+    return _shared_redis
+
 
 class RateLimiter:
     """
@@ -193,39 +219,36 @@ async def rate_limit_middleware(request: Request, call_next):
         # No auth - skip rate limiting (rely on CF rate limits)
         return await call_next(request)
 
-    # Apply rate limiting
-    rate_limiter = RateLimiter()
-    try:
-        is_limited, remaining, retry_after = await rate_limiter.is_rate_limited(user_id)
+    # Apply rate limiting using the shared Redis connection
+    rate_limiter = RateLimiter(redis_client=_get_shared_redis())
 
-        if is_limited:
-            return JSONResponse(
-                status_code=429,
-                content={
-                    "error": {
-                        "code": "RATE_LIMITED",
-                        "message": "Too many requests. Please slow down.",
-                        "retry_after": retry_after,
-                        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-                    }
-                },
-                headers={
-                    "Retry-After": str(retry_after),
-                    "X-RateLimit-Limit": str(RATE_LIMIT_REQUESTS),
-                    "X-RateLimit-Remaining": "0",
-                    "X-RateLimit-Reset": str(int(time.time()) + retry_after)
+    is_limited, remaining, retry_after = await rate_limiter.is_rate_limited(user_id)
+
+    if is_limited:
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": {
+                    "code": "RATE_LIMITED",
+                    "message": "Too many requests. Please slow down.",
+                    "retry_after": retry_after,
+                    "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                 }
-            )
+            },
+            headers={
+                "Retry-After": str(retry_after),
+                "X-RateLimit-Limit": str(RATE_LIMIT_REQUESTS),
+                "X-RateLimit-Remaining": "0",
+                "X-RateLimit-Reset": str(int(time.time()) + retry_after)
+            }
+        )
 
-        # Process request and add rate limit headers to response
-        response = await call_next(request)
+    # Process request and add rate limit headers to response
+    response = await call_next(request)
 
-        # Add rate limit headers to response
-        response.headers["X-RateLimit-Limit"] = str(RATE_LIMIT_REQUESTS)
-        response.headers["X-RateLimit-Remaining"] = str(remaining)
-        response.headers["X-RateLimit-Reset"] = str(int(time.time()) + RATE_LIMIT_WINDOW)
+    # Add rate limit headers to response
+    response.headers["X-RateLimit-Limit"] = str(RATE_LIMIT_REQUESTS)
+    response.headers["X-RateLimit-Remaining"] = str(remaining)
+    response.headers["X-RateLimit-Reset"] = str(int(time.time()) + RATE_LIMIT_WINDOW)
 
-        return response
-
-    finally:
-        await rate_limiter.close()
+    return response
