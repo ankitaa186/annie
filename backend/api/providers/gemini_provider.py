@@ -7,16 +7,18 @@ safety filter handling, function calling, and Langfuse tracing integration.
 
 import json
 import time
+import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional
 import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from api.config import get_config
 from api.logging import get_logger
-from api.providers.base import BaseProvider
+from api.providers.base import BaseProvider, ContextLengthError
 from api.providers.grok_provider import ProviderError, RateLimitError
 from api.providers.gemini_tool_adapter import GeminiToolAdapter
 from api.observability.tracing import get_current_trace
 from api.observability.cost import calculate_llm_cost
+from api.utils import inject_user_id
 
 logger = get_logger(__name__)
 
@@ -349,7 +351,6 @@ class GeminiProvider(BaseProvider):
             # Track metrics
             first_token = True
             first_token_time = None
-            token_count = 0
             accumulated_content = []
 
             # Get current trace for Langfuse
@@ -425,6 +426,9 @@ class GeminiProvider(BaseProvider):
                 }
             )
 
+            malformed_retries = 0  # Track MALFORMED_FUNCTION_CALL retries (cap: 3)
+            MAX_MALFORMED_RETRIES = 3
+
             while tool_iteration < self.max_tool_iterations:
                 # Generate streaming response using ChatSession
                 try:
@@ -443,6 +447,7 @@ class GeminiProvider(BaseProvider):
 
                     # Track ALL function calls in this iteration (parallel tool calling support)
                     function_calls = []  # List of {name, args} dicts
+                    token_count = 0  # Reset per iteration for accurate retry detection
 
                     # Debug: Track raw chunk data for MALFORMED_FUNCTION_CALL diagnosis
                     raw_chunk_data = []  # Accumulate for debugging if needed
@@ -779,6 +784,25 @@ class GeminiProvider(BaseProvider):
                         # Execute ALL tools via MCP client
                         tool_results = []
 
+                        # Generate stable IDs for persistence tracking
+                        tool_call_ids = [
+                            f"gemini_{uuid.uuid4().hex[:8]}"
+                            for _ in function_calls
+                        ]
+
+                        # Emit persistence event: batch of tool calls
+                        yield {
+                            "type": "tool_persist_calls",
+                            "tool_calls": [
+                                {
+                                    "id": tool_call_ids[i],
+                                    "name": fc["name"],
+                                    "arguments": json.dumps(fc["args"])
+                                }
+                                for i, fc in enumerate(function_calls)
+                            ]
+                        }
+
                         for idx, func_call in enumerate(function_calls, 1):
                             # Log tool execution with position indicator
                             logger.info(
@@ -814,6 +838,14 @@ class GeminiProvider(BaseProvider):
                                     "tool": func_call["name"],
                                     "result_summary": result_summary
                                 }
+
+                            # Emit persistence event: individual tool result
+                            yield {
+                                "type": "tool_persist_result",
+                                "tool_name": func_call["name"],
+                                "tool_call_id": tool_call_ids[idx - 1],
+                                "result_content": json.dumps(tool_result)
+                            }
 
                             # Format function response for Gemini
                             formatted_result = self.tool_adapter.format_tool_result_for_gemini(
@@ -915,8 +947,10 @@ class GeminiProvider(BaseProvider):
                                 "I wasn't able to generate a response. Please try again or rephrase your request."
                             )
 
-                            # For MALFORMED_FUNCTION_CALL, log detailed diagnostic info
+                            # For MALFORMED_FUNCTION_CALL, retry before giving up
                             if fr_value == 10:
+                                malformed_retries += 1
+
                                 # Extract tool names for debugging
                                 tool_names = []
                                 if gemini_tools:
@@ -934,12 +968,32 @@ class GeminiProvider(BaseProvider):
                                 # Get last chunk which should have the finish_reason
                                 last_chunk = raw_chunk_data[-1] if raw_chunk_data else {}
 
+                                if malformed_retries <= MAX_MALFORMED_RETRIES:
+                                    logger.warning(
+                                        f"MALFORMED_FUNCTION_CALL detected - retrying "
+                                        f"({malformed_retries}/{MAX_MALFORMED_RETRIES})",
+                                        extra={
+                                            "provider": self.model_name,
+                                            "tool_iteration": tool_iteration,
+                                            "malformed_retry": malformed_retries,
+                                            "max_malformed_retries": MAX_MALFORMED_RETRIES,
+                                            "message_count": len(messages),
+                                            "tool_count": len(gemini_tools) if gemini_tools else 0,
+                                            "chunk_count": len(raw_chunk_data),
+                                            "last_chunk": last_chunk,
+                                        }
+                                    )
+                                    tool_iteration += 1
+                                    continue  # Re-enter loop, re-send same message
+
+                                # Exhausted retries — log full diagnostic and fall through to error
                                 logger.error(
-                                    "MALFORMED_FUNCTION_CALL detected - Gemini failed to generate valid function call. "
+                                    "MALFORMED_FUNCTION_CALL detected - all retries exhausted. "
                                     "RAW CHUNK DATA LOGGED FOR DIAGNOSIS.",
                                     extra={
                                         "provider": self.model_name,
                                         "tool_iteration": tool_iteration,
+                                        "malformed_retries_exhausted": malformed_retries,
                                         "message_count": len(messages),
                                         "last_user_content": messages[-1].get("content", "")[:500] if messages else None,
                                         "tool_count": len(gemini_tools) if gemini_tools else 0,
@@ -1052,8 +1106,20 @@ class GeminiProvider(BaseProvider):
                         return
 
                 except Exception as e:
-                    # Check for quota/rate limit errors
                     error_str = str(e).lower()
+
+                    # Check for context window overflow
+                    if ("resource_exhausted" in error_str or "resource exhausted" in error_str) and ("token" in error_str and "limit" in error_str):
+                        logger.warning(
+                            "Gemini context length exceeded",
+                            extra={
+                                "provider": self.model_name,
+                                "error": str(e)
+                            }
+                        )
+                        raise ContextLengthError(self.model_name, str(e), e)
+
+                    # Check for quota/rate limit errors
                     if "quota" in error_str or "resource exhausted" in error_str or "429" in error_str:
                         logger.warning(
                             "Gemini quota/rate limit exceeded",
@@ -1085,6 +1151,10 @@ class GeminiProvider(BaseProvider):
 
         except RateLimitError:
             # Re-raise rate limit errors as-is
+            raise
+
+        except ContextLengthError:
+            # Re-raise context length errors as-is
             raise
 
         except Exception as e:
@@ -1124,20 +1194,10 @@ class GeminiProvider(BaseProvider):
             from api.mcp_client import MCPClient, MCPNetworkError, MCPToolError
 
             # Inject correct user_id to override any LLM-inferred value
-            # This prevents the LLM from using wrong user_ids (e.g., inferring "ankit" from profile name)
-            if user_id and "user_id" in tool_arguments:
-                original_user_id = tool_arguments.get("user_id")
-                if original_user_id != user_id:
-                    logger.warning(
-                        "Overriding LLM-provided user_id with correct value",
-                        extra={
-                            "provider": self.model_name,
-                            "tool_name": tool_name,
-                            "original_user_id": original_user_id,
-                            "correct_user_id": user_id
-                        }
-                    )
-                tool_arguments["user_id"] = user_id
+            inject_user_id(
+                tool_arguments, user_id, logger,
+                {"provider": self.model_name, "tool_name": tool_name}
+            )
 
             logger.info(
                 "Executing MCP tool for Gemini",

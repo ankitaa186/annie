@@ -426,7 +426,7 @@ class TestWebCrawlFallback:
                     "provider": "jina",
                     "url": "https://example.com",
                     "title": "Fallback Title",
-                    "content": "Fallback content",
+                    "content": "A" * 250,
                     "metadata": {},
                     "truncated": False
                 }
@@ -457,7 +457,7 @@ class TestWebCrawlFallback:
                     "provider": "jina",
                     "url": "https://example.com",
                     "title": "Fallback Title",
-                    "content": "Fallback content",
+                    "content": "A" * 250,
                     "metadata": {},
                     "truncated": False
                 }
@@ -472,21 +472,24 @@ class TestWebCrawlFallback:
 
     @pytest.mark.asyncio
     async def test_both_providers_fail(self):
-        """Test error when both providers fail."""
+        """Test error when all providers fail."""
         with patch("mcp_server.tools.web_crawl._crawl4ai_fetch") as mock_crawl4ai:
             mock_crawl4ai.side_effect = Exception("crawl4ai failed")
 
             with patch("mcp_server.tools.web_crawl._jina_reader_fetch") as mock_jina:
                 mock_jina.side_effect = Exception("jina failed")
 
-                result = await web_crawl_tool_handler(
-                    url="https://example.com",
-                    max_length=10000
-                )
+                with patch("mcp_server.tools.web_crawl._browser_fetch") as mock_browser:
+                    mock_browser.side_effect = Exception("browser failed")
 
-                assert result["status"] == "error"
-                assert result["provider"] is None
-                assert "Failed to fetch URL" in result["error_message"]
+                    result = await web_crawl_tool_handler(
+                        url="https://example.com",
+                        max_length=10000
+                    )
+
+                    assert result["status"] == "error"
+                    assert result["provider"] is None
+                    assert "All providers failed" in result["error_message"]
 
     @pytest.mark.asyncio
     async def test_invalid_url_no_fallback(self):
@@ -530,7 +533,7 @@ class TestWebCrawlFallback:
                 "provider": "crawl4ai",
                 "url": "https://example.com",
                 "title": "Test Page",
-                "content": "Test content",
+                "content": "A" * 250,
                 "metadata": {"links_count": 5},
                 "truncated": False
             }

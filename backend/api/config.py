@@ -222,6 +222,14 @@ def validate_environment() -> dict:
             # Invalid provider - just ignore it (don't log to avoid recursive loop)
             pass
 
+    # Load summary-specific LLM provider (optional, falls back to default provider)
+    # Used for context compaction summarization when conversations exceed token limits
+    summary_provider = get_env_var("SUMMARY_LLM_PROVIDER")
+    if summary_provider and summary_provider != "REPLACE_ME":
+        valid_providers = ["grok-4", "chatgpt-5", "gemini-3-pro-preview"]
+        if summary_provider in valid_providers:
+            config["SUMMARY_LLM_PROVIDER"] = summary_provider
+
     # Load optional LLM keys (may be set even if not primary provider)
     grok_key = get_env_var("GROK_API_KEY")
     if grok_key and grok_key != "REPLACE_ME":

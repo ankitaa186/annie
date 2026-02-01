@@ -17,9 +17,10 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 import httpx
 from api.config import get_config
 from api.logging import get_logger
-from api.providers.base import BaseProvider
+from api.providers.base import BaseProvider, ContextLengthError
 from api.observability.tracing import get_current_trace
 from api.observability.cost import calculate_llm_cost
+from api.utils import inject_user_id
 
 logger = get_logger(__name__)
 
@@ -301,6 +302,11 @@ class ChatGPTProvider(BaseProvider):
                     except Exception:
                         pass
 
+                    # Detect context window overflow
+                    error_lower = error_msg.lower()
+                    if "context_length_exceeded" in error_lower or "maximum context length" in error_lower:
+                        raise ContextLengthError("chatgpt-5", error_msg)
+
                     raise ProviderError("chatgpt-5", error_msg)
 
                 # Track metrics
@@ -437,18 +443,10 @@ class ChatGPTProvider(BaseProvider):
                                             if mcp_client:
                                                 try:
                                                     # Inject correct user_id to override LLM-inferred value
-                                                    if user_id and "user_id" in args:
-                                                        if args.get("user_id") != user_id:
-                                                            logger.warning(
-                                                                "Overriding LLM-provided user_id with correct value",
-                                                                extra={
-                                                                    "provider": "chatgpt-5",
-                                                                    "tool_name": tool_name,
-                                                                    "original_user_id": args.get("user_id"),
-                                                                    "correct_user_id": user_id
-                                                                }
-                                                            )
-                                                        args["user_id"] = user_id
+                                                    inject_user_id(
+                                                        args, user_id, logger,
+                                                        {"provider": "chatgpt-5", "tool_name": tool_name}
+                                                    )
                                                     result = await mcp_client.call_tool(tool_name, args)
                                                     result_str = json.dumps(result) if isinstance(result, (dict, list)) else str(result)
 
@@ -615,6 +613,10 @@ class ChatGPTProvider(BaseProvider):
 
         except RateLimitError:
             # Re-raise rate limit errors as-is
+            raise
+
+        except ContextLengthError:
+            # Re-raise context length errors as-is
             raise
 
         except Exception as e:

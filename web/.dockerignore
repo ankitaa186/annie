@@ -1,0 +1,40 @@
+# Dependencies
+node_modules
+
+# Build output (we build fresh in container)
+dist
+
+# Development files
+.env
+.env.local
+.env.*.local
+*.log
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Documentation
+*.md
+!README.md
+
+# Test files
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
+__tests__
+coverage

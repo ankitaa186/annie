@@ -15,6 +15,7 @@ from api.logging import get_logger
 from api.models.file_attachment import FileAttachment, get_files_metadata
 from api.providers import (
     BaseProvider,
+    ContextLengthError,
     GrokProvider,
     ChatGPTProvider,
     GeminiProvider,  # Story 9.2
@@ -152,6 +153,7 @@ class LLMClientError(Exception):
 __all__ = [
     "LLMClient",
     "LLMClientError",
+    "ContextLengthError",
     "ProviderError",
     "RateLimitError"
 ]
@@ -325,13 +327,16 @@ class LLMClient:
         tools: Optional[List[Dict[str, Any]]] = None,
         mcp_client=None,
         files: Optional[List[FileAttachment]] = None,
-        user_id: Optional[str] = None
+        user_id: Optional[str] = None,
+        conversation_id: Optional[str] = None,
+        state_manager=None
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Send streaming chat completion request with automatic provider failover.
 
         This method delegates to the provider's stream_chat_completion implementation.
         If the primary provider fails, it automatically falls back to the alternative provider.
+        On context-length errors, it compacts the context via summarization and retries.
 
         Args:
             messages: List of message dictionaries with 'role' and 'content'
@@ -340,6 +345,8 @@ class LLMClient:
             mcp_client: MCP client instance for tool execution (required if tools provided)
             files: Optional list of file attachments for multimodal processing
             user_id: Optional user ID to inject into tool calls (prevents LLM from using wrong IDs)
+            conversation_id: Optional conversation ID for context compaction on overflow
+            state_manager: Optional StateManager for generating summaries on overflow
 
         Yields:
             Stream event dictionaries:
@@ -395,6 +402,45 @@ class LLMClient:
                 async for event in self.provider.stream_chat_completion(messages, tools, mcp_client=mcp_client, files=files, user_id=user_id):
                     yield event
                 return  # Successfully completed streaming
+
+            except ContextLengthError as e:
+                # Context too long — compact and retry before falling back
+                logger.warning(
+                    "Context too long, compacting via summary and retrying",
+                    extra={
+                        "provider": provider_name,
+                        "error": str(e),
+                        "conversation_id": conversation_id,
+                        "event": "context_overflow_recovery"
+                    }
+                )
+                messages = await self._compact_context(
+                    messages, conversation_id, state_manager
+                )
+
+                # Retry with compacted context on same provider
+                try:
+                    async for event in self.provider.stream_chat_completion(messages, tools, mcp_client=mcp_client, files=files, user_id=user_id):
+                        yield event
+                    return
+                except (ContextLengthError, ProviderError) as retry_e:
+                    logger.warning(
+                        "Compacted retry failed on primary provider",
+                        extra={
+                            "provider": provider_name,
+                            "fallback_provider": fallback_name,
+                            "error": str(retry_e)
+                        }
+                    )
+                    # If no fallback available, yield error now
+                    if not fallback_name:
+                        yield {
+                            "type": "error",
+                            "message": "I'm experiencing technical difficulties. Please try again in a moment.",
+                            "code": "CONTEXT_OVERFLOW_NO_FALLBACK"
+                        }
+                        return
+                    # Otherwise fall through to fallback with compacted messages
 
             except RateLimitError as e:
                 # Set backoff for this provider
@@ -532,6 +578,70 @@ class LLMClient:
                 "message": "I'm experiencing technical difficulties. Please try again in a moment.",
                 "code": "ALL_PROVIDERS_FAILED"
             }
+
+    async def _compact_context(
+        self,
+        messages: List[Dict[str, Any]],
+        conversation_id: Optional[str],
+        state_manager
+    ) -> List[Dict[str, Any]]:
+        """
+        Aggressively reduce context size by summarizing older messages.
+
+        Splits messages into system messages (kept as-is), older non-system
+        messages (summarized), and recent non-system messages (kept raw).
+
+        Args:
+            messages: Original message list that was too long
+            conversation_id: Conversation ID for cached summary lookup
+            state_manager: StateManager instance for summary generation
+
+        Returns:
+            Compacted message list
+        """
+        system_msgs = [m for m in messages if m.get("role") == "system"]
+        non_system = [m for m in messages if m.get("role") != "system"]
+
+        keep_recent = min(6, len(non_system))
+        to_summarize = non_system[:-keep_recent] if keep_recent and len(non_system) > keep_recent else []
+        recent = non_system[-keep_recent:] if keep_recent else non_system
+
+        # Try LLM-based summarization if state_manager available
+        summary_text = None
+        if to_summarize and state_manager and conversation_id:
+            try:
+                summary_text = await state_manager.get_or_create_summary(
+                    conversation_id, to_summarize, len(non_system)
+                )
+            except Exception as e:
+                logger.warning(
+                    "Summary generation failed during overflow recovery",
+                    extra={"conversation_id": conversation_id, "error": str(e)}
+                )
+
+        if summary_text:
+            summary_msg = {
+                "role": "system",
+                "content": f"[Earlier conversation summary]\n{summary_text}"
+            }
+            compacted = system_msgs + [summary_msg] + recent
+        else:
+            # No summary available — brute force: keep only recent messages
+            compacted = system_msgs + recent
+
+        logger.info(
+            "Context compacted for overflow recovery",
+            extra={
+                "original_count": len(messages),
+                "compacted_count": len(compacted),
+                "summarized_count": len(to_summarize),
+                "kept_recent": keep_recent,
+                "has_summary": summary_text is not None,
+                "conversation_id": conversation_id
+            }
+        )
+
+        return compacted
 
     async def chat_completion(
         self,

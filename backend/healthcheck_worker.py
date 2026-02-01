@@ -32,7 +32,7 @@ async def check_heartbeat() -> bool:
         )
 
         heartbeat_json = await redis_client.get(HEARTBEAT_KEY)
-        await redis_client.aclose()
+        await redis_client.close()
 
         if not heartbeat_json:
             print("No heartbeat found")

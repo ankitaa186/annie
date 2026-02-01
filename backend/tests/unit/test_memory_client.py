@@ -568,3 +568,147 @@ class TestStreamMessage:
                 )
 
             assert "HTTP error" in str(exc_info.value)
+
+
+class TestStoreDirect:
+    """Test store_direct method for direct memory storage."""
+
+    @pytest.mark.asyncio
+    async def test_store_direct_success(self, memory_client):
+        """Test successful direct memory storage."""
+        mock_response = Mock()
+        mock_response.status_code = 201
+        mock_response.json.return_value = {
+            "id": "mem_direct_123",
+            "status": "created"
+        }
+
+        with patch.object(memory_client.client, 'post', new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = mock_response
+
+            result = await memory_client.store_direct(
+                user_id="user_456",
+                content="User decided to hold NVDA despite the dip",
+                layer="long-term",
+                memory_type="explicit",
+                persona_tags=["conversation_summary", "echoes"],
+                metadata={"conversation_id": "conv_789", "source": "session_flush_summary"}
+            )
+
+            assert result["id"] == "mem_direct_123"
+
+            # Verify POST was called correctly
+            mock_post.assert_called_once()
+            call_args = mock_post.call_args
+            assert call_args[0][0] == "http://test-memories:8080/v1/memories/direct"
+            payload = call_args[1]["json"]
+            assert payload["user_id"] == "user_456"
+            assert payload["content"] == "User decided to hold NVDA despite the dip"
+            assert payload["layer"] == "long-term"
+            assert payload["type"] == "explicit"
+            assert payload["persona_tags"] == ["conversation_summary", "echoes"]
+            assert payload["metadata"]["conversation_id"] == "conv_789"
+
+    @pytest.mark.asyncio
+    async def test_store_direct_success_200(self, memory_client):
+        """Test store_direct accepts both 200 and 201 status codes."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"id": "mem_ok"}
+
+        with patch.object(memory_client.client, 'post', new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = mock_response
+
+            result = await memory_client.store_direct(
+                user_id="user_1",
+                content="Some memory content"
+            )
+
+            assert result["id"] == "mem_ok"
+
+    @pytest.mark.asyncio
+    async def test_store_direct_minimal_params(self, memory_client):
+        """Test store_direct with only required parameters."""
+        mock_response = Mock()
+        mock_response.status_code = 201
+        mock_response.json.return_value = {"id": "mem_min"}
+
+        with patch.object(memory_client.client, 'post', new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = mock_response
+
+            result = await memory_client.store_direct(
+                user_id="user_1",
+                content="Minimal memory"
+            )
+
+            assert result["id"] == "mem_min"
+
+            # Verify defaults
+            payload = mock_post.call_args[1]["json"]
+            assert payload["layer"] == "long-term"
+            assert payload["type"] == "explicit"
+            assert "tags" not in payload
+            assert "metadata" not in payload
+
+    @pytest.mark.asyncio
+    async def test_store_direct_api_error(self, memory_client):
+        """Test store_direct with API error."""
+        mock_response = Mock()
+        mock_response.status_code = 400
+        mock_response.json.return_value = {"detail": "Content too long"}
+        mock_response.text = "Content too long"
+
+        with patch.object(memory_client.client, 'post', new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = mock_response
+
+            with pytest.raises(MemoryAPIError) as exc_info:
+                await memory_client.store_direct(
+                    user_id="user_1",
+                    content="x" * 10000
+                )
+
+            assert exc_info.value.status_code == 400
+            assert "Content too long" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_store_direct_network_error(self, memory_client):
+        """Test store_direct with network error."""
+        with patch.object(memory_client.client, 'post', new_callable=AsyncMock) as mock_post:
+            mock_post.side_effect = httpx.ConnectError("Connection refused")
+
+            with pytest.raises(MemoryNetworkError) as exc_info:
+                await memory_client.store_direct(
+                    user_id="user_1",
+                    content="test"
+                )
+
+            assert "Failed to connect" in str(exc_info.value)
+            assert exc_info.value.original_error is not None
+
+    @pytest.mark.asyncio
+    async def test_store_direct_timeout(self, memory_client):
+        """Test store_direct with timeout."""
+        with patch.object(memory_client.client, 'post', new_callable=AsyncMock) as mock_post:
+            mock_post.side_effect = httpx.TimeoutException("Request timed out")
+
+            with pytest.raises(MemoryNetworkError) as exc_info:
+                await memory_client.store_direct(
+                    user_id="user_1",
+                    content="test"
+                )
+
+            assert "timed out" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_store_direct_http_error(self, memory_client):
+        """Test store_direct with generic HTTP error."""
+        with patch.object(memory_client.client, 'post', new_callable=AsyncMock) as mock_post:
+            mock_post.side_effect = httpx.HTTPError("Generic HTTP error")
+
+            with pytest.raises(MemoryNetworkError) as exc_info:
+                await memory_client.store_direct(
+                    user_id="user_1",
+                    content="test"
+                )
+
+            assert "HTTP error" in str(exc_info.value)

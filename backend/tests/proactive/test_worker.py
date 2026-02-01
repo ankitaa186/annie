@@ -368,7 +368,7 @@ async def test_process_trigger_creates_session_if_missing(
             # Setup StateManager mock - no existing session
             mock_state_manager = AsyncMock()
             mock_state_manager.get_session = AsyncMock(return_value=None)
-            mock_state_manager.create_session = AsyncMock(return_value={
+            mock_state_manager.create_conversation = AsyncMock(return_value={
                 "user_id": "user_456",
                 "conversation_id": "conv_new123"
             })
@@ -384,8 +384,12 @@ async def test_process_trigger_creates_session_if_missing(
                 delivery=mock_delivery
             )
 
-            # Verify session was created
-            mock_state_manager.create_session.assert_called_once_with("user_456", "telegram")
+            # Verify conversation was created
+            mock_state_manager.create_conversation.assert_called_once_with(
+                user_id="user_456",
+                platform="telegram",
+                title="Proactive Check-in"
+            )
 
             # Verify message was stored in new conversation
             mock_state_manager.add_message.assert_called_once()
@@ -503,28 +507,31 @@ async def test_poll_triggers_empty_queue():
     """Test polling when no pending triggers."""
     ctx = {"redis": AsyncMock()}
 
-    with patch('api.proactive.worker.IntentsClient') as mock_client_class:
-        with patch('api.proactive.worker.SubconsciousGate') as mock_gate_class:
-            with patch('api.proactive.worker.TelegramDelivery') as mock_delivery_class:
-                mock_client = AsyncMock()
-                mock_client.get_pending = AsyncMock(return_value=[])
-                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-                mock_client.__aexit__ = AsyncMock(return_value=None)
-                mock_client_class.return_value = mock_client
+    with patch('api.proactive.worker.IntentsClient') as mock_client_class, \
+         patch('api.proactive.worker.SubconsciousGate') as mock_gate_class, \
+         patch('api.proactive.worker.TelegramDelivery') as mock_delivery_class, \
+         patch('redis.asyncio.Redis') as mock_redis_class, \
+         patch('api.proactive.worker.update_heartbeat', new_callable=AsyncMock):
+        mock_client = AsyncMock()
+        mock_client.get_pending = AsyncMock(return_value=[])
+        mock_client.close = AsyncMock()
+        mock_client_class.return_value = mock_client
 
-                mock_gate = AsyncMock()
-                mock_gate.__aenter__ = AsyncMock(return_value=mock_gate)
-                mock_gate.__aexit__ = AsyncMock(return_value=None)
-                mock_gate_class.return_value = mock_gate
+        mock_gate = AsyncMock()
+        mock_gate_class.return_value = mock_gate
 
-                mock_delivery = AsyncMock()
-                mock_delivery.__aenter__ = AsyncMock(return_value=mock_delivery)
-                mock_delivery.__aexit__ = AsyncMock(return_value=None)
-                mock_delivery_class.return_value = mock_delivery
+        mock_delivery = AsyncMock()
+        mock_delivery_class.return_value = mock_delivery
 
-                await poll_triggers(ctx)
+        # Mock Redis for outbox drain (lpop=None means empty queue)
+        mock_redis = AsyncMock()
+        mock_redis.lpop = AsyncMock(return_value=None)
+        mock_redis.close = AsyncMock()
+        mock_redis_class.return_value = mock_redis
 
-                mock_client.get_pending.assert_called_once()
+        await poll_triggers(ctx)
+
+        mock_client.get_pending.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -532,32 +539,35 @@ async def test_poll_triggers_claim_conflict():
     """Test polling handles claim conflicts gracefully."""
     ctx = {"redis": AsyncMock()}
 
-    with patch('api.proactive.worker.IntentsClient') as mock_client_class:
-        with patch('api.proactive.worker.SubconsciousGate') as mock_gate_class:
-            with patch('api.proactive.worker.TelegramDelivery') as mock_delivery_class:
-                mock_client = AsyncMock()
-                mock_client.get_pending = AsyncMock(return_value=[
-                    {"id": "intent_123", "user_id": "user_456", "trigger_type": "cron"}
-                ])
-                # Simulate claim conflict
-                mock_client.claim_intent = AsyncMock(return_value={"conflict": True})
-                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-                mock_client.__aexit__ = AsyncMock(return_value=None)
-                mock_client_class.return_value = mock_client
+    with patch('api.proactive.worker.IntentsClient') as mock_client_class, \
+         patch('api.proactive.worker.SubconsciousGate') as mock_gate_class, \
+         patch('api.proactive.worker.TelegramDelivery') as mock_delivery_class, \
+         patch('redis.asyncio.Redis') as mock_redis_class, \
+         patch('api.proactive.worker.update_heartbeat', new_callable=AsyncMock):
+        mock_client = AsyncMock()
+        mock_client.get_pending = AsyncMock(return_value=[
+            {"id": "intent_123", "user_id": "user_456", "trigger_type": "cron"}
+        ])
+        # Simulate claim conflict
+        mock_client.claim_intent = AsyncMock(return_value={"conflict": True})
+        mock_client.close = AsyncMock()
+        mock_client_class.return_value = mock_client
 
-                mock_gate = AsyncMock()
-                mock_gate.__aenter__ = AsyncMock(return_value=mock_gate)
-                mock_gate.__aexit__ = AsyncMock(return_value=None)
-                mock_gate_class.return_value = mock_gate
+        mock_gate = AsyncMock()
+        mock_gate_class.return_value = mock_gate
 
-                mock_delivery = AsyncMock()
-                mock_delivery.__aenter__ = AsyncMock(return_value=mock_delivery)
-                mock_delivery.__aexit__ = AsyncMock(return_value=None)
-                mock_delivery_class.return_value = mock_delivery
+        mock_delivery = AsyncMock()
+        mock_delivery_class.return_value = mock_delivery
 
-                await poll_triggers(ctx)
+        # Mock Redis for outbox drain (lpop=None means empty queue)
+        mock_redis = AsyncMock()
+        mock_redis.lpop = AsyncMock(return_value=None)
+        mock_redis.close = AsyncMock()
+        mock_redis_class.return_value = mock_redis
 
-                # Claim was attempted
-                mock_client.claim_intent.assert_called_once_with("intent_123")
-                # No processing happened (conflict)
-                mock_gate.should_fire.assert_not_called()
+        await poll_triggers(ctx)
+
+        # Claim was attempted
+        mock_client.claim_intent.assert_called_once_with("intent_123")
+        # No processing happened (conflict)
+        mock_gate.should_fire.assert_not_called()

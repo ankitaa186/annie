@@ -478,7 +478,12 @@ async def web_search_tool_handler(
 # Web search tool definition
 web_search_tool = {
     "name": "web_search",
-    "description": "Search the web for current information using Tavily (primary) with DuckDuckGo fallback. Returns relevant results with titles, URLs, and snippets. Use for finding up-to-date information about news, products, services, facts, or any topic requiring current web data.",
+    "description": """Search the web when you don't have a specific URL.
+
+Use this tool to FIND information — news, facts, products, prices, opinions, or anything you need to look up.
+Returns a list of results with titles, URLs, and snippets. Uses Tavily (primary) with DuckDuckGo as fallback.
+
+Do NOT use this tool if you already have a URL. Use web_crawl instead to read a known URL.""",
     "inputSchema": {
         "type": "object",
         "properties": {

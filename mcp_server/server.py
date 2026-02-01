@@ -49,6 +49,7 @@ from mcp_server.tools import (
     home_assistant_query_tool,  # Epic 16 - Story 16.1
     home_assistant_control_tool,  # Epic 16 - Story 16.2
     send_voice_message_to_smart_home_tool,  # Epic 16 - Story 16.6
+    browser_action_tool,  # Browser Automation
 )
 
 logger = get_logger(__name__)
@@ -122,6 +123,8 @@ class MCPServer:
         self.tool_registry.register(home_assistant_query_tool)
         self.tool_registry.register(home_assistant_control_tool)
         self.tool_registry.register(send_voice_message_to_smart_home_tool)
+        # Browser automation tool
+        self.tool_registry.register(browser_action_tool)
         logger.info(f"Registered {len(self.tool_registry.tools)} tools")
 
     async def handle_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
@@ -237,6 +240,18 @@ class MCPServer:
         # Execute tool
         try:
             tool_handler = tool_info["handler"]
+
+            # Filter arguments to only those accepted by the handler.
+            # This prevents TypeError when inject_user_id adds user_id
+            # to tools that don't have a user_id parameter.
+            sig = inspect.signature(tool_handler)
+            has_var_keyword = any(
+                p.kind == inspect.Parameter.VAR_KEYWORD
+                for p in sig.parameters.values()
+            )
+            if not has_var_keyword:
+                valid_params = set(sig.parameters.keys())
+                arguments = {k: v for k, v in arguments.items() if k in valid_params}
 
             # Check if handler is async and await if needed
             if inspect.iscoroutinefunction(tool_handler):

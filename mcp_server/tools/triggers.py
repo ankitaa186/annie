@@ -912,15 +912,71 @@ Only include fields you want to change. Omitted fields keep current values.
             },
             "schedule": {
                 "type": "object",
-                "description": "New schedule configuration"
+                "description": "New schedule configuration",
+                "properties": {
+                    "mode": {
+                        "type": "string",
+                        "enum": ["cron", "once"],
+                        "description": "'cron' for recurring, 'once' for one-time"
+                    },
+                    "cron_expression": {
+                        "type": "string",
+                        "description": "Cron expression for recurring (e.g., '0 9 * * 1-5' for weekdays at 9am, '0 14 * * 1,4' for Mon/Thu at 2pm)"
+                    },
+                    "datetime": {
+                        "type": "string",
+                        "description": "ISO datetime for one-time triggers (format: 'YYYY-MM-DDTHH:MM:SS')"
+                    },
+                    "timezone": {
+                        "type": "string",
+                        "description": "IANA timezone (default: 'America/Los_Angeles')"
+                    }
+                }
             },
             "condition": {
                 "type": "object",
-                "description": "New condition configuration"
+                "description": "New condition configuration",
+                "properties": {
+                    "type": {
+                        "type": "string",
+                        "enum": ["price", "portfolio", "silence"],
+                        "description": "Condition type"
+                    },
+                    "expression": {
+                        "type": "string",
+                        "description": "Condition expression (e.g., 'NVDA < 130', 'inactive_hours > 48')"
+                    },
+                    "check_interval_minutes": {
+                        "type": "integer",
+                        "description": "How often to evaluate in minutes"
+                    },
+                    "cooldown_hours": {
+                        "type": "integer",
+                        "description": "Minimum hours between fires"
+                    }
+                }
             },
             "action_context": {
                 "type": "object",
-                "description": "Updated briefing (merges with existing)"
+                "description": "Updated briefing (merges with existing)",
+                "properties": {
+                    "original_request": {
+                        "type": "string",
+                        "description": "Original user request"
+                    },
+                    "intent_summary": {
+                        "type": "string",
+                        "description": "Summary of the intent"
+                    },
+                    "execution_instructions": {
+                        "type": "string",
+                        "description": "Instructions for execution"
+                    },
+                    "message_guidance": {
+                        "type": "string",
+                        "description": "Guidance for message formatting"
+                    }
+                }
             },
             "enabled": {
                 "type": "boolean",

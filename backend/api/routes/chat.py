@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Request
 from pydantic import BaseModel, Field
 
 from api.logging import get_logger
@@ -214,8 +214,12 @@ async def refresh_profile_background(user_id: str):
 class ChatRequest(BaseModel):
     """Request model for chat endpoint."""
     user_id: str = Field(..., description="Unique user identifier")
-    platform: str = Field(..., description="Platform identifier (e.g., 'telegram')")
+    platform: str = Field(..., description="Platform identifier (e.g., 'telegram', 'web')")
     message: str = Field(..., min_length=1, description="User message content")
+    conversation_id: Optional[str] = Field(
+        default=None,
+        description="Optional conversation ID to resume a specific conversation (Web UI)"
+    )
     context: Optional[dict] = Field(default={}, description="Additional context metadata")
     files: Optional[List[FileAttachment]] = Field(
         default=None,
@@ -234,7 +238,11 @@ class ChatResponse(BaseModel):
 
 @router.post("/chat", response_model=ChatResponse)
 @observe(name="chat_request", as_type="trace")
-async def create_chat(request: ChatRequest, background_tasks: BackgroundTasks):
+async def create_chat(
+    request: ChatRequest,
+    background_tasks: BackgroundTasks,
+    http_request: Request
+):
     """
     Process incoming chat message and initiate streaming response.
 
@@ -286,6 +294,28 @@ async def create_chat(request: ChatRequest, background_tasks: BackgroundTasks):
             "timestamp": "2025-11-11T10:00:00Z"
         }
     """
+    # Override user_id from auth middleware if available (web UI flow)
+    # This ensures the authenticated user_id is used instead of client-provided one
+    if hasattr(http_request.state, 'user_id') and http_request.state.user_id:
+        if request.user_id != http_request.state.user_id:
+            logger.info(
+                "Overriding client user_id with authenticated user_id",
+                extra={
+                    "client_user_id": request.user_id,
+                    "auth_user_id": http_request.state.user_id,
+                    "event": "user_id_override"
+                }
+            )
+        # Create a new request object with the correct user_id
+        request = ChatRequest(
+            user_id=http_request.state.user_id,
+            platform=request.platform,
+            message=request.message,
+            conversation_id=request.conversation_id,
+            context=request.context,
+            files=request.files
+        )
+
     # Detect decision support request for memory retrieval
     needs_decision_support = is_decision_support_request(request.message)
 
@@ -335,24 +365,63 @@ async def create_chat(request: ChatRequest, background_tasks: BackgroundTasks):
             # Get or create session
             session = await state.get_session(request.user_id)
 
-            if not session:
-                # Create new session
-                session = await state.create_session(request.user_id, request.platform)
+            # If conversation_id provided (Web UI), validate and switch to it
+            if request.conversation_id:
+                resumed = await state.resume_conversation(
+                    user_id=request.user_id,
+                    conversation_id=request.conversation_id,
+                    platform=request.platform
+                )
+                if resumed:
+                    session = resumed
+                    logger.info(
+                        "Switched to requested conversation",
+                        extra={
+                            "user_id": request.user_id,
+                            "conversation_id": request.conversation_id,
+                            "platform": request.platform
+                        }
+                    )
+                else:
+                    logger.warning(
+                        "Could not switch to requested conversation",
+                        extra={
+                            "user_id": request.user_id,
+                            "requested_conversation_id": request.conversation_id
+                        }
+                    )
+
+            # Determine if we need a new conversation
+            needs_new_conversation = (
+                not session or  # No session at all
+                not session.get("conversation_id")  # Session exists but no conversation
+            )
+
+            if needs_new_conversation:
+                # Create new conversation with title from first message
+                conversation_title = request.message[:50] + ("..." if len(request.message) > 50 else "")
+                session = await state.create_conversation(
+                    user_id=request.user_id,
+                    platform=request.platform,
+                    title=conversation_title
+                )
                 logger.info(
-                    "New session created",
+                    "New conversation created",
                     extra={
                         "user_id": request.user_id,
-                        "conversation_id": session["conversation_id"]
+                        "conversation_id": session["conversation_id"],
+                        "title": conversation_title,
+                        "platform": request.platform
                     }
                 )
             else:
-                # Update existing session activity
+                # Use existing session's conversation
                 await state.update_session_activity(request.user_id)
                 logger.info(
-                    "Existing session updated",
+                    "Using existing conversation",
                     extra={
                         "user_id": request.user_id,
-                        "conversation_id": session["conversation_id"]
+                        "conversation_id": session.get("conversation_id")
                     }
                 )
 

@@ -59,6 +59,60 @@ logger = get_logger(__name__)
 
 
 # ============================================================================
+# Telegram Outbox Drain
+# ============================================================================
+
+async def drain_telegram_outbox(delivery: TelegramDelivery, redis_client: redis.Redis) -> int:
+    """Drain the telegram:outbox Redis queue and deliver each message.
+
+    Backend services push messages here when they need Telegram delivery
+    without owning the bot token. Called at the start of each poll cycle.
+
+    Returns:
+        Number of messages delivered.
+    """
+    delivered = 0
+    while True:
+        raw = await redis_client.lpop("telegram:outbox")
+        if raw is None:
+            break
+        try:
+            if isinstance(raw, bytes):
+                raw = raw.decode("utf-8")
+            payload = json.loads(raw)
+            user_id = payload["user_id"]
+            message = payload["message"]
+            trigger_id = payload.get("trigger_id", "outbox_unknown")
+            is_html = payload.get("is_html", False)
+
+            result = await delivery.send_proactive_message(
+                user_id=user_id,
+                message=message,
+                trigger_id=trigger_id,
+                is_html=is_html,
+            )
+            metadata = payload.get("metadata", {})
+            if result.success:
+                delivered += 1
+                logger.info("Delivered outbox message", extra={
+                    "user_id": user_id, "trigger_id": trigger_id,
+                    "message_id": result.message_id,
+                    **metadata,
+                })
+            else:
+                logger.warning("Outbox delivery failed", extra={
+                    "user_id": user_id, "trigger_id": trigger_id,
+                    "error": result.error,
+                    **metadata,
+                })
+        except Exception as e:
+            logger.warning("Failed to process outbox item", extra={
+                "error": str(e), "raw": raw[:200] if raw else None,
+            })
+    return delivered
+
+
+# ============================================================================
 # Worker Configuration
 # ============================================================================
 
@@ -259,10 +313,14 @@ async def process_trigger(
             # This ensures the LLM has context when user replies
             try:
                 async with StateManager() as state_manager:
-                    # Get or create session for user
+                    # Get or create conversation for user
                     session = await state_manager.get_session(user_id)
                     if not session:
-                        session = await state_manager.create_session(user_id, "telegram")
+                        session = await state_manager.create_conversation(
+                            user_id=user_id,
+                            platform="telegram",
+                            title="Proactive Check-in"
+                        )
 
                     conversation_id = session.get("conversation_id")
                     if conversation_id:
@@ -566,7 +624,7 @@ async def update_heartbeat() -> None:
             "worker": "proactive-worker"
         })
         await redis_client.set(HEARTBEAT_KEY, heartbeat_data, ex=HEARTBEAT_TTL)
-        await redis_client.aclose()
+        await redis_client.close()
     except Exception as e:
         logger.warning(f"Failed to update heartbeat: {e}")
 
@@ -580,7 +638,7 @@ async def check_heartbeat() -> bool:
             decode_responses=True
         )
         heartbeat_json = await redis_client.get(HEARTBEAT_KEY)
-        await redis_client.aclose()
+        await redis_client.close()
 
         if not heartbeat_json:
             return False
@@ -754,6 +812,19 @@ async def poll_triggers(ctx: Dict[str, Any]) -> None:
         intents_client = IntentsClient()
         gate = SubconsciousGate()
         delivery = TelegramDelivery()
+
+        # Drain outbox: backend pushes messages here for Telegram delivery
+        outbox_redis = redis.Redis(
+            host=config.get("REDIS_HOST", "redis"),
+            port=int(config.get("REDIS_PORT", 6379)),
+            decode_responses=False
+        )
+        try:
+            outbox_count = await drain_telegram_outbox(delivery, outbox_redis)
+            if outbox_count:
+                logger.info("Drained telegram outbox", extra={"delivered": outbox_count})
+        finally:
+            await outbox_redis.close()
 
         # Fetch all pending intents (no filter)
         pending = await intents_client.get_pending()

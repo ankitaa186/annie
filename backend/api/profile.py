@@ -220,6 +220,37 @@ class ProfileManager:
                 "values": {}
             }
 
+    async def fetch_profile(self, user_id: str) -> Dict[str, Any]:
+        """
+        Load user profile with cache-first strategy.
+
+        Tries Redis cache first (<10ms). If cache is empty or expired,
+        falls back to MCP API call and refreshes the cache.
+
+        Args:
+            user_id: User identifier
+
+        Returns:
+            Profile dict (may be empty if both cache and API fail)
+        """
+        # Try cache first
+        profile = await self.load_profile_from_cache(user_id)
+        if profile and profile.get("completeness", 0) > 0:
+            return profile
+
+        # Cache miss — fetch from API and refresh cache
+        try:
+            fresh = await self.fetch_profile_fresh(user_id)
+            if fresh and fresh.get("completeness_pct", fresh.get("completeness", 0)) > 0:
+                return fresh
+        except Exception as e:
+            logger.warning(
+                "fetch_profile: MCP fallback failed, returning empty profile",
+                extra={"user_id": user_id, "error": str(e)}
+            )
+
+        return profile  # return whatever cache gave us (possibly empty)
+
     @observe(name="profile_refresh", as_type="trace")
     async def refresh_profile_background(self, user_id: str) -> None:
         """

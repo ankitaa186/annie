@@ -383,7 +383,7 @@ class TelegramDelivery:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async context manager exit - cleanup resources."""
         if self._should_close_redis and self.redis_client:
-            await self.redis_client.aclose()
+            await self.redis_client.close()
 
     @observe(name="send_proactive_message", as_type="span")
     async def send_proactive_message(
@@ -392,7 +392,8 @@ class TelegramDelivery:
         message: str,
         trigger_id: str,
         parse_mode: str = "HTML",
-        max_retries: Optional[int] = None
+        max_retries: Optional[int] = None,
+        is_html: bool = False,
     ) -> DeliveryResult:
         """Send proactive message to user via Telegram.
 
@@ -409,6 +410,8 @@ class TelegramDelivery:
             trigger_id: Trigger ID for tracking and feedback
             parse_mode: Telegram parse mode (HTML or Markdown)
             max_retries: Maximum retry attempts for rate limits (default: 3)
+            is_html: If True, message is already Telegram-safe HTML; skip
+                     markdown-to-HTML conversion (default: False)
 
         Returns:
             DeliveryResult with success status, message_id, error, and timing
@@ -472,20 +475,21 @@ class TelegramDelivery:
                 delivery_ms = int((time.time() - start_time) * 1000)
                 return DeliveryResult(success=False, message_id=None, error=error_msg, delivery_ms=delivery_ms)
 
-            # Convert markdown to Telegram-safe HTML
-            # LLM output uses markdown (e.g., **bold**, ###) but Telegram expects HTML
-            html_message = markdown_to_telegram_html(message)
-
-            logger.debug(
-                "Converted markdown to HTML for Telegram",
-                extra={
-                    "user_id": user_id,
-                    "trigger_id": trigger_id,
-                    "original_length": len(message),
-                    "html_length": len(html_message),
-                    "event": "markdown_to_html_conversion"
-                }
-            )
+            # Convert markdown to Telegram-safe HTML (skip if already HTML)
+            if is_html:
+                html_message = message
+            else:
+                html_message = markdown_to_telegram_html(message)
+                logger.debug(
+                    "Converted markdown to HTML for Telegram",
+                    extra={
+                        "user_id": user_id,
+                        "trigger_id": trigger_id,
+                        "original_length": len(message),
+                        "html_length": len(html_message),
+                        "event": "markdown_to_html_conversion"
+                    }
+                )
 
             # Retry loop for rate limiting
             for attempt in range(1, max_retries + 1):

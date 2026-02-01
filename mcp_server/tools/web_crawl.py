@@ -317,6 +317,158 @@ async def _jina_reader_fetch(url: str, max_length: int, request_id: str) -> Dict
 
 
 # =============================================================================
+# Browser Fetch (Final Fallback)
+# =============================================================================
+
+async def _browser_fetch(url: str, max_length: int, request_id: str) -> Dict[str, Any]:
+    """
+    Fetch page content using the headless browser service as a last resort.
+
+    Uses the browser_action service (Playwright + Chromium) which handles
+    JavaScript rendering, anti-bot evasion, and authenticated sessions.
+
+    Args:
+        url: URL to fetch
+        max_length: Maximum content length
+        request_id: Request ID for logging
+
+    Returns:
+        Dict with crawl result
+    """
+    import os
+
+    browser_url = os.getenv("BROWSER_SERVICE_URL", "http://browser:8003")
+
+    logger.info(
+        "Attempting browser fallback fetch",
+        extra={"url": url, "request_id": request_id, "browser_url": browser_url}
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Create session
+            resp = await client.post(
+                f"{browser_url}/sessions",
+                json={"profile": "default"}
+            )
+            if resp.status_code != 200:
+                return {
+                    "status": "error",
+                    "provider": "browser",
+                    "url": url,
+                    "error_message": f"Browser service returned HTTP {resp.status_code}"
+                }
+
+            session_data = resp.json()
+            session_id = session_data.get("data", {}).get("session_id")
+            if not session_id:
+                return {
+                    "status": "error",
+                    "provider": "browser",
+                    "url": url,
+                    "error_message": "Browser service did not return a session ID"
+                }
+
+            try:
+                # Navigate to URL
+                nav_resp = await client.post(
+                    f"{browser_url}/sessions/{session_id}/navigate",
+                    json={"url": url, "timeout_ms": 20000},
+                    timeout=30.0
+                )
+                nav_data = nav_resp.json()
+                if nav_data.get("status") != "success":
+                    return {
+                        "status": "error",
+                        "provider": "browser",
+                        "url": url,
+                        "error_message": f"Navigation failed: {nav_data.get('error', 'unknown')}"
+                    }
+
+                # Wait for dynamic content to load
+                await asyncio.sleep(2)
+
+                # Extract page content
+                content_resp = await client.post(
+                    f"{browser_url}/sessions/{session_id}/content",
+                    timeout=15.0
+                )
+                content_data = content_resp.json()
+                if content_data.get("status") != "success":
+                    return {
+                        "status": "error",
+                        "provider": "browser",
+                        "url": url,
+                        "error_message": f"Content extraction failed: {content_data.get('error', 'unknown')}"
+                    }
+
+                page_data = content_data.get("data", {})
+                content = page_data.get("text", "")
+                title = page_data.get("title", "")
+                final_url = page_data.get("url", url)
+
+                if not content or content.strip() == "":
+                    return {
+                        "status": "error",
+                        "provider": "browser",
+                        "url": url,
+                        "error_message": "Browser extracted no content from page"
+                    }
+
+                truncated = False
+                if len(content) > max_length:
+                    content = content[:max_length]
+                    truncated = True
+
+                return {
+                    "status": "success",
+                    "provider": "browser",
+                    "url": final_url,
+                    "title": title,
+                    "content": content,
+                    "metadata": {
+                        "description": None,
+                        "author": None,
+                        "published_date": None,
+                        "links_count": 0
+                    },
+                    "truncated": truncated
+                }
+
+            finally:
+                # Always close the session
+                try:
+                    await client.delete(
+                        f"{browser_url}/sessions/{session_id}",
+                        timeout=5.0
+                    )
+                except Exception:
+                    pass
+
+    except httpx.TimeoutException:
+        return {
+            "status": "error",
+            "provider": "browser",
+            "url": url,
+            "error_message": "Browser fetch timed out (30s limit)"
+        }
+    except httpx.ConnectError:
+        return {
+            "status": "error",
+            "provider": "browser",
+            "url": url,
+            "error_message": "Browser service unreachable"
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "provider": "browser",
+            "url": url,
+            "error_message": f"Browser fetch error: {str(e)}"
+        }
+
+
+# =============================================================================
 # Web Crawl Tool Handler
 # =============================================================================
 
@@ -366,37 +518,46 @@ async def web_crawl_tool_handler(
             "error_message": "Invalid URL format. Please provide a valid HTTP/HTTPS URL (localhost and private IPs are blocked)."
         }
 
+    # Minimum content length to consider a fetch "successful"
+    # Anything shorter is likely a block page, CAPTCHA, or empty shell
+    MIN_CONTENT_LENGTH = 200
+
     # Try crawl4ai first
+    crawl4ai_error = None
     try:
         result = await _crawl4ai_fetch(url, include_images, max_length, wait_for_js, request_id)
         duration_ms = int((time.time() - start_time) * 1000)
 
-        if result.get("status") == "success":
+        content_len = len(result.get("content", ""))
+        if result.get("status") == "success" and content_len >= MIN_CONTENT_LENGTH:
             logger.info(
                 "web_crawl completed via crawl4ai",
                 extra={
                     "provider": "crawl4ai",
                     "url": url,
                     "duration_ms": duration_ms,
-                    "content_length": len(result.get("content", "")),
+                    "content_length": content_len,
                     "truncated": result.get("truncated", False),
                     "request_id": request_id
                 }
             )
             return result
-        else:
-            # crawl4ai returned an error result, try Jina
-            logger.warning(
-                "crawl4ai returned error, falling back to Jina Reader",
-                extra={
-                    "url": url,
-                    "error": result.get("error_message"),
-                    "request_id": request_id
-                }
-            )
-            raise Exception(result.get("error_message", "crawl4ai error"))
+
+        # Thin or empty content — treat as failure
+        reason = result.get("error_message", f"thin content ({content_len} chars)")
+        logger.warning(
+            "crawl4ai insufficient, falling back to Jina Reader",
+            extra={
+                "url": url,
+                "reason": reason,
+                "content_length": content_len,
+                "request_id": request_id
+            }
+        )
+        crawl4ai_error = reason
 
     except Exception as e:
+        crawl4ai_error = str(e)
         logger.warning(
             "crawl4ai failed, falling back to Jina Reader",
             extra={
@@ -407,55 +568,102 @@ async def web_crawl_tool_handler(
             }
         )
 
-        # Fall back to Jina Reader
-        try:
-            result = await _jina_reader_fetch(url, max_length, request_id)
-            duration_ms = int((time.time() - start_time) * 1000)
+    # Fall back to Jina Reader
+    try:
+        result = await _jina_reader_fetch(url, max_length, request_id)
+        duration_ms = int((time.time() - start_time) * 1000)
 
-            if result.get("status") == "success":
-                logger.info(
-                    "web_crawl completed via Jina fallback",
-                    extra={
-                        "provider": "jina",
-                        "url": url,
-                        "duration_ms": duration_ms,
-                        "content_length": len(result.get("content", "")),
-                        "truncated": result.get("truncated", False),
-                        "request_id": request_id
-                    }
-                )
-            else:
-                logger.error(
-                    "Both crawl4ai and Jina Reader failed",
-                    extra={
-                        "url": url,
-                        "crawl4ai_error": str(e),
-                        "jina_error": result.get("error_message"),
-                        "duration_ms": duration_ms,
-                        "request_id": request_id
-                    }
-                )
-
-            return result
-
-        except Exception as jina_error:
-            duration_ms = int((time.time() - start_time) * 1000)
-            logger.error(
-                "Both crawl4ai and Jina Reader failed",
+        content_len = len(result.get("content", ""))
+        if result.get("status") == "success" and content_len >= MIN_CONTENT_LENGTH:
+            logger.info(
+                "web_crawl completed via Jina fallback",
                 extra={
+                    "provider": "jina",
                     "url": url,
-                    "crawl4ai_error": str(e),
-                    "jina_error": str(jina_error),
                     "duration_ms": duration_ms,
+                    "content_length": content_len,
+                    "truncated": result.get("truncated", False),
                     "request_id": request_id
                 }
             )
-            return {
-                "status": "error",
-                "provider": None,
+            return result
+
+        # Jina also thin/failed — escalate to browser
+        jina_reason = result.get("error_message", f"thin content ({content_len} chars)")
+        logger.warning(
+            "Jina Reader insufficient, escalating to browser",
+            extra={
                 "url": url,
-                "error_message": f"Failed to fetch URL: {str(jina_error)}"
+                "crawl4ai_error": crawl4ai_error,
+                "jina_reason": jina_reason,
+                "content_length": content_len,
+                "request_id": request_id
             }
+        )
+        raise Exception(jina_reason)
+
+    except Exception as jina_error:
+            logger.warning(
+                "Both crawl4ai and Jina Reader failed, escalating to browser",
+                extra={
+                    "url": url,
+                    "crawl4ai_error": crawl4ai_error,
+                    "jina_error": str(jina_error),
+                    "request_id": request_id
+                }
+            )
+
+            # Escalate to headless browser as last resort
+            try:
+                result = await _browser_fetch(url, max_length, request_id)
+                duration_ms = int((time.time() - start_time) * 1000)
+
+                if result.get("status") == "success":
+                    logger.info(
+                        "web_crawl completed via browser fallback",
+                        extra={
+                            "provider": "browser",
+                            "url": url,
+                            "duration_ms": duration_ms,
+                            "content_length": len(result.get("content", "")),
+                            "truncated": result.get("truncated", False),
+                            "request_id": request_id
+                        }
+                    )
+                    return result
+
+                logger.error(
+                    "All three providers failed (crawl4ai, Jina, browser)",
+                    extra={
+                        "url": url,
+                        "crawl4ai_error": crawl4ai_error,
+                        "jina_error": str(jina_error),
+                        "browser_error": result.get("error_message"),
+                        "duration_ms": duration_ms,
+                        "request_id": request_id
+                    }
+                )
+                return result
+
+            except Exception as browser_error:
+                duration_ms = int((time.time() - start_time) * 1000)
+                logger.error(
+                    "All three providers failed (crawl4ai, Jina, browser)",
+                    extra={
+                        "url": url,
+                        "crawl4ai_error": crawl4ai_error,
+                        "jina_error": str(jina_error),
+                        "browser_error": str(browser_error),
+                        "duration_ms": duration_ms,
+                        "request_id": request_id
+                    }
+                )
+                return {
+                    "status": "error",
+                    "provider": None,
+                    "url": url,
+                    "error_message": f"All providers failed. Last error: {str(browser_error)}"
+                }
 
 
 # =============================================================================
@@ -464,23 +672,14 @@ async def web_crawl_tool_handler(
 
 web_crawl_tool = {
     "name": "web_crawl",
-    "description": """Fetch and read the full content of a webpage.
+    "description": """Read the content of a URL. This is the default tool for fetching any webpage.
 
-Use this tool when you need to:
-- Read an article, blog post, or news story
-- Access documentation or reference material
-- Get the full content of a URL the user references
-- Read product pages, reviews, or detailed information
+Use this tool when you HAVE a URL and want to read its content. Handles JavaScript-heavy pages, anti-bot protection, and most websites automatically via internal fallback chain.
 
-Returns clean markdown text suitable for LLM consumption. Supports JavaScript-rendered pages with wait_for_js option.
+Do NOT use this tool to search — use web_search to find URLs first.
+Do NOT use browser_action just to read a page — this tool already escalates to the browser internally if needed.
 
-IMPORTANT: This tool is for reading webpage content. For searching the web, use web_search instead.
-
-Examples:
-- User shares a link: "Read this article for me: https://example.com/article"
-- User references a page: "What does the React docs say about hooks?"
-- User wants details: "Can you summarize this blog post?"
-""",
+Only use browser_action when you need to INTERACT with a page (click buttons, fill forms, log in).""",
     "inputSchema": {
         "type": "object",
         "properties": {
