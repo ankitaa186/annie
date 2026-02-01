@@ -98,7 +98,7 @@ RESTRICTED_TOOLS = [
 # ============================================================================
 
 @observe(name="gather_dynamic_state", as_type="span")
-async def gather_dynamic_state(user_id: str, timezone: str = "America/Los_Angeles") -> DynamicState:
+async def gather_dynamic_state(user_id: str, user_timezone: str = "America/Los_Angeles") -> DynamicState:
     """
     Gather fresh dynamic context at wake-up time.
 
@@ -111,7 +111,7 @@ async def gather_dynamic_state(user_id: str, timezone: str = "America/Los_Angele
 
     Args:
         user_id: User identifier
-        timezone: User's timezone (default: America/Los_Angeles)
+        user_timezone: User's timezone (default: America/Los_Angeles)
 
     Returns:
         DynamicState with fresh context
@@ -120,7 +120,7 @@ async def gather_dynamic_state(user_id: str, timezone: str = "America/Los_Angele
 
     try:
         # Get current time in user's timezone
-        user_tz = pytz.timezone(timezone)
+        user_tz = pytz.timezone(user_timezone)
         current_time = datetime.now(user_tz)
 
         # Get market status (simple open/closed check)
@@ -180,7 +180,7 @@ async def gather_dynamic_state(user_id: str, timezone: str = "America/Los_Angele
                 if session:
                     conversation_id = session.get("conversation_id")
                     if conversation_id:
-                        history = await state_manager.get_messages(conversation_id)
+                        history = await state_manager.get_conversation_history(conversation_id)
                         # Limit to last 20 messages to keep context manageable
                         conversation_history = history[-20:] if history else []
                         logger.info(
@@ -684,7 +684,7 @@ async def execute_wake_up_agent(
 
     try:
         # 1. Gather dynamic state (FRESH at execution time)
-        dynamic_state = await gather_dynamic_state(user_id, timezone)
+        dynamic_state = await gather_dynamic_state(user_id, user_timezone=timezone)
 
         # 2. Get available tools dynamically from MCP server
         async with MCPClient() as mcp_client:
