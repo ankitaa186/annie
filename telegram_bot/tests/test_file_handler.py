@@ -62,9 +62,15 @@ class TestFileCategory:
     def test_get_file_category_unsupported(self):
         """Test unsupported MIME types return None."""
         assert get_file_category("application/zip") is None
-        assert get_file_category("video/mp4") is None
         assert get_file_category("audio/mp3") is None
         assert get_file_category("unknown/type") is None
+
+    def test_get_file_category_video(self):
+        """Test video MIME types return VIDEO category."""
+        from telegram_bot.file_handler import FileCategory
+        assert get_file_category("video/mp4") == FileCategory.VIDEO
+        assert get_file_category("video/webm") == FileCategory.VIDEO
+        assert get_file_category("video/quicktime") == FileCategory.VIDEO
 
 
 class TestMimeTypeValidation:
@@ -78,8 +84,14 @@ class TestMimeTypeValidation:
     def test_is_mime_type_supported_invalid(self):
         """Test unsupported MIME types return False."""
         assert is_mime_type_supported("application/zip") is False
-        assert is_mime_type_supported("video/mp4") is False
+        assert is_mime_type_supported("audio/mp3") is False
         assert is_mime_type_supported("") is False
+
+    def test_is_mime_type_supported_video(self):
+        """Test video MIME types are now supported."""
+        assert is_mime_type_supported("video/mp4") is True
+        assert is_mime_type_supported("video/webm") is True
+        assert is_mime_type_supported("video/quicktime") is True
 
     def test_normalize_mime_type_known(self):
         """Test MIME type normalization for known types."""
@@ -464,6 +476,16 @@ class TestHasProcessableFiles:
         """Test message with photo."""
         mock_message = MagicMock()
         mock_message.photo = [MagicMock()]
+        mock_message.video = None
+        mock_message.document = None
+
+        assert has_processable_files(mock_message) is True
+
+    def test_has_video(self):
+        """Test message with video."""
+        mock_message = MagicMock()
+        mock_message.photo = None
+        mock_message.video = MagicMock()
         mock_message.document = None
 
         assert has_processable_files(mock_message) is True
@@ -472,6 +494,7 @@ class TestHasProcessableFiles:
         """Test message with document."""
         mock_message = MagicMock()
         mock_message.photo = None
+        mock_message.video = None
         mock_message.document = MagicMock()
 
         assert has_processable_files(mock_message) is True
@@ -480,6 +503,7 @@ class TestHasProcessableFiles:
         """Test message without files."""
         mock_message = MagicMock()
         mock_message.photo = None
+        mock_message.video = None
         mock_message.document = None
 
         assert has_processable_files(mock_message) is False

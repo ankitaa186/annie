@@ -18,7 +18,7 @@ from api.providers.grok_provider import ProviderError, RateLimitError
 from api.providers.gemini_tool_adapter import GeminiToolAdapter
 from api.observability.tracing import get_current_trace
 from api.observability.cost import calculate_llm_cost
-from api.utils import inject_user_id
+from api.utils import inject_user_id, strip_base64_from_tool_result
 
 logger = get_logger(__name__)
 
@@ -847,10 +847,14 @@ class GeminiProvider(BaseProvider):
                                 "result_content": json.dumps(tool_result)
                             }
 
+                            # Strip large base64 blobs before sending back to Gemini
+                            # (media is already extracted and sent via SSE media frames)
+                            clean_result = strip_base64_from_tool_result(tool_result)
+
                             # Format function response for Gemini
                             formatted_result = self.tool_adapter.format_tool_result_for_gemini(
                                 func_call["name"],
-                                tool_result
+                                clean_result
                             )
                             tool_results.append(formatted_result)
 

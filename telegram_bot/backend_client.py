@@ -67,7 +67,10 @@ class BackendClient:
     async def _ensure_session(self):
         """Ensure aiohttp session is created."""
         if self.session is None or self.session.closed:
-            self.session = aiohttp.ClientSession(timeout=self.timeout)
+            self.session = aiohttp.ClientSession(
+                timeout=self.timeout,
+                read_bufsize=2 * 1024 * 1024,  # 2MB - handles large SSE frames (e.g. base64 screenshots)
+            )
             logger.debug(
                 "HTTP session created",
                 extra={"event": "session_created"}
@@ -323,6 +326,54 @@ class BackendClient:
                                 )
                                 yield chunk_data
                                 break
+
+                            # Handle media frames (for sending photos/videos to user)
+                            elif chunk_type == "media":
+                                # Media send request from backend
+                                # Structure: {
+                                #   "type": "media",
+                                #   "media_type": "photo" | "video" | "animation" | "voice",
+                                #   "source_type": "url" | "base64" | "file_id",
+                                #   "source": "<url or base64 data or file_id>",
+                                #   "caption": "optional caption",
+                                #   "filename": "optional filename",
+                                #   "duration": optional_duration_seconds,
+                                #   "width": optional_width,
+                                #   "height": optional_height
+                                # }
+                                logger.info(
+                                    "Media frame received",
+                                    extra={
+                                        "user_id": user_id,
+                                        "conversation_id": conversation_id,
+                                        "media_type": chunk_data.get("media_type"),
+                                        "source_type": chunk_data.get("source_type"),
+                                        "has_caption": bool(chunk_data.get("caption")),
+                                        "event": "stream_media"
+                                    }
+                                )
+                                yield chunk_data
+
+                            # Handle media_group frames (for sending albums)
+                            elif chunk_type == "media_group":
+                                # Media group (album) send request from backend
+                                # Structure: {
+                                #   "type": "media_group",
+                                #   "items": [
+                                #     {"media_type": "photo", "source_type": "url", "source": "...", "caption": "..."},
+                                #     {"media_type": "video", "source_type": "url", "source": "..."}
+                                #   ]
+                                # }
+                                logger.info(
+                                    "Media group frame received",
+                                    extra={
+                                        "user_id": user_id,
+                                        "conversation_id": conversation_id,
+                                        "item_count": len(chunk_data.get("items", [])),
+                                        "event": "stream_media_group"
+                                    }
+                                )
+                                yield chunk_data
 
                             # Handle error frames
                             elif chunk_type == "error":

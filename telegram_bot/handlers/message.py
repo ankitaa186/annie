@@ -27,8 +27,92 @@ from telegram_bot.file_handler import (
     format_partial_success_acknowledgment,
 )
 from telegram_bot.logger import get_logger
+from telegram_bot.media_sender import (
+    MediaItem,
+    MediaType,
+    MediaSourceType,
+    send_media,
+    send_media_group,
+)
 
 logger = get_logger(__name__)
+
+
+# SSE frame type mappings (used by stream_response_to_telegram for media/media_group frames)
+# Maps string types from backend SSE events to MediaType/MediaSourceType enums
+MEDIA_TYPE_MAP = {
+    "photo": MediaType.PHOTO,
+    "video": MediaType.VIDEO,
+    "animation": MediaType.ANIMATION,
+    "voice": MediaType.VOICE,
+}
+
+# Source types that can arrive over SSE (JSON-serializable only).
+# Note: "bytes" and "file_path" are NOT valid over SSE/JSON but included
+# for forward-compatibility with local-only use cases.
+SOURCE_TYPE_MAP = {
+    "url": MediaSourceType.URL,
+    "base64": MediaSourceType.BASE64,
+    "file_id": MediaSourceType.FILE_ID,
+    "file_path": MediaSourceType.FILE_PATH,
+}
+
+# Subset of media types valid in Telegram media groups (albums)
+MEDIA_GROUP_TYPE_MAP = {
+    "photo": MediaType.PHOTO,
+    "video": MediaType.VIDEO,
+}
+
+async def resolve_redis_ref(redis_client, redis_key: str, conversation_id: str = "") -> Optional[str]:
+    """
+    Fetch a base64 blob that was offloaded to Redis by the backend.
+
+    The key is deleted after a successful read (one-time use).
+
+    Args:
+        redis_client: An async Redis client.
+        redis_key: The ``media:<conv_id>:<uuid>`` key.
+        conversation_id: For logging context only.
+
+    Returns:
+        The base64 string, or ``None`` if the key is missing or an error occurs.
+    """
+    try:
+        data = await redis_client.get(redis_key)
+        if data is None:
+            logger.warning(
+                "Redis media key not found (expired or already consumed)",
+                extra={
+                    "conversation_id": conversation_id,
+                    "redis_key": redis_key,
+                    "event": "media_redis_key_missing"
+                }
+            )
+            return None
+        # Delete after successful read (one-time use)
+        await redis_client.delete(redis_key)
+        logger.info(
+            "Resolved media from Redis",
+            extra={
+                "conversation_id": conversation_id,
+                "redis_key": redis_key,
+                "size": len(data) if isinstance(data, (str, bytes)) else 0,
+                "event": "media_redis_fetch_success"
+            }
+        )
+        return data if isinstance(data, str) else data.decode("utf-8")
+    except Exception as exc:
+        logger.error(
+            "Failed to resolve media from Redis",
+            extra={
+                "conversation_id": conversation_id,
+                "redis_key": redis_key,
+                "error": str(exc),
+                "error_type": type(exc).__name__,
+                "event": "media_redis_fetch_error"
+            }
+        )
+        return None
 
 
 # Conversation state storage (per user) - for tracking status messages and pending messages
@@ -626,6 +710,189 @@ async def stream_response_to_telegram(
                                 "event": "message_edit_error"
                             }
                         )
+
+            # Handle media frames (send photos/videos to user)
+            elif chunk_type == "media":
+                # Media send request from backend
+                media_type_str = chunk_data.get("media_type", "photo")
+                source_type_str = chunk_data.get("source_type", "url")
+                source = chunk_data.get("source")
+                caption = chunk_data.get("caption")
+                filename = chunk_data.get("filename")
+                duration = chunk_data.get("duration")
+                width = chunk_data.get("width")
+                height = chunk_data.get("height")
+
+                # Resolve Redis-offloaded base64 media
+                if source_type_str == "redis_ref" and source:
+                    resolved = await resolve_redis_ref(
+                        get_redis_client(), source, conversation_id
+                    )
+                    if resolved:
+                        source = resolved
+                        source_type_str = "base64"
+                    else:
+                        logger.warning(
+                            "Skipping media frame: redis_ref could not be resolved",
+                            extra={"user_id": user_id, "event": "media_redis_ref_unresolved"}
+                        )
+                        continue
+
+                if not source:
+                    logger.warning(
+                        "Media frame received without source",
+                        extra={"user_id": user_id, "event": "media_no_source"}
+                    )
+                    continue
+
+                media_type = MEDIA_TYPE_MAP.get(media_type_str, MediaType.PHOTO)
+                source_type = SOURCE_TYPE_MAP.get(source_type_str, MediaSourceType.URL)
+
+                # Create MediaItem
+                media_item = MediaItem(
+                    media_type=media_type,
+                    source=source,
+                    source_type=source_type,
+                    caption=caption,
+                    filename=filename,
+                    duration=duration,
+                    width=width,
+                    height=height
+                )
+
+                # Send the media
+                try:
+                    result = await send_media(
+                        context=context,
+                        chat_id=chat_id,
+                        item=media_item,
+                        reply_to_message_id=message.message_id
+                    )
+
+                    if result.success:
+                        logger.info(
+                            "Media sent successfully",
+                            extra={
+                                "user_id": user_id,
+                                "media_type": media_type_str,
+                                "file_id": result.file_id[:20] + "..." if result.file_id else None,
+                                "event": "media_sent"
+                            }
+                        )
+                    else:
+                        logger.error(
+                            "Media send failed",
+                            extra={
+                                "user_id": user_id,
+                                "media_type": media_type_str,
+                                "error": result.error,
+                                "event": "media_send_failed"
+                            }
+                        )
+                except Exception as media_error:
+                    logger.error(
+                        "Exception while sending media",
+                        extra={
+                            "user_id": user_id,
+                            "media_type": media_type_str,
+                            "error": str(media_error),
+                            "error_type": type(media_error).__name__,
+                            "event": "media_send_exception"
+                        }
+                    )
+                continue
+
+            # Handle media_group frames (send albums to user)
+            elif chunk_type == "media_group":
+                items_data = chunk_data.get("items", [])
+                if not items_data:
+                    logger.warning(
+                        "Media group frame received without items",
+                        extra={"user_id": user_id, "event": "media_group_no_items"}
+                    )
+                    continue
+
+                # Create MediaItems
+                media_items = []
+                for item_data in items_data:
+                    media_type_str = item_data.get("media_type", "photo")
+                    source_type_str = item_data.get("source_type", "url")
+                    item_source = item_data.get("source")
+
+                    # Resolve Redis-offloaded base64 media per item
+                    if source_type_str == "redis_ref" and item_source:
+                        resolved = await resolve_redis_ref(
+                            get_redis_client(), item_source, conversation_id
+                        )
+                        if resolved:
+                            item_source = resolved
+                            source_type_str = "base64"
+                        else:
+                            continue  # skip unresolvable item
+
+                    # Only photos and videos are supported in media groups
+                    if media_type_str not in MEDIA_GROUP_TYPE_MAP:
+                        continue
+
+                    media_items.append(MediaItem(
+                        media_type=MEDIA_GROUP_TYPE_MAP.get(media_type_str, MediaType.PHOTO),
+                        source=item_source,
+                        source_type=SOURCE_TYPE_MAP.get(source_type_str, MediaSourceType.URL),
+                        caption=item_data.get("caption"),
+                        filename=item_data.get("filename"),
+                        duration=item_data.get("duration"),
+                        width=item_data.get("width"),
+                        height=item_data.get("height")
+                    ))
+
+                if not media_items:
+                    logger.warning(
+                        "No valid items in media group",
+                        extra={"user_id": user_id, "event": "media_group_no_valid_items"}
+                    )
+                    continue
+
+                # Send the media group
+                try:
+                    result = await send_media_group(
+                        context=context,
+                        chat_id=chat_id,
+                        items=media_items,
+                        reply_to_message_id=message.message_id
+                    )
+
+                    if result.success:
+                        logger.info(
+                            "Media group sent successfully",
+                            extra={
+                                "user_id": user_id,
+                                "item_count": len(media_items),
+                                "message_count": len(result.messages) if result.messages else 0,
+                                "event": "media_group_sent"
+                            }
+                        )
+                    else:
+                        logger.error(
+                            "Media group send failed",
+                            extra={
+                                "user_id": user_id,
+                                "item_count": len(media_items),
+                                "error": result.error,
+                                "event": "media_group_send_failed"
+                            }
+                        )
+                except Exception as media_error:
+                    logger.error(
+                        "Exception while sending media group",
+                        extra={
+                            "user_id": user_id,
+                            "item_count": len(media_items),
+                            "error": str(media_error),
+                            "error_type": type(media_error).__name__,
+                            "event": "media_group_send_exception"
+                        }
+                    )
+                continue
 
             # Handle done and error frames
             elif chunk_type in ["done", "error"]:
