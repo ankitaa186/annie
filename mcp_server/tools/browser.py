@@ -20,8 +20,23 @@ from mcp_server.logging import get_logger
 
 logger = get_logger(__name__)
 
+from urllib.parse import urlparse
+
 # Default browser service URL (overridable via env)
 _BROWSER_SERVICE_URL: Optional[str] = None
+
+
+def _extract_domain(url: str) -> Optional[str]:
+    """Extract the normalized hostname from a URL (strips www. prefix).
+
+    'https://www.reddit.com/r/foo' → 'reddit.com'
+    'https://mail.google.com'      → 'mail.google.com'
+    """
+    try:
+        hostname = urlparse(url).hostname
+        return hostname.removeprefix("www.") if hostname else None
+    except Exception:
+        return None
 
 
 def _get_browser_url() -> str:
@@ -95,6 +110,12 @@ async def _execute_action(
                 timeout=max(timeout_ms / 1000 + 5, 10),
             )
 
+        elif action_type == "go_back":
+            resp = await client.post(
+                f"{base}/sessions/{session_id}/go_back",
+                timeout=15,
+            )
+
         elif action_type == "wait":
             wait_ms = timeout_ms
             await asyncio.sleep(wait_ms / 1000)
@@ -131,7 +152,7 @@ async def browser_action_handler(
     profile: str = "default",
     session_id: Optional[str] = None,
     user_id: Optional[str] = None,
-    keep_session: bool = False,
+    keep_session: bool = True,
 ) -> Dict[str, Any]:
     """
     Execute a sequence of browser actions.
@@ -155,8 +176,8 @@ async def browser_action_handler(
     base = _get_browser_url()
     created_session = False
 
-    # Derive per-user profile when user_id is provided and no custom profile set
-    if user_id and profile == "default":
+    # Always derive profile from user_id — 1 context per user, no overrides
+    if user_id:
         profile = f"user_{user_id}"
 
     logger.info(
@@ -170,26 +191,50 @@ async def browser_action_handler(
     )
 
     async with httpx.AsyncClient() as client:
-        # ---- Create or reuse session ----------------------------------------
+        # ---- Create or reuse session (domain-aware) --------------------------
         if not session_id:
-            # Try to reuse an existing session with the same profile
+            # Determine the target domain from the first navigate action (if any)
+            target_domain = None
+            for act in actions:
+                if act.get("type") == "navigate" and act.get("url"):
+                    target_domain = _extract_domain(act["url"])
+                    break
+
             try:
                 list_resp = await client.get(f"{base}/sessions", timeout=5)
                 if list_resp.status_code == 200:
                     list_data = list_resp.json()
                     existing = list_data.get("data", {}).get("sessions", [])
-                    for sess in existing:
-                        if sess.get("profile") == profile:
-                            session_id = sess["session_id"]
-                            logger.info(
-                                f"Reusing existing session {session_id} for profile '{profile}'",
-                                extra={
-                                    "request_id": request_id,
-                                    "session_id": session_id,
-                                    "idle_seconds": sess.get("idle_seconds"),
-                                },
-                            )
-                            break
+                    # Filter to this user's profile
+                    profile_sessions = [s for s in existing if s.get("profile") == profile]
+
+                    if target_domain and profile_sessions:
+                        # Look for an existing tab on the same domain
+                        for sess in profile_sessions:
+                            if sess.get("domain") == target_domain:
+                                session_id = sess["session_id"]
+                                logger.info(
+                                    f"Reusing session {session_id} (domain={target_domain})",
+                                    extra={
+                                        "request_id": request_id,
+                                        "session_id": session_id,
+                                        "idle_seconds": sess.get("idle_seconds"),
+                                    },
+                                )
+                                break
+                    elif not target_domain and profile_sessions:
+                        # No navigate action (e.g. just screenshot/content) —
+                        # pick the most recently used session (lowest idle_seconds)
+                        mru = min(profile_sessions, key=lambda s: s.get("idle_seconds", 0))
+                        session_id = mru["session_id"]
+                        logger.info(
+                            f"Reusing MRU session {session_id} (no navigate action)",
+                            extra={
+                                "request_id": request_id,
+                                "session_id": session_id,
+                                "idle_seconds": mru.get("idle_seconds"),
+                            },
+                        )
             except Exception as exc:
                 logger.debug(
                     f"Could not list sessions for reuse check: {exc}",
@@ -297,7 +342,7 @@ async def browser_action_handler(
                 )
         elif created_session and keep_session:
             logger.info(
-                f"Keeping browser session {session_id} alive (1-hour idle timeout)",
+                f"Keeping browser session {session_id} alive (24-hour idle timeout)",
                 extra={"request_id": request_id, "session_id": session_id},
             )
 
@@ -329,6 +374,11 @@ browser_action_tool = {
     "name": "browser_action",
     "description": (
         "Full browser control — navigate, read, click, type, screenshot, run JavaScript. "
+        "Each site gets its own tab (domain-based): navigating to reddit.com reuses the Reddit tab, "
+        "gmail.com reuses the Gmail tab, etc. Tabs auto-expire after 24 hours idle; at capacity the "
+        "least recently used tab is evicted. "
+        "IMPORTANT: If the user asks about a site that's already open, send a screenshot first to see "
+        "the current state before navigating again. "
         "Use for anything the other web tools can't handle: interacting with pages, logging in, "
         "filling forms, sites that block scrapers, JavaScript-heavy apps, or when you're unsure which tool to use. "
         "Supports persistent login sessions via Chrome profiles so authenticated sites stay logged in. "
@@ -353,6 +403,7 @@ browser_action_tool = {
                                 "content",
                                 "wait",
                                 "evaluate",
+                                "go_back",
                                 "close_session",
                             ],
                             "description": "Action type",
@@ -397,8 +448,8 @@ browser_action_tool = {
             },
             "keep_session": {
                 "type": "boolean",
-                "default": False,
-                "description": "Keep session alive after actions complete for multi-step flows",
+                "default": True,
+                "description": "Keep session alive after actions complete (default: true). Set false to close immediately.",
             },
         },
         "required": ["actions"],
