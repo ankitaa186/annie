@@ -8,6 +8,7 @@ with function calling, tool orchestration, and Redis-based conversation state.
 import asyncio
 import json
 import time
+import uuid
 from typing import AsyncGenerator, Dict, Any, List, Optional
 from datetime import datetime, timezone
 
@@ -21,7 +22,7 @@ from api.models.file_attachment import FileAttachment, get_files_metadata
 from api.state import StateManager, StateError
 from api.status import StatusContext, emit_status
 from api.logging import get_logger
-from api.utils import inject_user_id
+from api.utils import inject_user_id, strip_base64_from_tool_result
 
 try:
     from langfuse.decorators import observe, langfuse_context
@@ -68,6 +69,335 @@ def format_status_frame(message: str) -> Dict[str, Any]:
         "event": "message",
         "data": json.dumps({"type": "status", "message": message})
     }
+
+
+def format_media_frame(
+    media_type: str,
+    source: str,
+    source_type: str = "url",
+    caption: Optional[str] = None,
+    filename: Optional[str] = None,
+    duration: Optional[int] = None,
+    width: Optional[int] = None,
+    height: Optional[int] = None
+) -> Dict[str, Any]:
+    """
+    Format media as SSE event for sending to Telegram client.
+
+    Creates a media frame that will be processed by the Telegram bot's
+    media_sender module to send photos, videos, or other media to users.
+
+    Args:
+        media_type: Type of media ("photo", "video", "animation", "voice", "video_note")
+        source: Media source (URL, base64 data, or Telegram file_id)
+        source_type: Type of source ("url", "base64", "file_id")
+        caption: Optional caption for the media (supports HTML formatting)
+        filename: Optional filename for the media
+        duration: Optional duration in seconds (for video/voice)
+        width: Optional width in pixels (for video)
+        height: Optional height in pixels (for video)
+
+    Returns:
+        SSE event dictionary with type "media"
+
+    Example:
+        >>> format_media_frame("photo", "https://example.com/image.jpg", caption="A beautiful sunset")
+        {"event": "message", "data": '{"type":"media","media_type":"photo","source":"...","source_type":"url","caption":"..."}'}
+    """
+    frame = {
+        "type": "media",
+        "media_type": media_type,
+        "source": source,
+        "source_type": source_type
+    }
+
+    # Add optional fields if provided
+    if caption:
+        frame["caption"] = caption
+    if filename:
+        frame["filename"] = filename
+    if duration is not None:
+        frame["duration"] = duration
+    if width is not None:
+        frame["width"] = width
+    if height is not None:
+        frame["height"] = height
+
+    return {
+        "event": "message",
+        "data": json.dumps(frame)
+    }
+
+
+def format_media_group_frame(items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Format media group (album) as SSE event for sending to Telegram client.
+
+    Creates a media_group frame that will be processed by the Telegram bot's
+    media_sender module to send albums (multiple photos/videos) to users.
+    Albums can contain 2-10 items and support only photos and videos.
+
+    Args:
+        items: List of media items, each with:
+            - media_type: "photo" or "video"
+            - source: Media source (URL, base64, or file_id)
+            - source_type: Type of source ("url", "base64", "file_id")
+            - caption: Optional caption (only first item's caption is shown)
+
+    Returns:
+        SSE event dictionary with type "media_group"
+
+    Example:
+        >>> items = [
+        ...     {"media_type": "photo", "source": "https://example.com/1.jpg", "source_type": "url"},
+        ...     {"media_type": "photo", "source": "https://example.com/2.jpg", "source_type": "url", "caption": "Photos from today"}
+        ... ]
+        >>> format_media_group_frame(items)
+        {"event": "message", "data": '{"type":"media_group","items":[...]}'}
+    """
+    return {
+        "event": "message",
+        "data": json.dumps({
+            "type": "media_group",
+            "items": items
+        })
+    }
+
+
+def extract_media_from_tool_result(tool_result: Any, tool_name: str) -> Optional[Dict[str, Any]]:
+    """
+    Extract media data from a tool result if it contains media to send.
+
+    Checks if a tool result contains media that should be sent to the user
+    (e.g., generated images, fetched photos, etc.). Returns media frame data
+    if found, None otherwise.
+
+    Tool results should include media in one of these formats:
+    1. Direct media object: {"media": {"type": "photo", "url": "...", "caption": "..."}}
+    2. Image generation result: {"image_url": "...", "prompt": "..."} (for image gen tools)
+    3. Media list: {"media_items": [{"type": "photo", "url": "..."}, ...]}
+    4. Browser screenshot: {"results": [{"action": "screenshot", "data": {"base64": "..."}}]}
+
+    Args:
+        tool_result: The result returned by the tool
+        tool_name: Name of the tool that returned the result
+
+    Returns:
+        Dict with media frame data, or None if no media found
+    """
+    if not isinstance(tool_result, dict):
+        return None
+
+    # Format 1: Direct media object
+    if "media" in tool_result:
+        media = tool_result["media"]
+        if isinstance(media, dict) and "type" in media:
+            return {
+                "single": True,
+                "media_type": media.get("type", "photo"),
+                "source": media.get("url") or media.get("source") or media.get("data"),
+                "source_type": media.get("source_type", "url"),
+                "caption": media.get("caption"),
+                "filename": media.get("filename"),
+                "duration": media.get("duration"),
+                "width": media.get("width"),
+                "height": media.get("height")
+            }
+
+    # Format 2: Image generation result (common pattern for DALL-E, Stable Diffusion, etc.)
+    if tool_name in ["generate_image", "create_image", "dalle", "stable_diffusion", "image_generation"]:
+        if "image_url" in tool_result:
+            return {
+                "single": True,
+                "media_type": "photo",
+                "source": tool_result["image_url"],
+                "source_type": "url",
+                "caption": tool_result.get("prompt") or tool_result.get("caption")
+            }
+        if "image_data" in tool_result or "base64" in tool_result:
+            return {
+                "single": True,
+                "media_type": "photo",
+                "source": tool_result.get("image_data") or tool_result.get("base64"),
+                "source_type": "base64",
+                "caption": tool_result.get("prompt") or tool_result.get("caption")
+            }
+        if "images" in tool_result and isinstance(tool_result["images"], list):
+            # Multiple images generated
+            items = []
+            for i, img in enumerate(tool_result["images"]):
+                if isinstance(img, dict):
+                    items.append({
+                        "media_type": "photo",
+                        "source": img.get("url") or img.get("data"),
+                        "source_type": "base64" if img.get("data") else "url",
+                        "caption": tool_result.get("prompt") if i == 0 else None
+                    })
+                elif isinstance(img, str):
+                    # Assume URL if string
+                    items.append({
+                        "media_type": "photo",
+                        "source": img,
+                        "source_type": "url",
+                        "caption": tool_result.get("prompt") if i == 0 else None
+                    })
+            if items:
+                return {"single": False, "items": items}
+
+    # Format 3: Media list (for tools that return multiple media items)
+    if "media_items" in tool_result:
+        items = []
+        for item in tool_result["media_items"]:
+            if isinstance(item, dict):
+                items.append({
+                    "media_type": item.get("type", "photo"),
+                    "source": item.get("url") or item.get("source") or item.get("data"),
+                    "source_type": item.get("source_type", "url"),
+                    "caption": item.get("caption")
+                })
+        if items:
+            if len(items) == 1:
+                return {"single": True, **items[0]}
+            return {"single": False, "items": items}
+
+    # Format 4: Browser screenshot results
+    # browser_action returns {"results": [{"action": "screenshot", "data": {"base64": "...", "width": .., "height": ..}}]}
+    if tool_name == "browser_action" and isinstance(tool_result.get("results"), list):
+        screenshots = []
+        for r in tool_result["results"]:
+            if (
+                isinstance(r, dict)
+                and r.get("action") == "screenshot"
+                and r.get("status") == "success"
+                and isinstance(r.get("data"), dict)
+                and r["data"].get("base64")
+            ):
+                screenshots.append({
+                    "media_type": "photo",
+                    "source": r["data"]["base64"],
+                    "source_type": "base64",
+                    "width": r["data"].get("width"),
+                    "height": r["data"].get("height"),
+                })
+        if len(screenshots) == 1:
+            return {"single": True, **screenshots[0]}
+        elif screenshots:
+            return {"single": False, "items": screenshots}
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Redis offloading for large base64 media
+# ---------------------------------------------------------------------------
+MEDIA_OFFLOAD_THRESHOLD = 64 * 1024   # 64 KB
+MEDIA_OFFLOAD_TTL = 300               # 5 minutes
+
+
+async def offload_base64_to_redis(
+    media_data: Dict[str, Any],
+    redis_client,
+    conversation_id: str
+) -> Dict[str, Any]:
+    """
+    Replace large base64 sources with Redis key references.
+
+    If a media item's source_type is "base64" and the payload exceeds
+    MEDIA_OFFLOAD_THRESHOLD, the base64 string is stored in Redis under
+    a unique key and the media_data dict is mutated to carry a small
+    ``redis_ref`` source instead of the full blob.  This keeps SSE frames
+    small and avoids aiohttp chunk-size errors.
+
+    On Redis failure the original media_data is returned unchanged so that
+    the existing 2 MB read_bufsize safety net can handle it.
+
+    Args:
+        media_data: Dict from extract_media_from_tool_result
+        redis_client: An async Redis client (e.g. ``state_manager.redis_client``)
+        conversation_id: Used as part of the Redis key namespace
+
+    Returns:
+        The (possibly mutated) media_data dict.
+    """
+    async def _offload_item(item: Dict[str, Any]) -> None:
+        """Offload a single item dict in-place if it qualifies."""
+        if item.get("source_type") != "base64":
+            return
+        source = item.get("source", "")
+        if len(source) <= MEDIA_OFFLOAD_THRESHOLD:
+            return
+        redis_key = f"media:{conversation_id}:{uuid.uuid4()}"
+        try:
+            await redis_client.set(redis_key, source, ex=MEDIA_OFFLOAD_TTL)
+            item["source"] = redis_key
+            item["source_type"] = "redis_ref"
+            logger.info(
+                "Large base64 media offloaded to Redis",
+                extra={
+                    "conversation_id": conversation_id,
+                    "redis_key": redis_key,
+                    "original_size": len(source),
+                    "event": "media_offloaded"
+                }
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to offload media to Redis, leaving inline",
+                extra={
+                    "conversation_id": conversation_id,
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                    "event": "media_offload_failed"
+                }
+            )
+
+    try:
+        if media_data.get("single", True):
+            await _offload_item(media_data)
+        else:
+            for item in media_data.get("items", []):
+                await _offload_item(item)
+    except Exception as exc:
+        logger.warning(
+            "Unexpected error during media offload, leaving inline",
+            extra={
+                "conversation_id": conversation_id,
+                "error": str(exc),
+                "event": "media_offload_unexpected_error"
+            }
+        )
+
+    return media_data
+
+
+def build_media_sse_frames(
+    media_data: Dict[str, Any]
+) -> List[Dict[str, Any]]:
+    """
+    Build SSE frame(s) from extracted media data.
+
+    Converts the output of extract_media_from_tool_result into one or more
+    SSE event dicts ready to yield to the client.
+
+    Args:
+        media_data: Dict from extract_media_from_tool_result (must not be None)
+
+    Returns:
+        List of SSE event dicts (typically 1 element, or 1 media_group frame)
+    """
+    if media_data.get("single", True):
+        return [format_media_frame(
+            media_type=media_data.get("media_type", "photo"),
+            source=media_data.get("source"),
+            source_type=media_data.get("source_type", "url"),
+            caption=media_data.get("caption"),
+            filename=media_data.get("filename"),
+            duration=media_data.get("duration"),
+            width=media_data.get("width"),
+            height=media_data.get("height")
+        )]
+    else:
+        return [format_media_group_frame(media_data.get("items", []))]
 
 
 @observe(name="llm_streaming", as_type="span")
@@ -353,31 +683,62 @@ async def stream_generator(
                             )
                         continue  # Don't forward persistence events to SSE client
 
-                    if event.get("type") == "tool_persist_result" and state_manager:
+                    if event.get("type") == "tool_persist_result":
+                        tool_name = event.get("tool_name", "")
+                        result_content = event.get("result_content", "")
+
+                        if state_manager:
+                            try:
+                                await state_manager.add_message(conversation_id, {
+                                    "role": "tool",
+                                    "content": result_content,
+                                    "tool_call_id": event.get("tool_call_id", ""),
+                                    "tool_name": tool_name,
+                                    "is_tool_result": True
+                                })
+                                logger.info(
+                                    "Gemini tool result persisted to Redis",
+                                    extra={
+                                        "conversation_id": conversation_id,
+                                        "tool_name": tool_name
+                                    }
+                                )
+                            except Exception as e:
+                                logger.warning(
+                                    "Failed to persist Gemini tool result to Redis",
+                                    extra={
+                                        "conversation_id": conversation_id,
+                                        "tool_name": tool_name,
+                                        "error": str(e)
+                                    }
+                                )
+
+                        # Check if tool result contains media to send to user
                         try:
-                            await state_manager.add_message(conversation_id, {
-                                "role": "tool",
-                                "content": event.get("result_content", ""),
-                                "tool_call_id": event.get("tool_call_id", ""),
-                                "tool_name": event.get("tool_name", ""),
-                                "is_tool_result": True
-                            })
-                            logger.info(
-                                "Gemini tool result persisted to Redis",
-                                extra={
-                                    "conversation_id": conversation_id,
-                                    "tool_name": event.get("tool_name", "")
-                                }
-                            )
-                        except Exception as e:
-                            logger.warning(
-                                "Failed to persist Gemini tool result to Redis",
-                                extra={
-                                    "conversation_id": conversation_id,
-                                    "tool_name": event.get("tool_name", ""),
-                                    "error": str(e)
-                                }
-                            )
+                            tool_result = json.loads(result_content) if isinstance(result_content, str) else result_content
+                        except (json.JSONDecodeError, TypeError):
+                            tool_result = None
+
+                        if isinstance(tool_result, dict):
+                            media_data = extract_media_from_tool_result(tool_result, tool_name)
+                            if media_data:
+                                if state_manager:
+                                    media_data = await offload_base64_to_redis(
+                                        media_data, state_manager.redis_client, conversation_id
+                                    )
+                                logger.info(
+                                    "Tool returned media to send",
+                                    extra={
+                                        "conversation_id": conversation_id,
+                                        "tool_name": tool_name,
+                                        "is_single": media_data.get("single", True),
+                                        "media_type": media_data.get("media_type", "unknown"),
+                                        "event": "tool_media_emit"
+                                    }
+                                )
+                                for frame in build_media_sse_frames(media_data):
+                                    yield frame
+
                         continue  # Don't forward persistence events to SSE client
 
                     # Drain status queue before yielding event (ensures status frames are interleaved)
@@ -768,8 +1129,29 @@ async def stream_generator(
                                 except asyncio.QueueEmpty:
                                     break
 
-                        # Add tool result to conversation
-                        tool_content = json.dumps(tool_result)
+                            # Check if tool result contains media to send to user
+                            media_data = extract_media_from_tool_result(tool_result, function_name)
+                            if media_data:
+                                if state_manager:
+                                    media_data = await offload_base64_to_redis(
+                                        media_data, state_manager.redis_client, conversation_id
+                                    )
+                                logger.info(
+                                    "Tool returned media to send",
+                                    extra={
+                                        "conversation_id": conversation_id,
+                                        "tool_name": function_name,
+                                        "tool_call_id": tool_call_id,
+                                        "is_single": media_data.get("single", True),
+                                        "media_type": media_data.get("media_type", "unknown"),
+                                        "event": "tool_media_emit"
+                                    }
+                                )
+                                for frame in build_media_sse_frames(media_data):
+                                    yield frame
+
+                        # Add tool result to conversation (strip base64 so LLM won't echo it)
+                        tool_content = json.dumps(strip_base64_from_tool_result(tool_result))
                         conversation_messages.append({
                             "role": "tool",
                             "content": tool_content,

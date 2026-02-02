@@ -243,9 +243,10 @@ manage_host_terminal_mcp() {
         return 0
     fi
     
-    # Start server in background
+    # Start server in background (setsid + disown to fully detach from parent shell/session)
     echo "Starting host-terminal-mcp on port $HOST_TERMINAL_PORT (mode: $HOST_TERMINAL_MODE)..."
-    nohup host-terminal-mcp --http --port "$HOST_TERMINAL_PORT" --mode "$HOST_TERMINAL_MODE" > "$HOST_TERMINAL_LOG" 2>&1 &
+    setsid nohup host-terminal-mcp --http --port "$HOST_TERMINAL_PORT" --mode "$HOST_TERMINAL_MODE" > "$HOST_TERMINAL_LOG" 2>&1 &
+    disown
     
     # Wait for server to start
     sleep 2

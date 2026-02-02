@@ -15,7 +15,7 @@ from enum import Enum
 from io import BytesIO
 from typing import List, Optional, Tuple
 
-from telegram import Document, Message, PhotoSize
+from telegram import Document, Message, PhotoSize, Video
 from telegram.ext import ContextTypes
 
 from telegram_bot.logger import get_logger
@@ -26,6 +26,7 @@ logger = get_logger(__name__)
 class FileCategory(Enum):
     """File category enumeration."""
     IMAGE = "image"
+    VIDEO = "video"
     DOCUMENT = "document"
     SPREADSHEET = "spreadsheet"
 
@@ -111,6 +112,14 @@ SUPPORTED_MIME_TYPES = {
     "image/gif": {"category": FileCategory.IMAGE, "gemini": True, "chatgpt": True},
     "image/webp": {"category": FileCategory.IMAGE, "gemini": True, "chatgpt": True},
 
+    # Videos (Gemini native support)
+    "video/mp4": {"category": FileCategory.VIDEO, "gemini": True, "chatgpt": False},
+    "video/mpeg": {"category": FileCategory.VIDEO, "gemini": True, "chatgpt": False},
+    "video/quicktime": {"category": FileCategory.VIDEO, "gemini": True, "chatgpt": False},
+    "video/webm": {"category": FileCategory.VIDEO, "gemini": True, "chatgpt": False},
+    "video/x-msvideo": {"category": FileCategory.VIDEO, "gemini": True, "chatgpt": False},
+    "video/3gpp": {"category": FileCategory.VIDEO, "gemini": True, "chatgpt": False},
+
     # Documents (Gemini native, ChatGPT needs extraction)
     "application/pdf": {"category": FileCategory.DOCUMENT, "gemini": True, "chatgpt": False},
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {
@@ -128,6 +137,7 @@ SUPPORTED_MIME_TYPES = {
 # File size limits by category (in bytes)
 FILE_SIZE_LIMITS = {
     FileCategory.IMAGE: 10 * 1024 * 1024,      # 10MB
+    FileCategory.VIDEO: 50 * 1024 * 1024,      # 50MB (Telegram bot limit)
     FileCategory.DOCUMENT: 20 * 1024 * 1024,   # 20MB
     FileCategory.SPREADSHEET: 20 * 1024 * 1024, # 20MB
 }
@@ -143,6 +153,7 @@ FILE_DOWNLOAD_MAX_RETRIES = 1
 # File type icons for acknowledgment messages
 FILE_TYPE_ICONS = {
     FileCategory.IMAGE: "📷",
+    FileCategory.VIDEO: "🎬",
     FileCategory.DOCUMENT: "📄",
     FileCategory.SPREADSHEET: "📊",
 }
@@ -240,6 +251,13 @@ def normalize_mime_type(mime_type: Optional[str], filename: str) -> str:
         ".png": "image/png",
         ".gif": "image/gif",
         ".webp": "image/webp",
+        ".mp4": "video/mp4",
+        ".mpeg": "video/mpeg",
+        ".mpg": "video/mpeg",
+        ".mov": "video/quicktime",
+        ".webm": "video/webm",
+        ".avi": "video/x-msvideo",
+        ".3gp": "video/3gpp",
         ".pdf": "application/pdf",
         ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         ".txt": "text/plain",
@@ -479,9 +497,10 @@ async def process_document(
     # Check if MIME type is supported
     if not is_mime_type_supported(mime_type):
         supported_types = ", ".join([
-            "JPEG, PNG, GIF, WEBP",
-            "PDF, DOCX, TXT",
-            "XLSX, CSV"
+            "JPEG, PNG, GIF, WEBP (images)",
+            "MP4, MPEG, MOV, WEBM, AVI, 3GP (videos)",
+            "PDF, DOCX, TXT (documents)",
+            "XLSX, CSV (spreadsheets)"
         ])
         return None, FileError(
             filename=filename,
@@ -554,6 +573,104 @@ async def process_document(
         )
 
 
+async def process_video(
+    video: Video,
+    context: ContextTypes.DEFAULT_TYPE
+) -> Tuple[Optional[FileAttachment], Optional[FileError]]:
+    """
+    Process a video attachment from Telegram.
+
+    Args:
+        video: Telegram Video object
+        context: Bot context
+
+    Returns:
+        Tuple of (FileAttachment or None, FileError or None)
+    """
+    # Videos are typically MP4
+    mime_type = video.mime_type or "video/mp4"
+    filename = video.file_name or f"video_{video.file_unique_id}.mp4"
+    size_bytes = video.file_size or 0
+
+    # Normalize mime type
+    mime_type = normalize_mime_type(mime_type, filename)
+
+    # Check if MIME type is supported
+    if not is_mime_type_supported(mime_type):
+        return None, FileError(
+            filename=filename,
+            error_type=FileErrorType.UNSUPPORTED_FORMAT,
+            message=f"Unsupported video format: {mime_type}"
+        )
+
+    # Validate size
+    is_valid, error_msg = validate_file_size(mime_type, size_bytes)
+    if not is_valid:
+        error_type = FileErrorType.EMPTY_FILE if size_bytes == 0 else FileErrorType.SIZE_EXCEEDED
+        return None, FileError(
+            filename=filename,
+            error_type=error_type,
+            message=error_msg or "Invalid video"
+        )
+
+    try:
+        # Download file
+        file_bytes = await download_file_with_retry(context, video.file_id)
+
+        # Validate downloaded content
+        if len(file_bytes) == 0:
+            return None, FileError(
+                filename=filename,
+                error_type=FileErrorType.EMPTY_FILE,
+                message="Downloaded video is empty"
+            )
+
+        # Encode to base64
+        data_base64 = encode_file_to_base64(file_bytes)
+
+        logger.info(
+            "Video processed successfully",
+            extra={
+                "file_name": filename,
+                "mime_type": mime_type,
+                "size_bytes": len(file_bytes),
+                "duration": video.duration,
+                "width": video.width,
+                "height": video.height,
+                "event": "video_processed"
+            }
+        )
+
+        return FileAttachment(
+            filename=filename,
+            mime_type=mime_type,
+            size_bytes=len(file_bytes),
+            data_base64=data_base64
+        ), None
+
+    except asyncio.TimeoutError:
+        return None, FileError(
+            filename=filename,
+            error_type=FileErrorType.TIMEOUT,
+            message="Video download timed out. Please try a smaller video."
+        )
+    except Exception as e:
+        logger.error(
+            "Video processing failed",
+            extra={
+                "file_name": filename,
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "event": "video_processing_failed"
+            }
+        )
+        return None, FileError(
+            filename=filename,
+            error_type=FileErrorType.DOWNLOAD_FAILED,
+            message="Failed to download video. Please try again."
+        )
+
+
 async def process_message_files(
     message: Message,
     context: ContextTypes.DEFAULT_TYPE
@@ -564,6 +681,7 @@ async def process_message_files(
     Handles:
     - Single photos
     - Photo albums (media groups)
+    - Videos
     - Document attachments
 
     Args:
@@ -580,6 +698,14 @@ async def process_message_files(
         # Get the largest photo size
         largest_photo = message.photo[-1]
         attachment, error = await process_photo(largest_photo, context)
+        if attachment:
+            result.successful.append(attachment)
+        if error:
+            result.failed.append(error)
+
+    # Check for video
+    if message.video:
+        attachment, error = await process_video(message.video, context)
         if attachment:
             result.successful.append(attachment)
         if error:
@@ -616,9 +742,9 @@ def has_processable_files(message: Message) -> bool:
         message: Telegram Message object
 
     Returns:
-        True if message has photos or documents
+        True if message has photos, videos, or documents
     """
-    return bool(message.photo) or bool(message.document)
+    return bool(message.photo) or bool(message.video) or bool(message.document)
 
 
 def format_file_acknowledgment(files: List[FileAttachment]) -> str:
@@ -657,6 +783,7 @@ def format_file_error(error: FileError) -> str:
             f"Sorry, I can't process {error.filename}.\n\n"
             "I support:\n"
             "• Images: JPEG, PNG, GIF, WEBP\n"
+            "• Videos: MP4, MPEG, MOV, WEBM, AVI, 3GP\n"
             "• Documents: PDF, DOCX, TXT\n"
             "• Spreadsheets: XLSX, CSV\n\n"
             "Could you send the file in one of these formats?"
@@ -665,6 +792,7 @@ def format_file_error(error: FileError) -> str:
             f"That file is too large ({error.filename}).\n\n"
             "Please send:\n"
             "• Images under 10MB\n"
+            "• Videos under 50MB\n"
             "• Documents under 20MB"
         ),
         FileErrorType.DOWNLOAD_FAILED: (

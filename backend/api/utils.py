@@ -2,8 +2,45 @@
 Shared utility functions for the Annie backend API.
 """
 
-from typing import Any, Dict, Optional
+import re
+from typing import Any, Dict, List, Optional
 import logging
+
+# Threshold for considering a string "large base64" (matches stream.py MEDIA_OFFLOAD_THRESHOLD)
+_BASE64_STRIP_THRESHOLD = 64 * 1024  # 64 KB
+_BASE64_PATTERN = re.compile(r'^[A-Za-z0-9+/\n]+=*$')
+
+
+def strip_base64_from_tool_result(
+    result: Any,
+    threshold: int = _BASE64_STRIP_THRESHOLD,
+) -> Any:
+    """
+    Recursively replace large base64 strings in a tool result with a placeholder.
+
+    This prevents LLMs from seeing raw base64 in conversation context and
+    echoing it back as inline ``data:`` URIs in their text responses.
+    Only strings that exceed *threshold* **and** consist solely of base64
+    characters are replaced.
+
+    Args:
+        result: Tool result (dict, list, or primitive).
+        threshold: Minimum string length to consider for stripping.
+
+    Returns:
+        A shallow copy of *result* with large base64 values replaced by
+        ``"[image data removed - sent to user as media]"``.
+    """
+    if isinstance(result, dict):
+        return {k: strip_base64_from_tool_result(v, threshold) for k, v in result.items()}
+    if isinstance(result, list):
+        return [strip_base64_from_tool_result(item, threshold) for item in result]
+    if isinstance(result, str) and len(result) > threshold:
+        # Quick check: base64 has no spaces; sample the head to avoid scanning the whole string
+        sample = result[:256]
+        if _BASE64_PATTERN.match(sample):
+            return "[image data removed - sent to user as media]"
+    return result
 
 
 def inject_user_id(

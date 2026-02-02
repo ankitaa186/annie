@@ -172,6 +172,31 @@ async def browser_action_handler(
     async with httpx.AsyncClient() as client:
         # ---- Create or reuse session ----------------------------------------
         if not session_id:
+            # Try to reuse an existing session with the same profile
+            try:
+                list_resp = await client.get(f"{base}/sessions", timeout=5)
+                if list_resp.status_code == 200:
+                    list_data = list_resp.json()
+                    existing = list_data.get("data", {}).get("sessions", [])
+                    for sess in existing:
+                        if sess.get("profile") == profile:
+                            session_id = sess["session_id"]
+                            logger.info(
+                                f"Reusing existing session {session_id} for profile '{profile}'",
+                                extra={
+                                    "request_id": request_id,
+                                    "session_id": session_id,
+                                    "idle_seconds": sess.get("idle_seconds"),
+                                },
+                            )
+                            break
+            except Exception as exc:
+                logger.debug(
+                    f"Could not list sessions for reuse check: {exc}",
+                    extra={"request_id": request_id},
+                )
+
+        if not session_id:
             try:
                 resp = await client.post(
                     f"{base}/sessions",

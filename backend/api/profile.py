@@ -94,7 +94,12 @@ class ProfileManager:
             self.redis_client = redis.Redis(
                 host=redis_host,
                 port=redis_port,
-                decode_responses=True
+                decode_responses=True,
+                socket_connect_timeout=5,
+                socket_timeout=5,
+                socket_keepalive=True,
+                health_check_interval=30,
+                retry_on_timeout=True
             )
             self._owned_redis = True
             logger.debug(f"Created Redis connection to {redis_host}:{redis_port}")

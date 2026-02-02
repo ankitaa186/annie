@@ -253,7 +253,7 @@ terminal-start: ## Start host-terminal-mcp server
 		uv tool install --force 'host-terminal-mcp[http]' >/dev/null 2>&1; \
 		PORT=$${HOST_TERMINAL_PORT:-8099}; \
 		MODE=$${HOST_TERMINAL_MODE:-allowlist}; \
-		nohup host-terminal-mcp --http --port $$PORT --mode $$MODE > /tmp/host-terminal-mcp.log 2>&1 & \
+		setsid nohup host-terminal-mcp --http --port $$PORT --mode $$MODE > /tmp/host-terminal-mcp.log 2>&1 & disown; \
 		sleep 2; \
 		if curl -s "http://localhost:$$PORT/health" >/dev/null 2>&1; then \
 			echo "✓ host-terminal-mcp running on port $$PORT (mode: $$MODE)"; \
