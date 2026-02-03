@@ -468,7 +468,7 @@ async def navigate(session_id: str, req: NavigateRequest):
 async def go_back(session_id: str):
     info = manager.get_session(session_id)
     try:
-        await info.page.go_back(wait_until="domcontentloaded")
+        await info.page.go_back(wait_until="commit", timeout=10000)
         title = await info.page.title()
         return JSONResponse(
             content={

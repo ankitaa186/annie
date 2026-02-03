@@ -9,6 +9,7 @@ content extraction, JavaScript evaluation, and wait.
 """
 
 import asyncio
+import random
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -276,6 +277,12 @@ async def browser_action_handler(
         # ---- Execute actions sequentially -----------------------------------
         results: List[Dict[str, Any]] = []
         for idx, action in enumerate(actions):
+            # Human-like delay between actions to avoid "clicking too fast" detection.
+            # Skip delay before the first action and before non-interactive actions.
+            if idx > 0 and action.get("type") in ("navigate", "click", "type"):
+                delay = random.uniform(0.4, 1.2)
+                await asyncio.sleep(delay)
+
             action_result = await _execute_action(client, session_id, action, request_id)
 
             # Expired session retry: if session_id was provided (not created here)
