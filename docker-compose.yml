@@ -190,7 +190,7 @@ services:
         - VITE_API_URL=/api
     container_name: annie-web
     ports:
-      - "${WEB_PORT:-3000}:80"
+      - "${WEB_PORT:-3003}:80"
     depends_on:
       backend:
         condition: service_healthy
