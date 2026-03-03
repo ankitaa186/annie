@@ -11,7 +11,7 @@ import logging
 import pytest
 import asyncio
 import time
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 
 # Reset context vars before each test

@@ -79,7 +79,6 @@ class TestEndToEndStreaming:
         assert chat_response["status"] == "streaming"
         assert "stream_url" in chat_response
 
-        conversation_id = chat_response["conversation_id"]
         stream_url = chat_response["stream_url"]
 
         # Step 2: Connect to streaming endpoint

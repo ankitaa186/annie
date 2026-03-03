@@ -2,7 +2,6 @@
 Unit tests for MemoryClient
 """
 
-import json
 import os
 import pytest
 from unittest.mock import AsyncMock, Mock, patch
@@ -282,7 +281,7 @@ class TestRetrieveMemories:
         with patch.object(memory_client.client, 'get', new_callable=AsyncMock) as mock_get:
             mock_get.return_value = mock_response
 
-            result = await memory_client.retrieve_memories(
+            await memory_client.retrieve_memories(
                 "user123",
                 "stock investment",
                 limit=10,

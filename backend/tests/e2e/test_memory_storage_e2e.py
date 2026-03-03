@@ -4,14 +4,12 @@ Integration tests for end-to-end memory storage flow
 Tests the complete flow: chat request → memory storage (fire-and-forget on every message)
 """
 
-import asyncio
 import json
 import pytest
 from unittest.mock import AsyncMock, Mock, patch
 
 from api.routes.chat import ChatRequest, create_chat
 from api.memory import MemoryManager
-from api.state import StateManager
 from fastapi import BackgroundTasks
 from starlette.requests import Request
 from starlette.datastructures import Headers
