@@ -27,9 +27,10 @@ from playwright.async_api import async_playwright, Browser, BrowserContext, Page
 ENVIRONMENT = os.getenv("ENVIRONMENT", "dev")
 BROWSER_ALLOWED_DOMAINS = os.getenv("BROWSER_ALLOWED_DOMAINS", "")
 PROFILES_DIR = "/data/profiles"
-MAX_SESSIONS = 5
-SESSION_TIMEOUT_SECONDS = int(os.getenv("BROWSER_SESSION_TIMEOUT", "3600"))  # 1 hour
+MAX_SESSIONS = 10
+SESSION_TIMEOUT_SECONDS = int(os.getenv("BROWSER_SESSION_TIMEOUT", "86400"))  # 24 hours
 CLEANUP_INTERVAL_SECONDS = 60
+CONTEXT_SAVE_INTERVAL_SECONDS = 300  # save all context state to disk every 5 minutes
 
 _PACIFIC_TZ = pytz.timezone("America/Los_Angeles")
 
@@ -120,19 +121,30 @@ class SessionInfo:
         self.context = context
         self.profile = profile
         self.last_activity = time.time()
+        self.primary_domain: Optional[str] = None  # set on explicit navigate
 
     def touch(self):
         self.last_activity = time.time()
 
 
 class BrowserManager:
-    """Manages Playwright browser lifecycle, contexts and sessions."""
+    """Manages Playwright browser lifecycle, contexts and sessions.
+
+    Hierarchy:
+        Browser  (1 Chromium process)
+         └─ Context  (1 per user — holds cookies, localStorage, login state)
+              └─ Session  (1 tab/page inside the user's context)
+
+    Contexts are keyed by profile name (derived from user_id upstream).
+    Each user gets exactly one context; sessions (tabs) are created inside it.
+    Closing a session saves cookies to disk but keeps the context alive.
+    """
 
     def __init__(self):
         self._playwright = None
         self._browser: Optional[Browser] = None
         self._sessions: Dict[str, SessionInfo] = {}
-        self._contexts: Dict[str, BrowserContext] = {}  # profile -> context
+        self._contexts: Dict[str, BrowserContext] = {}  # user profile -> context (1:1)
         self._allowed_domains = _parse_allowed_domains()
         self._cleanup_task: Optional[asyncio.Task] = None
 
@@ -153,7 +165,7 @@ class BrowserManager:
         self._cleanup_task = asyncio.create_task(self._cleanup_loop())
 
     async def stop(self):
-        """Shut down everything."""
+        """Shut down: save all context state to disk, then release resources."""
         if self._cleanup_task:
             self._cleanup_task.cancel()
             try:
@@ -161,8 +173,19 @@ class BrowserManager:
             except asyncio.CancelledError:
                 pass
 
+        # Save every context to disk first (including ones with no active sessions)
+        for profile in list(self._contexts):
+            await self._save_context_state(profile)
+            logger.info(f"Saved context state for profile '{profile}' before shutdown")
+
         for sid in list(self._sessions):
-            await self.close_session(sid)
+            try:
+                info = self._sessions.pop(sid, None)
+                if info:
+                    await info.page.close()
+            except Exception:
+                pass
+
         for ctx in self._contexts.values():
             try:
                 await ctx.close()
@@ -177,7 +200,12 @@ class BrowserManager:
     # -- context (per profile) -----------------------------------------------
 
     async def _get_context(self, profile: str) -> BrowserContext:
-        """Get or create a persistent browser context for a profile."""
+        """Get or create a persistent browser context for a user profile.
+
+        Contexts are never deleted during normal operation — only their state
+        is periodically flushed to disk.  On restart the context is recreated
+        from the stored ``storage_state.json``.
+        """
         if profile in self._contexts:
             return self._contexts[profile]
 
@@ -225,12 +253,21 @@ class BrowserManager:
     # -- sessions ------------------------------------------------------------
 
     async def create_session(self, profile: str = "default") -> str:
-        """Create a new browser session (page)."""
+        """Create a new browser session (page).
+
+        If MAX_SESSIONS is reached, the least-recently-used session is evicted
+        to make room (LRU eviction) instead of returning a 429 error.
+        """
         if len(self._sessions) >= MAX_SESSIONS:
-            raise HTTPException(
-                status_code=429,
-                detail=f"Maximum concurrent sessions ({MAX_SESSIONS}) reached",
+            # LRU eviction: close the session with the oldest last_activity
+            lru_sid = min(self._sessions, key=lambda s: self._sessions[s].last_activity)
+            lru_info = self._sessions[lru_sid]
+            logger.info(
+                f"LRU eviction: closing session {lru_sid} "
+                f"(profile={lru_info.profile}, idle {int(time.time() - lru_info.last_activity)}s) "
+                f"to make room for new session"
             )
+            await self.close_session(lru_sid)
 
         ctx = await self._get_context(profile)
         page = await ctx.new_page()
@@ -248,7 +285,12 @@ class BrowserManager:
         return info
 
     async def close_session(self, session_id: str):
-        """Close a session and persist profile state."""
+        """Close a session (tab) and persist context state.
+
+        The context itself is *never* removed — only the page is closed.
+        Cookies and localStorage remain in-memory and on disk for the next
+        session created under the same profile.
+        """
         info = self._sessions.pop(session_id, None)
         if not info:
             raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
@@ -257,18 +299,35 @@ class BrowserManager:
         except Exception:
             pass
         await self._save_context_state(info.profile)
-        logger.info(f"Session closed: {session_id}")
+        logger.info(f"Session closed: {session_id} (context for '{info.profile}' kept alive)")
+
+    @staticmethod
+    def _normalize_domain(hostname: Optional[str]) -> Optional[str]:
+        """Strip 'www.' prefix so reddit.com and www.reddit.com match."""
+        if hostname:
+            return hostname.removeprefix("www.")
+        return None
 
     def list_sessions(self) -> List[Dict[str, Any]]:
-        """List active sessions."""
+        """List active sessions with domain information."""
+        from urllib.parse import urlparse
+
         result = []
         now = time.time()
         for sid, info in self._sessions.items():
+            page_url = info.page.url if info.page else None
+            # Prefer tracked primary_domain (stable across click navigation).
+            # Fall back to current page URL for sessions that haven't navigated yet.
+            domain = info.primary_domain
+            if domain is None and page_url:
+                hostname = urlparse(page_url).hostname
+                domain = self._normalize_domain(hostname)
             result.append(
                 {
                     "session_id": sid,
                     "profile": info.profile,
-                    "url": info.page.url if info.page else None,
+                    "url": page_url,
+                    "domain": domain,
                     "idle_seconds": int(now - info.last_activity),
                 }
             )
@@ -277,10 +336,20 @@ class BrowserManager:
     # -- cleanup -------------------------------------------------------------
 
     async def _cleanup_loop(self):
-        """Background loop that expires idle sessions."""
+        """Background loop: periodic context saves + idle session expiry."""
+        last_context_save = time.time()
         while True:
             await asyncio.sleep(CLEANUP_INTERVAL_SECONDS)
             now = time.time()
+
+            # -- Periodic context save (every CONTEXT_SAVE_INTERVAL_SECONDS) --
+            if now - last_context_save >= CONTEXT_SAVE_INTERVAL_SECONDS:
+                for profile in list(self._contexts):
+                    await self._save_context_state(profile)
+                logger.debug(f"Periodic context save: {len(self._contexts)} profile(s)")
+                last_context_save = now
+
+            # -- Expire idle sessions (tabs only, context stays) --------------
             expired = [
                 sid
                 for sid, info in self._sessions.items()
@@ -370,10 +439,16 @@ async def delete_session(session_id: str):
 
 @app.post("/sessions/{session_id}/navigate")
 async def navigate(session_id: str, req: NavigateRequest):
+    from urllib.parse import urlparse
+
     manager.check_url(req.url)
     info = manager.get_session(session_id)
     try:
         await info.page.goto(req.url, timeout=req.timeout_ms, wait_until="domcontentloaded")
+        # Update primary_domain on every explicit navigate so domain matching
+        # stays accurate, while click-driven navigations leave it unchanged.
+        hostname = urlparse(info.page.url).hostname
+        info.primary_domain = manager._normalize_domain(hostname)
         title = await info.page.title()
         return JSONResponse(
             content={
@@ -383,6 +458,26 @@ async def navigate(session_id: str, req: NavigateRequest):
         )
     except Exception as exc:
         logger.error(f"Navigate error (session={session_id}): {exc}")
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "error": str(exc)},
+        )
+
+
+@app.post("/sessions/{session_id}/go_back")
+async def go_back(session_id: str):
+    info = manager.get_session(session_id)
+    try:
+        await info.page.go_back(wait_until="commit", timeout=10000)
+        title = await info.page.title()
+        return JSONResponse(
+            content={
+                "status": "success",
+                "data": {"url": info.page.url, "title": title},
+            }
+        )
+    except Exception as exc:
+        logger.error(f"Go back error (session={session_id}): {exc}")
         return JSONResponse(
             status_code=500,
             content={"status": "error", "error": str(exc)},
