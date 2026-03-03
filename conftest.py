@@ -15,7 +15,8 @@ TEST_ENV_VARS = {
     "ENVIRONMENT": "test",
     "LOG_LEVEL": "DEBUG",
     # LLM Configuration
-    "LLM_PROVIDER": "grok-4",
+    "LLM_MODEL": "grok-4-fast",
+    "LLM_PROVIDER": "grok-4-fast",
     "GROK_API_KEY": "test-grok-key-12345",
     "CHATGPT_API_KEY": "test-chatgpt-key-12345",
     "GEMINI_API_KEY": "test-gemini-key-12345",

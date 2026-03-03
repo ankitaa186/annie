@@ -13,6 +13,11 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 from api.config import get_config
 from api.logging import get_logger
 from api.models.file_attachment import FileAttachment, get_files_metadata
+from api.constants import (
+    ALL_MODELS, MODEL_API_KEY_MAP, FALLBACK_CHAIN,
+    MODEL_GROK_4, MODEL_GPT_5, MODEL_GEMINI_PRO, MODEL_GEMINI_PRO_3, MODEL_GEMINI_FLASH, MODEL_GEMINI_LEGACY,
+    LEGACY_PROVIDER_TO_MODEL, DEFAULT_MODEL,
+)
 from api.providers import (
     BaseProvider,
     ContextLengthError,
@@ -24,6 +29,20 @@ from api.providers import (
 )
 
 logger = get_logger(__name__)
+
+
+# ---- Model → Provider class factory ----
+# Returns dict at call time (not import time) so that tests can patch the
+# provider classes on the module namespace and have the patches picked up.
+def _get_provider_factory():
+    return {
+        MODEL_GROK_4: (GrokProvider, {}),
+        MODEL_GPT_5: (ChatGPTProvider, {}),
+        MODEL_GEMINI_PRO: (GeminiProvider, {}),
+        MODEL_GEMINI_PRO_3: (GeminiProvider, {"model_override": MODEL_GEMINI_PRO_3}),
+        MODEL_GEMINI_FLASH: (GeminiProvider, {"model_override": MODEL_GEMINI_FLASH}),
+        MODEL_GEMINI_LEGACY: (GeminiProvider, {"model_override": MODEL_GEMINI_LEGACY}),
+    }
 
 
 # Backoff configuration for rate-limited providers
@@ -186,71 +205,57 @@ class LLMClient:
         """
         Initialize LLM client with provider factory pattern.
 
-        The provider is selected based on:
+        The model is selected based on:
         1. provider_override parameter (if provided)
-        2. LLM_PROVIDER environment variable (default)
+        2. LLM_MODEL environment variable (default)
 
         Args:
-            provider_override: Optional provider name to use instead of env config.
-                              Useful for task-specific provider selection (e.g., research tasks).
+            provider_override: Optional model name to use instead of env config.
+                              Useful for task-specific model selection (e.g., research tasks).
+                              Accepts both new model names and legacy provider names.
 
         Raises:
             ValueError: If no providers are configured (missing API keys)
         """
         config = get_config()
 
-        # Get provider selection: override > environment > default
-        provider_name = provider_override or config.get("LLM_PROVIDER", "grok-4")
+        # Get model selection: override > environment > default
+        raw_name = provider_override or config.get("LLM_MODEL") or config.get("LLM_PROVIDER") or str(DEFAULT_MODEL)
+        # Resolve legacy provider names (e.g. "grok-4" → "grok-4-fast")
+        model_name = LEGACY_PROVIDER_TO_MODEL.get(raw_name, raw_name)
 
-        # Get API keys to determine which providers are available
-        grok_api_key = config.get("GROK_API_KEY")
-        chatgpt_api_key = config.get("CHATGPT_API_KEY")
-        gemini_api_key = config.get("GEMINI_API_KEY")  # Story 9.2
-
-        # Track which providers are available
-        self.providers_available = {
-            "grok-4": bool(grok_api_key and grok_api_key != "REPLACE_ME"),
-            "chatgpt-5": bool(chatgpt_api_key and chatgpt_api_key != "REPLACE_ME"),
-            "gemini-3.1-pro-preview": bool(gemini_api_key and gemini_api_key != "REPLACE_ME"),  # Story 9.2
-            "gemini-3-flash-preview": bool(gemini_api_key and gemini_api_key != "REPLACE_ME"),  # Fallback for Gemini 3 Pro
-            "gemini-2.5-pro": bool(gemini_api_key and gemini_api_key != "REPLACE_ME")  # Legacy
-        }
+        # Build availability map from API keys
+        self.providers_available = {}
+        for model in ALL_MODELS:
+            key_var = MODEL_API_KEY_MAP[model]
+            key_val = config.get(key_var)
+            self.providers_available[model] = bool(key_val and key_val != "REPLACE_ME")
 
         # Instantiate provider based on configuration
-        self.primary_provider_name = provider_name
+        self.primary_provider_name = model_name
         self.provider: Optional[BaseProvider] = None
 
         try:
-            if provider_name == "grok-4" and self.providers_available["grok-4"]:
-                self.provider = GrokProvider()
-            elif provider_name == "chatgpt-5" and self.providers_available["chatgpt-5"]:
-                self.provider = ChatGPTProvider()
-            elif provider_name == "gemini-3.1-pro-preview" and self.providers_available["gemini-3.1-pro-preview"]:
-                # Story 9.2: Gemini 3 Pro support
-                self.provider = GeminiProvider()
+            factory = _get_provider_factory()
+            if model_name in factory and self.providers_available.get(model_name):
+                cls, kwargs = factory[model_name]
+                self.provider = cls(**kwargs)
             else:
-                # Unknown provider or provider not configured, try fallback
+                # Model not available, try any configured model
                 logger.warning(
-                    f"Provider '{provider_name}' not available. Attempting fallback.",
-                    extra={"requested_provider": provider_name, "providers_available": self.providers_available}
+                    f"Model '{model_name}' not available. Attempting fallback.",
+                    extra={"requested_model": model_name, "providers_available": self.providers_available}
                 )
 
-                # Try Grok-4 as default fallback
-                if self.providers_available["grok-4"]:
-                    self.provider = GrokProvider()
-                    self.primary_provider_name = "grok-4"
-                    logger.info("Using Grok-4 as fallback provider")
-                # Try ChatGPT-5 as secondary fallback
-                elif self.providers_available["chatgpt-5"]:
-                    self.provider = ChatGPTProvider()
-                    self.primary_provider_name = "chatgpt-5"
-                    logger.info("Using ChatGPT-5 as fallback provider")
-                # Try Gemini as tertiary fallback (Story 9.2)
-                elif self.providers_available["gemini-3.1-pro-preview"]:
-                    self.provider = GeminiProvider()
-                    self.primary_provider_name = "gemini-3.1-pro-preview"
-                    logger.info("Using Gemini 3 Pro as fallback provider")
-                else:
+                for fallback_model in [MODEL_GROK_4, MODEL_GPT_5, MODEL_GEMINI_PRO]:
+                    if self.providers_available.get(fallback_model) and fallback_model in factory:
+                        cls, kwargs = factory[fallback_model]
+                        self.provider = cls(**kwargs)
+                        self.primary_provider_name = fallback_model
+                        logger.info(f"Using {fallback_model} as fallback provider")
+                        break
+
+                if self.provider is None:
                     raise ValueError(
                         "No LLM providers configured. Please set GROK_API_KEY, CHATGPT_API_KEY, or GEMINI_API_KEY."
                     )
@@ -259,7 +264,7 @@ class LLMClient:
             # Provider initialization failed (missing API key)
             logger.error(
                 "Failed to initialize provider",
-                extra={"provider": provider_name, "error": str(e)}
+                extra={"provider": model_name, "error": str(e)}
             )
             raise
 
@@ -268,8 +273,7 @@ class LLMClient:
             extra={
                 "primary_provider": self.primary_provider_name,
                 "provider_class": self.provider.__class__.__name__,
-                "grok4_available": self.providers_available["grok-4"],
-                "chatgpt5_available": self.providers_available["chatgpt-5"]
+                "providers_available": {k: v for k, v in self.providers_available.items() if v}
             }
         )
 
@@ -288,37 +292,17 @@ class LLMClient:
 
     def _get_fallback_provider(self, failed_provider: str) -> Optional[str]:
         """
-        Get fallback provider for a failed provider.
-
-        Fallback chains:
-        - grok-4 → chatgpt-5
-        - chatgpt-5 → grok-4
-        - gemini-3.1-pro-preview → chatgpt-5 (GPT-5.2) → gemini-3-flash-preview → grok-4
-        - gemini-3-flash-preview → grok-4
-        - gemini-2.5-pro → grok-4
+        Get fallback provider for a failed provider using FALLBACK_CHAIN.
 
         Args:
-            failed_provider: Provider that failed
+            failed_provider: Provider/model that failed
 
         Returns:
-            Fallback provider name, or None if no fallback available
+            Fallback model name, or None if no fallback available
         """
-        if failed_provider == "grok-4" and self.providers_available["chatgpt-5"]:
-            return "chatgpt-5"
-        elif failed_provider == "chatgpt-5" and self.providers_available["grok-4"]:
-            return "grok-4"
-        elif failed_provider == "gemini-3.1-pro-preview":
-            # Gemini 3 Pro → ChatGPT (GPT-5.2) → Gemini 3 Flash → Grok-4
-            if self.providers_available["chatgpt-5"]:
-                return "chatgpt-5"
-            elif self.providers_available["gemini-3-flash-preview"]:
-                return "gemini-3-flash-preview"
-            elif self.providers_available["grok-4"]:
-                return "grok-4"
-        elif failed_provider == "gemini-3-flash-preview" and self.providers_available["grok-4"]:
-            return "grok-4"
-        elif failed_provider == "gemini-2.5-pro" and self.providers_available["grok-4"]:
-            return "grok-4"
+        for candidate in FALLBACK_CHAIN.get(failed_provider, []):
+            if self.providers_available.get(candidate):
+                return candidate
         return None
 
     async def stream_chat_completion(
@@ -516,19 +500,12 @@ class LLMClient:
                 extra={"fallback_provider": fallback_name}
             )
 
-            # Instantiate fallback provider
-            if fallback_name == "grok-4":
-                fallback_provider = GrokProvider()
-            elif fallback_name == "chatgpt-5":
-                fallback_provider = ChatGPTProvider()
-            elif fallback_name == "gemini-3-flash-preview":
-                fallback_provider = GeminiProvider(model_override="gemini-3-flash-preview")
-            elif fallback_name == "gemini-2.5-pro":
-                fallback_provider = GeminiProvider(model_override="gemini-2.5-pro")
-            elif fallback_name == "gemini-3.1-pro-preview":
-                fallback_provider = GeminiProvider(model_override="gemini-3.1-pro-preview")
-            else:
+            # Instantiate fallback provider via factory
+            factory = _get_provider_factory()
+            if fallback_name not in factory:
                 raise ValueError(f"Unknown fallback provider: {fallback_name}")
+            cls, kwargs = factory[fallback_name]
+            fallback_provider = cls(**kwargs)
 
             async with fallback_provider:
                 async for event in fallback_provider.stream_chat_completion(messages, tools, mcp_client=mcp_client, files=files, user_id=user_id):

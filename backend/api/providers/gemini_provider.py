@@ -13,6 +13,7 @@ import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from api.config import get_config
 from api.logging import get_logger
+from api.constants import MODEL_GEMINI_PRO, MODEL_GEMINI_FLASH, MODEL_GEMINI_LEGACY, PROVIDER_GOOGLE
 from api.providers.base import BaseProvider, ContextLengthError
 from api.providers.grok_provider import ProviderError, RateLimitError
 from api.providers.gemini_tool_adapter import GeminiToolAdapter
@@ -38,10 +39,10 @@ class GeminiProvider(BaseProvider):
     """
 
     # Default Gemini model
-    DEFAULT_MODEL = "gemini-3.1-pro-preview"
+    DEFAULT_MODEL = MODEL_GEMINI_PRO
 
     # Supported Gemini models
-    SUPPORTED_MODELS = ["gemini-3.1-pro-preview", "gemini-3-flash-preview", "gemini-2.5-pro"]
+    SUPPORTED_MODELS = [MODEL_GEMINI_PRO, MODEL_GEMINI_FLASH, MODEL_GEMINI_LEGACY]
 
     # Safety filter user-friendly messages
     SAFETY_MESSAGES = {
@@ -70,9 +71,13 @@ class GeminiProvider(BaseProvider):
             raise ValueError("GEMINI_API_KEY not configured")
 
         # Load configuration from environment, with optional override
+        # cost_model_id: the constant used for cost calculation and provider identity
+        # model_name: what gets sent to the Gemini SDK (may differ, e.g. user sets GEMINI_MODEL)
         if model_override:
+            self.cost_model_id = model_override
             self.model_name = model_override
         else:
+            self.cost_model_id = self.DEFAULT_MODEL
             self.model_name = config.get("GEMINI_MODEL", self.DEFAULT_MODEL)
         self.max_output_tokens = int(config.get("GEMINI_MAX_OUTPUT_TOKENS", "16384"))
         self.temperature = float(config.get("GEMINI_TEMPERATURE", "1.0"))
@@ -171,8 +176,8 @@ class GeminiProvider(BaseProvider):
         return model_name
 
     def get_provider_name(self) -> str:
-        """Return provider name (model identifier without 'models/' prefix)."""
-        return self._normalize_model_name(self.model_name)
+        """Return provider name (constant model identifier for cost/routing)."""
+        return self.cost_model_id
 
     def calculate_cost(self, usage: Dict[str, int]) -> Dict[str, float]:
         """
@@ -188,7 +193,7 @@ class GeminiProvider(BaseProvider):
             Cost details dictionary
         """
         return calculate_llm_cost(
-            provider=self._normalize_model_name(self.model_name),
+            provider=self.cost_model_id,
             prompt_tokens=usage.get("prompt_tokens", 0),
             completion_tokens=usage.get("completion_tokens", 0),
             sources_used=0,  # Gemini doesn't have live search

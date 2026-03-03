@@ -6,36 +6,13 @@ import {
 } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import type { ComponentStatus } from '@/lib/hooks/useHealth';
+import {
+  MODEL_DISPLAY_NAMES as LLM_DISPLAY_NAMES,
+  getLLMDisplayName,
+} from '@/lib/constants/llm';
 
-/**
- * Mapping of LLM provider IDs to display names
- */
-export const LLM_DISPLAY_NAMES: Record<string, string> = {
-  // Gemini variants
-  'gemini-3.1-pro-preview': 'Gemini 3 Pro',
-  'gemini-2.0-flash-exp': 'Gemini 2.0',
-  'gemini-1.5-pro': 'Gemini 1.5',
-  'gemini-1.5-flash': 'Gemini 1.5 Flash',
-  // Grok variants
-  'grok-4': 'Grok-4',
-  'grok-3': 'Grok-3',
-  'grok-beta': 'Grok Beta',
-  // ChatGPT variants
-  'chatgpt-5': 'ChatGPT-5',
-  'gpt-4o': 'GPT-4o',
-  'gpt-4-turbo': 'GPT-4 Turbo',
-  'gpt-4': 'GPT-4',
-  // Default/fallback
-  unknown: 'Unknown LLM',
-};
-
-/**
- * Get display name for LLM provider
- */
-export function getLLMDisplayName(providerId: string | undefined | null): string {
-  if (!providerId) return LLM_DISPLAY_NAMES.unknown ?? 'Unknown LLM';
-  return LLM_DISPLAY_NAMES[providerId] ?? providerId;
-}
+// Re-export for backward compatibility
+export { LLM_DISPLAY_NAMES, getLLMDisplayName };
 
 /**
  * Status color for LLM indicator dot

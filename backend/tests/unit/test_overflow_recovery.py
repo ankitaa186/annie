@@ -18,6 +18,7 @@ sys.path.insert(0, str(backend_dir))
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from api.constants import MODEL_GROK_4, MODEL_GPT_5, MODEL_GEMINI_PRO
 from api.providers.base import ContextLengthError
 from api.providers.grok_provider import ProviderError, RateLimitError
 
@@ -35,14 +36,14 @@ class TestContextLengthError:
 
     def test_attributes(self):
         original = ValueError("original")
-        err = ContextLengthError("grok-4", "max tokens exceeded", original)
-        assert err.provider == "grok-4"
+        err = ContextLengthError(MODEL_GROK_4, "max tokens exceeded", original)
+        assert err.provider == MODEL_GROK_4
         assert err.message == "max tokens exceeded"
         assert err.original_error is original
 
     def test_str_representation(self):
-        err = ContextLengthError("chatgpt-5", "context_length_exceeded")
-        assert "chatgpt-5" in str(err)
+        err = ContextLengthError(MODEL_GPT_5, "context_length_exceeded")
+        assert MODEL_GPT_5 in str(err)
         assert "context_length_exceeded" in str(err)
 
     def test_not_subclass_of_provider_error(self):
@@ -82,7 +83,7 @@ class TestGrokContextDetection:
                 ):
                     pass
 
-            assert exc_info.value.provider == "grok-4"
+            assert exc_info.value.provider == MODEL_GROK_4
             assert "context_length_exceeded" in exc_info.value.message
 
     @pytest.mark.asyncio
@@ -157,7 +158,7 @@ class TestChatGPTContextDetection:
                 ):
                     pass
 
-            assert exc_info.value.provider == "chatgpt-5"
+            assert exc_info.value.provider == MODEL_GPT_5
 
 
 class TestGeminiContextDetection:
@@ -380,7 +381,7 @@ class TestOverflowRecoveryIntegration:
                 nonlocal call_count
                 call_count += 1
                 if call_count == 1:
-                    raise ContextLengthError("grok-4", "context_length_exceeded")
+                    raise ContextLengthError(MODEL_GROK_4, "context_length_exceeded")
                 # Second call succeeds
                 yield {"type": "token", "content": "recovered"}
                 yield {"type": "done", "tokens_used": {"prompt": 10, "completion": 1}}
@@ -414,7 +415,7 @@ class TestOverflowRecoveryIntegration:
 
             # Primary always raises ContextLengthError
             async def primary_stream(messages, tools=None, **kwargs):
-                raise ContextLengthError("grok-4", "context_length_exceeded")
+                raise ContextLengthError(MODEL_GROK_4, "context_length_exceeded")
                 yield  # make it a generator
 
             client.provider.stream_chat_completion = primary_stream
@@ -451,11 +452,11 @@ class TestOverflowRecoveryIntegration:
         with patch('api.llm_client.GrokProvider'):
             client = LLMClient()
             # Only grok available, no chatgpt
-            client.providers_available["chatgpt-5"] = False
-            client.providers_available["gemini-3.1-pro-preview"] = False
+            client.providers_available[MODEL_GPT_5] = False
+            client.providers_available[MODEL_GEMINI_PRO] = False
 
             async def always_overflow(messages, tools=None, **kwargs):
-                raise ContextLengthError("grok-4", "context_length_exceeded")
+                raise ContextLengthError(MODEL_GROK_4, "context_length_exceeded")
                 yield  # make it a generator
 
             client.provider.stream_chat_completion = always_overflow
@@ -487,7 +488,7 @@ class TestOverflowRecoveryIntegration:
                 nonlocal call_count
                 call_count += 1
                 if call_count == 1:
-                    raise ContextLengthError("grok-4", "too long")
+                    raise ContextLengthError(MODEL_GROK_4, "too long")
                 yield {"type": "token", "content": "ok"}
                 yield {"type": "done", "tokens_used": {"prompt": 5, "completion": 1}}
 

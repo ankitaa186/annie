@@ -179,7 +179,7 @@ class TestPruneToolResults:
                 "content": "",
                 "is_tool_call": True,
                 "tool_calls": [
-                    {"id": "tc1", "function": {"name": "web_search", "arguments": '{"query": "AAPL stock"}'}}
+                    {"id": "tc1", "type": "function", "function": {"name": "web_search", "arguments": '{"query": "AAPL stock"}'}}
                 ]
             },
             {
@@ -204,10 +204,11 @@ class TestPruneToolResults:
         assert tool_result_msg["_pruned"] is True
         assert "[Returned 5 results]" in tool_result_msg["content"]
 
-        # Tool call arguments in turn 1 should be stripped
+        # Tool call arguments in turn 1 should be stripped, type preserved
         tool_call_msg = result[1]
         assert tool_call_msg["_pruned"] is True
         assert tool_call_msg["tool_calls"][0]["function"]["arguments"] == "{}"
+        assert tool_call_msg["tool_calls"][0]["type"] == "function"
 
         # Recent turns should be untouched
         assert result[4]["content"] == "What about NVDA?"

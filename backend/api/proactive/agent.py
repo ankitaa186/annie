@@ -734,7 +734,7 @@ async def execute_wake_up_agent(
         provider_override = None
         if is_research_trigger(trigger_data):
             config = get_config()
-            research_provider = config.get("RESEARCH_LLM_PROVIDER")
+            research_provider = config.get("RESEARCH_LLM_MODEL")
             if research_provider:
                 provider_override = research_provider
                 logger.info(

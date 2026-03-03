@@ -162,72 +162,71 @@ def validate_environment() -> dict:
     for var, default in OPTIONAL_VARS.items():
         config[var] = get_env_var(var, default=default)
 
-    # Load LLM provider configuration (optional for Story 2.1, required for Story 2.2)
-    # For now, log warnings if not configured
+    # Load LLM model configuration
     from api.logging import get_logger
+    from api.constants import (
+        PRIMARY_MODELS, ALL_MODELS, DEFAULT_MODEL,
+        MODEL_API_KEY_MAP, LEGACY_PROVIDER_TO_MODEL, MODEL_GEMINI_PRO,
+    )
     logger = get_logger(__name__)
 
-    llm_provider = get_env_var("LLM_PROVIDER", default="grok-4")
-    config["LLM_PROVIDER"] = llm_provider
+    # Read LLM_MODEL (preferred) or fall back to legacy LLM_PROVIDER
+    raw_model = get_env_var("LLM_MODEL") or get_env_var("LLM_PROVIDER")
+    if not raw_model or raw_model == "REPLACE_ME":
+        raw_model = str(DEFAULT_MODEL)
 
-    if llm_provider == "grok-4":
-        grok_key = get_env_var("GROK_API_KEY")
-        if not grok_key or grok_key == "REPLACE_ME":
-            logger.warning(
-                "LLM_PROVIDER is set to 'grok-4' but GROK_API_KEY is not set. "
-                "LLM functionality will not work until configured (required for Story 2.2)."
-            )
-        else:
-            config["GROK_API_KEY"] = grok_key
-    elif llm_provider == "chatgpt-5":
-        chatgpt_key = get_env_var("CHATGPT_API_KEY")
-        if not chatgpt_key or chatgpt_key == "REPLACE_ME":
-            logger.warning(
-                "LLM_PROVIDER is set to 'chatgpt-5' but CHATGPT_API_KEY is not set. "
-                "LLM functionality will not work until configured (required for Story 2.2)."
-            )
-        else:
-            config["CHATGPT_API_KEY"] = chatgpt_key
-    elif llm_provider == "gemini-3.1-pro-preview":
-        # Story 9.2: Gemini 3 Pro support
-        gemini_key = get_env_var("GEMINI_API_KEY")
-        if not gemini_key or gemini_key == "REPLACE_ME":
+    # Map legacy provider names (e.g. "grok-4") to actual model names
+    llm_model = LEGACY_PROVIDER_TO_MODEL.get(raw_model, raw_model)
+
+    if llm_model not in ALL_MODELS:
+        raise ValueError(
+            f"Invalid LLM_MODEL '{raw_model}'. Must be one of: {', '.join(ALL_MODELS)}"
+        )
+
+    config["LLM_MODEL"] = llm_model
+    # Backward compat: keep LLM_PROVIDER populated for any code not yet migrated
+    config["LLM_PROVIDER"] = llm_model
+
+    # Validate that the required API key is set for the chosen model
+    api_key_var = MODEL_API_KEY_MAP[llm_model]
+    api_key = get_env_var(api_key_var)
+    if not api_key or api_key == "REPLACE_ME":
+        if llm_model == MODEL_GEMINI_PRO:
             raise ValueError(
-                "GEMINI_API_KEY is required when LLM_PROVIDER is set to 'gemini-3.1-pro-preview'. "
+                f"{api_key_var} is required when LLM_MODEL is set to '{llm_model}'. "
                 "Get your API key from https://aistudio.google.com/app/apikey"
             )
         else:
-            config["GEMINI_API_KEY"] = gemini_key
-            # Load Gemini-specific configuration
-            config["GEMINI_MODEL"] = get_env_var("GEMINI_MODEL", default="gemini-3.1-pro-preview")
-            config["GEMINI_MAX_OUTPUT_TOKENS"] = get_env_var("GEMINI_MAX_OUTPUT_TOKENS", default="8192")
-            config["GEMINI_TEMPERATURE"] = get_env_var("GEMINI_TEMPERATURE", default="1.0")
-            config["GEMINI_SAFETY_SETTING"] = get_env_var("GEMINI_SAFETY_SETTING", default="BLOCK_NONE")
-            config["GEMINI_CONTEXT_CACHE_TTL"] = get_env_var("GEMINI_CONTEXT_CACHE_TTL", default="300")
+            logger.warning(
+                f"LLM_MODEL is set to '{llm_model}' but {api_key_var} is not set. "
+                "LLM functionality will not work until configured."
+            )
     else:
-        raise ValueError(
-            f"Invalid LLM_PROVIDER '{llm_provider}'. Must be 'grok-4', 'chatgpt-5', or 'gemini-3.1-pro-preview'."
-        )
+        config[api_key_var] = api_key
 
-    # Load research-specific LLM provider (optional, falls back to LLM_PROVIDER)
+    # Load Gemini-specific configuration if Gemini is the primary model
+    if llm_model == MODEL_GEMINI_PRO:
+        config["GEMINI_MODEL"] = get_env_var("GEMINI_MODEL", default=str(MODEL_GEMINI_PRO))
+        config["GEMINI_MAX_OUTPUT_TOKENS"] = get_env_var("GEMINI_MAX_OUTPUT_TOKENS", default="8192")
+        config["GEMINI_TEMPERATURE"] = get_env_var("GEMINI_TEMPERATURE", default="1.0")
+        config["GEMINI_SAFETY_SETTING"] = get_env_var("GEMINI_SAFETY_SETTING", default="BLOCK_NONE")
+        config["GEMINI_CONTEXT_CACHE_TTL"] = get_env_var("GEMINI_CONTEXT_CACHE_TTL", default="300")
+
+    # Load research-specific LLM model (optional, falls back to LLM_MODEL)
     # This allows using a different model for deep research tasks (e.g., GPT-5.2 for 128K output)
-    research_provider = get_env_var("RESEARCH_LLM_PROVIDER")
-    if research_provider and research_provider != "REPLACE_ME":
-        valid_providers = ["grok-4", "chatgpt-5", "gemini-3.1-pro-preview"]
-        if research_provider in valid_providers:
-            config["RESEARCH_LLM_PROVIDER"] = research_provider
-            # Note: Don't log here - causes recursive loop with logger init
-        else:
-            # Invalid provider - just ignore it (don't log to avoid recursive loop)
-            pass
+    research_model = get_env_var("RESEARCH_LLM_MODEL") or get_env_var("RESEARCH_LLM_PROVIDER")
+    if research_model and research_model != "REPLACE_ME":
+        resolved = LEGACY_PROVIDER_TO_MODEL.get(research_model, research_model)
+        if resolved in PRIMARY_MODELS:
+            config["RESEARCH_LLM_MODEL"] = resolved
 
-    # Load summary-specific LLM provider (optional, falls back to default provider)
+    # Load summary-specific LLM model (optional, falls back to default model)
     # Used for context compaction summarization when conversations exceed token limits
-    summary_provider = get_env_var("SUMMARY_LLM_PROVIDER")
-    if summary_provider and summary_provider != "REPLACE_ME":
-        valid_providers = ["grok-4", "chatgpt-5", "gemini-3.1-pro-preview"]
-        if summary_provider in valid_providers:
-            config["SUMMARY_LLM_PROVIDER"] = summary_provider
+    summary_model = get_env_var("SUMMARY_LLM_MODEL") or get_env_var("SUMMARY_LLM_PROVIDER")
+    if summary_model and summary_model != "REPLACE_ME":
+        resolved = LEGACY_PROVIDER_TO_MODEL.get(summary_model, summary_model)
+        if resolved in PRIMARY_MODELS:
+            config["SUMMARY_LLM_MODEL"] = resolved
 
     # Load optional LLM keys (may be set even if not primary provider)
     grok_key = get_env_var("GROK_API_KEY")

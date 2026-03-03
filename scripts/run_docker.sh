@@ -262,6 +262,47 @@ manage_host_terminal_mcp() {
     fi
 }
 
+# Function: Clear stale session state from Redis
+# Removes pending message locks and active request flags that survive restarts
+clear_stale_redis_state() {
+    echo ""
+    echo "Clearing stale session state from Redis..."
+
+    # Wait for Redis to be healthy
+    local retries=10
+    while [ $retries -gt 0 ]; do
+        if $COMPOSE_CMD exec -T redis redis-cli PING 2>/dev/null | grep -q PONG; then
+            break
+        fi
+        retries=$((retries - 1))
+        sleep 1
+    done
+
+    if [ $retries -eq 0 ]; then
+        echo -e "${YELLOW}Warning: Redis not ready, skipping stale state cleanup${NC}"
+        return 0
+    fi
+
+    # Delete stale keys that block message processing after crashes
+    local cleared=0
+    for pattern in "pending_message:*" "active_request:*"; do
+        local keys
+        keys=$($COMPOSE_CMD exec -T redis redis-cli KEYS "$pattern" 2>/dev/null | tr -d '\r')
+        if [ -n "$keys" ]; then
+            for key in $keys; do
+                $COMPOSE_CMD exec -T redis redis-cli DEL "$key" > /dev/null 2>&1
+                cleared=$((cleared + 1))
+            done
+        fi
+    done
+
+    if [ $cleared -gt 0 ]; then
+        echo -e "${GREEN}✓ Cleared $cleared stale session key(s)${NC}"
+    else
+        echo -e "${GREEN}✓ No stale session state found${NC}"
+    fi
+}
+
 # Function: Start Docker services
 start_services() {
     echo ""
@@ -283,6 +324,9 @@ start_services() {
         echo ""
         echo -e "${GREEN}✓ Services started in development mode${NC}"
     fi
+
+    # Clear stale locks/pending states from previous crashes
+    clear_stale_redis_state
 
     echo ""
     echo "Use 'make logs' to view logs"
