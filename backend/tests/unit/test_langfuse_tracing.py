@@ -4,6 +4,7 @@ Unit tests for Langfuse tracing utilities with contextvars.
 Tests AC #4: Trace context is maintained correctly using contextvars without cross-request contamination.
 Tests AC #5: Application continues without errors when Langfuse is unavailable (fire-and-forget).
 """
+import logging
 import pytest
 import asyncio
 from unittest.mock import Mock, patch, MagicMock
@@ -195,7 +196,8 @@ class TestFireAndForgetPattern:
         """Test that start_trace returns None gracefully when Langfuse is disabled."""
         from api.observability.tracing import start_trace
 
-        trace = start_trace(name="test_trace", user_id="user123")
+        with caplog.at_level(logging.DEBUG, logger="api.observability.tracing"):
+            trace = start_trace(name="test_trace", user_id="user123")
 
         # Verify no trace created (graceful degradation)
         assert trace is None
@@ -210,7 +212,8 @@ class TestFireAndForgetPattern:
         """Test that start_span returns None gracefully when no active trace."""
         from api.observability.tracing import start_span
 
-        span = start_span(name="test_span")
+        with caplog.at_level(logging.DEBUG, logger="api.observability.tracing"):
+            span = start_span(name="test_span")
 
         # Verify no span created (graceful degradation)
         assert span is None

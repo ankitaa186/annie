@@ -143,13 +143,12 @@ async def test_complete_profile_flow(client, redis_client, cleanup_redis):
     assert profile_from_cache["completeness"] == 60
     assert profile_from_cache["basics"]["name"] == "Alice"
 
-    # Step 3: Verify message count was incremented
+    # Step 3: Verify message count was incremented (profile_meta is a Redis Hash)
     meta_key = f"profile_meta:{user_id}"
-    meta_data = await redis_client.get(meta_key)
-    assert meta_data is not None
+    metadata = await redis_client.hgetall(meta_key)
+    assert metadata is not None and len(metadata) > 0
 
-    metadata = json.loads(meta_data)
-    assert metadata["message_count"] == 1
+    assert int(metadata["message_count"]) == 1
 
     print(f"✅ Complete profile flow test passed")
 
@@ -181,13 +180,12 @@ async def test_empty_profile_handling(client, redis_client, cleanup_redis):
     # Should be None since completeness is 0
     assert cached_profile is None
 
-    # Verify message count was still incremented
+    # Verify message count was still incremented (profile_meta is a Redis Hash)
     meta_key = f"profile_meta:{user_id}"
-    meta_data = await redis_client.get(meta_key)
-    assert meta_data is not None
+    metadata = await redis_client.hgetall(meta_key)
+    assert metadata is not None and len(metadata) > 0
 
-    metadata = json.loads(meta_data)
-    assert metadata["message_count"] == 1
+    assert int(metadata["message_count"]) == 1
 
     print(f"✅ Empty profile handling test passed")
 
@@ -230,11 +228,10 @@ async def test_message_count_trigger(client, redis_client, cleanup_redis):
         # Small delay to avoid race conditions
         await asyncio.sleep(0.1)
 
-    # Verify message count is 5
+    # Verify message count is 5 (profile_meta is a Redis Hash)
     meta_key = f"profile_meta:{user_id}"
-    meta_data = await redis_client.get(meta_key)
-    metadata = json.loads(meta_data)
-    assert metadata["message_count"] == 5
+    metadata = await redis_client.hgetall(meta_key)
+    assert int(metadata["message_count"]) == 5
 
     # Note: We can't easily verify background refresh was triggered in test,
     # but we verified the trigger logic returns True in unit tests
@@ -287,13 +284,12 @@ async def test_profile_manager_refresh_with_mcp(redis_client, cleanup_redis):
     assert profile["basics"]["name"] == "Charlie"
     assert profile["basics"]["age"] == 30
 
-    # Verify metadata was updated with last_refresh
+    # Verify metadata was updated with last_refresh (profile_meta is a Redis Hash)
     meta_key = f"profile_meta:{user_id}"
-    meta_data = await redis_client.get(meta_key)
-    assert meta_data is not None
+    metadata = await redis_client.hgetall(meta_key)
+    assert metadata is not None and len(metadata) > 0
 
-    metadata = json.loads(meta_data)
-    assert metadata["last_refresh"] is not None
+    assert metadata.get("last_refresh") is not None
 
     # Verify last_refresh is recent (within last 5 seconds)
     last_refresh = datetime.fromisoformat(metadata["last_refresh"])
@@ -395,18 +391,16 @@ async def test_time_based_trigger(redis_client, cleanup_redis):
     """
     user_id = "test_user_time_trigger"
 
-    # Setup metadata with last_refresh > 15 minutes ago
+    # Setup metadata with last_refresh > 15 minutes ago using Redis Hash
+    # (check_refresh_triggers uses hgetall/hget, not get/json)
     old_refresh = datetime.now(timezone.utc) - timedelta(minutes=16)
-    metadata = {
-        "message_count": 3,  # Not a message count trigger
-        "last_refresh": old_refresh.isoformat()
-    }
+    meta_key = f"profile_meta:{user_id}"
 
-    await redis_client.setex(
-        f"profile_meta:{user_id}",
-        86400,
-        json.dumps(metadata)
-    )
+    await redis_client.hset(meta_key, mapping={
+        "message_count": "3",  # Not a message count trigger
+        "last_refresh": old_refresh.isoformat()
+    })
+    await redis_client.expire(meta_key, 86400)
 
     # Check if trigger fires
     profile_manager = ProfileManager(redis_client=redis_client)
@@ -416,13 +410,9 @@ async def test_time_based_trigger(redis_client, cleanup_redis):
 
     # Test with recent refresh (should NOT trigger)
     recent_refresh = datetime.now(timezone.utc) - timedelta(minutes=10)
-    metadata["last_refresh"] = recent_refresh.isoformat()
 
-    await redis_client.setex(
-        f"profile_meta:{user_id}",
-        86400,
-        json.dumps(metadata)
-    )
+    await redis_client.hset(meta_key, "last_refresh", recent_refresh.isoformat())
+    await redis_client.expire(meta_key, 86400)
 
     should_refresh = await profile_manager.check_refresh_triggers(user_id)
     assert should_refresh == False

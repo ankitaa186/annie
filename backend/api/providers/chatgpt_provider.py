@@ -17,7 +17,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 import httpx
 from api.config import get_config
 from api.logging import get_logger
-from api.constants import MODEL_GPT_5, PROVIDER_OPENAI
+from api.constants import MODEL_GPT_5
 from api.providers.base import BaseProvider, ContextLengthError
 from api.observability.tracing import get_current_trace
 from api.observability.cost import calculate_llm_cost

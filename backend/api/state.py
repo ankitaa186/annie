@@ -283,7 +283,7 @@ class StateManager:
 
         # Auto-generate title if not provided
         if not title:
-            title = f"New Chat"
+            title = "New Chat"
 
         # Create unified session/conversation structure
         session = {
