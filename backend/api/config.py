@@ -205,9 +205,8 @@ def validate_environment() -> dict:
             config["GEMINI_SAFETY_SETTING"] = get_env_var("GEMINI_SAFETY_SETTING", default="BLOCK_NONE")
             config["GEMINI_CONTEXT_CACHE_TTL"] = get_env_var("GEMINI_CONTEXT_CACHE_TTL", default="300")
     else:
-        logger.warning(
-            f"Invalid LLM_PROVIDER '{llm_provider}'. Must be 'grok-4', 'chatgpt-5', or 'gemini-3.1-pro-preview'. "
-            f"LLM functionality will not work until configured properly."
+        raise ValueError(
+            f"Invalid LLM_PROVIDER '{llm_provider}'. Must be 'grok-4', 'chatgpt-5', or 'gemini-3.1-pro-preview'."
         )
 
     # Load research-specific LLM provider (optional, falls back to LLM_PROVIDER)

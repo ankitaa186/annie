@@ -563,13 +563,16 @@ class TelegramDelivery:
                     )
 
                     # Record last message for feedback detection (Story 13.10)
+                    # Skip recording for non-intent trigger_ids (e.g. session_flush:*)
+                    # as they are not real intents and cause 422 errors on feedback lookup
                     try:
-                        await record_proactive_message(
-                            self.redis_client,
-                            user_id,
-                            trigger_id,
-                            str(message_obj.message_id)
-                        )
+                        if ":" not in trigger_id:
+                            await record_proactive_message(
+                                self.redis_client,
+                                user_id,
+                                trigger_id,
+                                str(message_obj.message_id)
+                            )
                     except Exception as e:
                         # Don't fail delivery if recording fails
                         logger.warning(
