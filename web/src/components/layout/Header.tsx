@@ -35,7 +35,7 @@ export function Header() {
 
   // Extract active LLM from health response (use llm_api status for now)
   // In production, this would come from a config endpoint or the health response
-  const activeLLM = health?.components?.llm_api === 'ok' ? 'gemini-3-pro-preview' : null;
+  const activeLLM = health?.components?.llm_api === 'ok' ? 'gemini-3.1-pro-preview' : null;
 
   const transitionClasses = prefersReducedMotion
     ? ''

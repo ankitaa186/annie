@@ -528,13 +528,13 @@ async def stream_generator(
 
             # IMPORTANT: Gemini handles tool execution internally during streaming
             # Skip the OpenAI-style tool orchestration loop for Gemini providers
-            if llm_client.primary_provider_name == "gemini-3-pro-preview":
+            if llm_client.primary_provider_name == "gemini-3.1-pro-preview":
                 # Gemini: Stream directly with mcp_client - tools are handled automatically
                 logger.info(
                     "Using Gemini streaming (internal tool handling)",
                     extra={
                         "conversation_id": conversation_id,
-                        "provider": "gemini-3-pro-preview"
+                        "provider": "gemini-3.1-pro-preview"
                     }
                 )
 

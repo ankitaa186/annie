@@ -188,25 +188,25 @@ def validate_environment() -> dict:
             )
         else:
             config["CHATGPT_API_KEY"] = chatgpt_key
-    elif llm_provider == "gemini-3-pro-preview":
+    elif llm_provider == "gemini-3.1-pro-preview":
         # Story 9.2: Gemini 3 Pro support
         gemini_key = get_env_var("GEMINI_API_KEY")
         if not gemini_key or gemini_key == "REPLACE_ME":
             raise ValueError(
-                "GEMINI_API_KEY is required when LLM_PROVIDER is set to 'gemini-3-pro-preview'. "
+                "GEMINI_API_KEY is required when LLM_PROVIDER is set to 'gemini-3.1-pro-preview'. "
                 "Get your API key from https://aistudio.google.com/app/apikey"
             )
         else:
             config["GEMINI_API_KEY"] = gemini_key
             # Load Gemini-specific configuration
-            config["GEMINI_MODEL"] = get_env_var("GEMINI_MODEL", default="gemini-3-pro-preview")
+            config["GEMINI_MODEL"] = get_env_var("GEMINI_MODEL", default="gemini-3.1-pro-preview")
             config["GEMINI_MAX_OUTPUT_TOKENS"] = get_env_var("GEMINI_MAX_OUTPUT_TOKENS", default="8192")
             config["GEMINI_TEMPERATURE"] = get_env_var("GEMINI_TEMPERATURE", default="1.0")
             config["GEMINI_SAFETY_SETTING"] = get_env_var("GEMINI_SAFETY_SETTING", default="BLOCK_NONE")
             config["GEMINI_CONTEXT_CACHE_TTL"] = get_env_var("GEMINI_CONTEXT_CACHE_TTL", default="300")
     else:
         logger.warning(
-            f"Invalid LLM_PROVIDER '{llm_provider}'. Must be 'grok-4', 'chatgpt-5', or 'gemini-3-pro-preview'. "
+            f"Invalid LLM_PROVIDER '{llm_provider}'. Must be 'grok-4', 'chatgpt-5', or 'gemini-3.1-pro-preview'. "
             f"LLM functionality will not work until configured properly."
         )
 
@@ -214,7 +214,7 @@ def validate_environment() -> dict:
     # This allows using a different model for deep research tasks (e.g., GPT-5.2 for 128K output)
     research_provider = get_env_var("RESEARCH_LLM_PROVIDER")
     if research_provider and research_provider != "REPLACE_ME":
-        valid_providers = ["grok-4", "chatgpt-5", "gemini-3-pro-preview"]
+        valid_providers = ["grok-4", "chatgpt-5", "gemini-3.1-pro-preview"]
         if research_provider in valid_providers:
             config["RESEARCH_LLM_PROVIDER"] = research_provider
             # Note: Don't log here - causes recursive loop with logger init
@@ -226,7 +226,7 @@ def validate_environment() -> dict:
     # Used for context compaction summarization when conversations exceed token limits
     summary_provider = get_env_var("SUMMARY_LLM_PROVIDER")
     if summary_provider and summary_provider != "REPLACE_ME":
-        valid_providers = ["grok-4", "chatgpt-5", "gemini-3-pro-preview"]
+        valid_providers = ["grok-4", "chatgpt-5", "gemini-3.1-pro-preview"]
         if summary_provider in valid_providers:
             config["SUMMARY_LLM_PROVIDER"] = summary_provider
 

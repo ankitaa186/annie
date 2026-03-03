@@ -205,7 +205,7 @@ class TestUnifiedCostCalculation:
 
     def test_calculate_llm_cost_gemini(self):
         """Test unified function with Gemini 3 Pro Preview provider."""
-        result = calculate_llm_cost("gemini-3-pro-preview", prompt_tokens=1000, completion_tokens=500)
+        result = calculate_llm_cost("gemini-3.1-pro-preview", prompt_tokens=1000, completion_tokens=500)
 
         # Should match Gemini cost calculation
         assert result["input_cost"] == 0.002
@@ -215,7 +215,7 @@ class TestUnifiedCostCalculation:
     def test_calculate_llm_cost_gemini_with_cached(self):
         """Test unified function with Gemini 3 Pro and cached tokens."""
         result = calculate_llm_cost(
-            "gemini-3-pro-preview",
+            "gemini-3.1-pro-preview",
             prompt_tokens=1000,
             completion_tokens=500,
             cached_tokens=200

@@ -369,7 +369,7 @@ logger.warning("File validation failed", extra={
 # Multimodal request (Backend)
 logger.info("Multimodal LLM request", extra={
     "event": "multimodal_request",
-    "provider": "gemini-3-pro-preview",
+    "provider": "gemini-3.1-pro-preview",
     "file_count": 2,
     "total_size_bytes": 1500000,
     "mime_types": ["image/png", "application/pdf"],
@@ -379,7 +379,7 @@ logger.info("Multimodal LLM request", extra={
 logger.info("File processing complete", extra={
     "event": "file_processing_complete",
     "duration_ms": 4500,
-    "provider": "gemini-3-pro-preview",
+    "provider": "gemini-3.1-pro-preview",
     "fallback_used": False,
 })
 ```
@@ -452,7 +452,7 @@ await file.download_to_memory(buffer)
 **2. Gemini Multimodal API**:
 ```python
 # google-generativeai SDK supports inline_data natively
-model = genai.GenerativeModel("gemini-3-pro-preview")
+model = genai.GenerativeModel("gemini-3.1-pro-preview")
 response = model.generate_content([
     "Analyze this document",
     {"mime_type": "application/pdf", "data": base64_data}

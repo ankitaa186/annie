@@ -452,7 +452,7 @@ class TestOverflowRecoveryIntegration:
             client = LLMClient()
             # Only grok available, no chatgpt
             client.providers_available["chatgpt-5"] = False
-            client.providers_available["gemini-3-pro-preview"] = False
+            client.providers_available["gemini-3.1-pro-preview"] = False
 
             async def always_overflow(messages, tools=None, **kwargs):
                 raise ContextLengthError("grok-4", "context_length_exceeded")

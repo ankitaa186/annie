@@ -19,7 +19,7 @@ class TestGeminiProviderConfiguration:
         """Test provider initializes correctly with valid API key."""
         mock_get_config.return_value = {
             "GEMINI_API_KEY": "test-api-key",
-            "GEMINI_MODEL": "gemini-3-pro-preview",
+            "GEMINI_MODEL": "gemini-3.1-pro-preview",
             "GEMINI_MAX_OUTPUT_TOKENS": "8192",
             "GEMINI_TEMPERATURE": "1.0",
             "GEMINI_SAFETY_SETTING": "BLOCK_NONE",
@@ -29,7 +29,7 @@ class TestGeminiProviderConfiguration:
         provider = GeminiProvider()
 
         assert provider.api_key == "test-api-key"
-        assert provider.model_name == "gemini-3-pro-preview"
+        assert provider.model_name == "gemini-3.1-pro-preview"
         assert provider.max_output_tokens == 8192  # Matches config value passed above
         assert provider.temperature == 1.0
         mock_configure.assert_called_once_with(api_key="test-api-key")
@@ -55,7 +55,7 @@ class TestGeminiProviderConfiguration:
 
         provider = GeminiProvider()
 
-        assert provider.model_name == "gemini-3-pro-preview"
+        assert provider.model_name == "gemini-3.1-pro-preview"
         assert provider.max_output_tokens == 16384  # Code default when env var not set
         assert provider.temperature == 1.0
 
@@ -67,7 +67,7 @@ class TestGeminiProviderConfiguration:
         mock_get_config.return_value = {"GEMINI_API_KEY": "test-api-key"}
 
         provider = GeminiProvider()
-        assert provider.get_provider_name() == "gemini-3-pro-preview"
+        assert provider.get_provider_name() == "gemini-3.1-pro-preview"
 
 
 class TestGeminiProviderMessageConversion:
@@ -146,7 +146,7 @@ class TestGeminiProviderCostCalculation:
         cost = provider.calculate_cost(usage)
 
         mock_calc_cost.assert_called_once_with(
-            provider="gemini-3-pro-preview",
+            provider="gemini-3.1-pro-preview",
             prompt_tokens=100,
             completion_tokens=50,
             sources_used=0,

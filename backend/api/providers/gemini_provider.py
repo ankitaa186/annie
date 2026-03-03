@@ -34,14 +34,14 @@ class GeminiProvider(BaseProvider):
     - Quota and rate limit handling
     - Cost calculation with tiered pricing
     - Langfuse tracing integration (fire-and-forget)
-    - Supports multiple Gemini models (gemini-3-pro-preview, gemini-2.5-pro, etc.)
+    - Supports multiple Gemini models (gemini-3.1-pro-preview, gemini-2.5-pro, etc.)
     """
 
     # Default Gemini model
-    DEFAULT_MODEL = "gemini-3-pro-preview"
+    DEFAULT_MODEL = "gemini-3.1-pro-preview"
 
     # Supported Gemini models
-    SUPPORTED_MODELS = ["gemini-3-pro-preview", "gemini-3-flash-preview", "gemini-2.5-pro"]
+    SUPPORTED_MODELS = ["gemini-3.1-pro-preview", "gemini-3-flash-preview", "gemini-2.5-pro"]
 
     # Safety filter user-friendly messages
     SAFETY_MESSAGES = {
@@ -163,8 +163,8 @@ class GeminiProvider(BaseProvider):
         """
         Normalize model name by removing 'models/' prefix if present.
 
-        The Gemini SDK uses full paths like 'models/gemini-3-pro-preview',
-        but the cost calculator expects just 'gemini-3-pro-preview'.
+        The Gemini SDK uses full paths like 'models/gemini-3.1-pro-preview',
+        but the cost calculator expects just 'gemini-3.1-pro-preview'.
         """
         if model_name.startswith("models/"):
             return model_name[7:]  # Remove 'models/' prefix

@@ -12,7 +12,7 @@ import type { ComponentStatus } from '@/lib/hooks/useHealth';
  */
 export const LLM_DISPLAY_NAMES: Record<string, string> = {
   // Gemini variants
-  'gemini-3-pro-preview': 'Gemini 3 Pro',
+  'gemini-3.1-pro-preview': 'Gemini 3 Pro',
   'gemini-2.0-flash-exp': 'Gemini 2.0',
   'gemini-1.5-pro': 'Gemini 1.5',
   'gemini-1.5-flash': 'Gemini 1.5 Flash',
@@ -51,7 +51,7 @@ const STATUS_COLORS: Record<ComponentStatus | 'unknown', string> = {
  * Props for LLMIndicator component
  */
 interface LLMIndicatorProps {
-  /** Active LLM provider ID (e.g., 'gemini-3-pro-preview') */
+  /** Active LLM provider ID (e.g., 'gemini-3.1-pro-preview') */
   activeLLM: string | null;
   /** LLM API health status */
   llmStatus: ComponentStatus;
@@ -81,7 +81,7 @@ function LLMIndicatorSkeleton() {
  * LLMIndicator displays the active LLM provider with status
  *
  * Features:
- * - Shows friendly provider name (e.g., "Gemini 3 Pro" instead of "gemini-3-pro-preview")
+ * - Shows friendly provider name (e.g., "Gemini 3 Pro" instead of "gemini-3.1-pro-preview")
  * - Status dot indicates LLM API health
  * - Tooltip shows full provider details
  * - Loading skeleton during initial fetch
@@ -90,7 +90,7 @@ function LLMIndicatorSkeleton() {
  * @example
  * ```tsx
  * <LLMIndicator
- *   activeLLM="gemini-3-pro-preview"
+ *   activeLLM="gemini-3.1-pro-preview"
  *   llmStatus="ok"
  * />
  * ```

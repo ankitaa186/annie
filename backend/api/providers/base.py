@@ -85,7 +85,7 @@ class BaseProvider(ABC):
     @abstractmethod
     def get_provider_name(self) -> str:
         """
-        Return provider name (e.g., 'grok-4', 'chatgpt-5', 'gemini-3-pro-preview').
+        Return provider name (e.g., 'grok-4', 'chatgpt-5', 'gemini-3.1-pro-preview').
 
         Returns:
             Provider name string

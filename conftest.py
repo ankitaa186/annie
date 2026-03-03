@@ -19,7 +19,7 @@ TEST_ENV_VARS = {
     "GROK_API_KEY": "test-grok-key-12345",
     "CHATGPT_API_KEY": "test-chatgpt-key-12345",
     "GEMINI_API_KEY": "test-gemini-key-12345",
-    "GEMINI_MODEL": "gemini-3-pro-preview",
+    "GEMINI_MODEL": "gemini-3.1-pro-preview",
     "GEMINI_MAX_OUTPUT_TOKENS": "8192",
     "GEMINI_TEMPERATURE": "1.0",
     "GEMINI_SAFETY_SETTING": "BLOCK_NONE",

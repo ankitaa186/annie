@@ -15,7 +15,7 @@ Status: done
 ## Acceptance Criteria
 
 ### AC #1: User can set Gemini as LLM provider via environment variable
-**Given** `.env` file with `LLM_PROVIDER=gemini-3-pro-preview`
+**Given** `.env` file with `LLM_PROVIDER=gemini-3.1-pro-preview`
 **When** the backend initializes
 **Then** GeminiProvider is instantiated and used for all LLM calls
 
@@ -60,9 +60,9 @@ Status: done
 ---
 
 ### AC #6: Environment validation ensures GEMINI_API_KEY is set when using Gemini
-**Given** `LLM_PROVIDER=gemini-3-pro-preview` but `GEMINI_API_KEY` is not set
+**Given** `LLM_PROVIDER=gemini-3.1-pro-preview` but `GEMINI_API_KEY` is not set
 **When** backend initializes
-**Then** startup fails with clear error: "GEMINI_API_KEY is required when LLM_PROVIDER is set to 'gemini-3-pro-preview'"
+**Then** startup fails with clear error: "GEMINI_API_KEY is required when LLM_PROVIDER is set to 'gemini-3.1-pro-preview'"
 
 **Mapped to Tasks:** Task 1
 
@@ -77,7 +77,7 @@ Status: done
 **Implementation Details:**
 - Update `backend/api/config.py`:
   - Add `GEMINI_API_KEY` to config loading
-  - Add `GEMINI_MODEL` (default: "gemini-3-pro-preview")
+  - Add `GEMINI_MODEL` (default: "gemini-3.1-pro-preview")
   - Add `GEMINI_MAX_OUTPUT_TOKENS` (default: 8192, max: 65536)
   - Add `GEMINI_TEMPERATURE` (default: 1.0) - Gemini 3 recommends 1.0, lowering causes looping
   - Add `GEMINI_SAFETY_SETTING` (default: "BLOCK_NONE") - Minimal safety filtering
@@ -86,7 +86,7 @@ Status: done
   ```bash
   # Gemini 3 Pro Configuration
   GEMINI_API_KEY=REPLACE_ME                      # Get from: https://aistudio.google.com/app/apikey
-  GEMINI_MODEL=gemini-3-pro-preview              # Model name (gemini-3-pro-preview)
+  GEMINI_MODEL=gemini-3.1-pro-preview              # Model name (gemini-3.1-pro-preview)
   GEMINI_MAX_OUTPUT_TOKENS=8192                  # Max output tokens (default: 8192, max: 65536)
   GEMINI_TEMPERATURE=1.0                         # Temperature (default: 1.0, avoid lowering)
   GEMINI_SAFETY_SETTING=BLOCK_NONE               # Safety: BLOCK_NONE, BLOCK_ONLY_HIGH (default: BLOCK_NONE)
@@ -97,12 +97,12 @@ Status: done
   backend:
     environment:
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-3-pro-preview}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.1-pro-preview}
       - GEMINI_TEMPERATURE=${GEMINI_TEMPERATURE:-1.0}
       - GEMINI_SAFETY_SETTING=${GEMINI_SAFETY_SETTING:-BLOCK_NONE}
   ```
 - Add validation in config.py:
-  - If `LLM_PROVIDER=gemini-3-pro-preview`, verify `GEMINI_API_KEY` is set
+  - If `LLM_PROVIDER=gemini-3.1-pro-preview`, verify `GEMINI_API_KEY` is set
   - Raise `ValueError` with clear message if missing
   - Log masked API key (first 4, last 4 chars) for debugging
 
@@ -114,9 +114,9 @@ Status: done
 
 **Subtasks:**
 - [x] Add GEMINI_API_KEY to config.py
-- [x] Add GEMINI_MODEL (gemini-3-pro-preview), GEMINI_MAX_OUTPUT_TOKENS (65536 max), GEMINI_TEMPERATURE (1.0 default)
+- [x] Add GEMINI_MODEL (gemini-3.1-pro-preview), GEMINI_MAX_OUTPUT_TOKENS (65536 max), GEMINI_TEMPERATURE (1.0 default)
 - [x] Add GEMINI_SAFETY_SETTING (BLOCK_NONE default) and GEMINI_CONTEXT_CACHE_TTL
-- [x] Add validation logic for required GEMINI_API_KEY when provider is gemini-3-pro-preview
+- [x] Add validation logic for required GEMINI_API_KEY when provider is gemini-3.1-pro-preview
 - [x] Update env.example with Gemini configuration
 - [x] Update docker-compose.yml with Gemini env vars
 - [x] Test environment validation (missing API key should fail)
@@ -155,7 +155,7 @@ Status: done
 - **Configuration:**
   - Load from environment: API key, model, max_output_tokens, temperature, safety_setting
   - Initialize `genai.configure(api_key=...)`
-  - Create model: `genai.GenerativeModel(model_name='gemini-3-pro-preview')`
+  - Create model: `genai.GenerativeModel(model_name='gemini-3.1-pro-preview')`
   - **Context Caching** (optional): If conversation >2048 tokens, enable context caching to reduce costs
     - Input tokens ≤200k: $0.20/1M (vs $2.00 without cache)
     - Input tokens >200k: $0.40/1M (vs $4.00 without cache)
@@ -282,7 +282,7 @@ Status: done
 - Raise `RateLimitError` (from Story 9.1):
   ```python
   raise RateLimitError(
-      provider="gemini-3-pro-preview",
+      provider="gemini-3.1-pro-preview",
       retry_after=retry_seconds
   )
   ```
@@ -324,7 +324,7 @@ Status: done
 - Reuse Langfuse patterns from Story 8.2
 - Add tracing to `stream_chat_completion()`:
   - Call `get_current_trace()` to get active trace
-  - Create generation span: `trace.generation(name="gemini_streaming", model="gemini-3-pro-preview")`
+  - Create generation span: `trace.generation(name="gemini_streaming", model="gemini-3.1-pro-preview")`
   - Update with prompt (truncated to 1000 chars)
   - Update with completion (truncated to 1000 chars)
   - Update with token counts (prompt_tokens, completion_tokens, cached_tokens, total_tokens)
@@ -347,11 +347,11 @@ Status: done
 
 **Subtasks:**
 - [x] Add get_current_trace() calls
-- [x] Create generation span for Gemini (model=gemini-3-pro-preview)
+- [x] Create generation span for Gemini (model=gemini-3.1-pro-preview)
 - [x] Update with prompt (truncated)
 - [x] Update with completion (truncated)
 - [x] Track token counts using model.count_tokens() (including cached_tokens)
-- [x] Add model metadata (gemini-3-pro-preview, context caching status)
+- [x] Add model metadata (gemini-3.1-pro-preview, context caching status)
 - [x] Wrap in try/except for graceful degradation
 - [x] Test tracing with real Gemini calls
 - [x] Verify traces appear in Langfuse dashboard with correct model name
@@ -381,7 +381,7 @@ Status: done
     - Test invalid API key (401 Unauthorized)
   - **Integration Tests:**
     - Test with real Gemini API (if API key in CI)
-    - Test provider switching (LLM_PROVIDER=gemini-3-pro-preview)
+    - Test provider switching (LLM_PROVIDER=gemini-3.1-pro-preview)
     - Test SSE compatibility with Telegram bot
 - Mocking strategy:
   - Mock `google.generativeai` responses
@@ -421,7 +421,7 @@ Status: done
           self.provider = GrokProvider()
       elif provider_name == "chatgpt-5":
           self.provider = ChatGPTProvider()
-      elif provider_name == "gemini-3-pro-preview":
+      elif provider_name == "gemini-3.1-pro-preview":
           self.provider = GeminiProvider()  # NEW
       else:
           logger.warning(f"Unknown provider {provider_name}, defaulting to grok-4")
@@ -440,9 +440,9 @@ Status: done
 - Easy to add more providers in future
 
 **Subtasks:**
-- [x] Add gemini-3-pro-preview case to factory logic
+- [x] Add gemini-3.1-pro-preview case to factory logic
 - [x] Import GeminiProvider
-- [x] Test provider instantiation with LLM_PROVIDER=gemini-3-pro-preview
+- [x] Test provider instantiation with LLM_PROVIDER=gemini-3.1-pro-preview
 - [x] Verify delegation works correctly
 
 ---
@@ -451,7 +451,7 @@ Status: done
 
 ### Architecture Context
 
-**Story Goal:** Implement Gemini 3 Pro (gemini-3-pro-preview) as third provider in the multi-provider architecture established in Story 9.1
+**Story Goal:** Implement Gemini 3 Pro (gemini-3.1-pro-preview) as third provider in the multi-provider architecture established in Story 9.1
 
 **Architecture (After Story 9.2):**
 ```
@@ -579,7 +579,7 @@ BaseProvider (Interface)
 - `backend/tests/unit/test_gemini_provider.py` - Unit tests
 
 **Files to Modify:**
-- `backend/api/llm_client.py` - Add gemini-3-pro-preview to factory (1 line)
+- `backend/api/llm_client.py` - Add gemini-3.1-pro-preview to factory (1 line)
 - `backend/api/config.py` - Add Gemini environment variables
 - `backend/requirements.txt` - Add google-generativeai
 - `env.example` - Add Gemini configuration
@@ -650,7 +650,7 @@ BaseProvider (Interface)
 ### Success Metrics
 
 - ✅ All 6 acceptance criteria implemented and validated
-- ✅ Gemini provider works via `LLM_PROVIDER=gemini-3-pro-preview`
+- ✅ Gemini provider works via `LLM_PROVIDER=gemini-3.1-pro-preview`
 - ✅ Streaming compatible with SSE/Telegram bot
 - ✅ Safety filters handled gracefully
 - ✅ Quota errors handled gracefully
@@ -721,7 +721,7 @@ All 8 tasks successfully completed:
 - Added GEMINI_API_KEY, GEMINI_MODEL, GEMINI_MAX_OUTPUT_TOKENS, GEMINI_TEMPERATURE, GEMINI_SAFETY_SETTING, GEMINI_CONTEXT_CACHE_TTL to config.py
 - Updated env.example with comprehensive Gemini configuration examples
 - Updated docker-compose.yml with Gemini environment variables
-- Added validation logic requiring GEMINI_API_KEY when LLM_PROVIDER=gemini-3-pro-preview
+- Added validation logic requiring GEMINI_API_KEY when LLM_PROVIDER=gemini-3.1-pro-preview
 
 **✅ Task 2: GeminiProvider Implementation**
 - Created complete GeminiProvider class (761 lines) extending BaseProvider
@@ -765,7 +765,7 @@ All 8 tasks successfully completed:
 - Total: 298 lines of test code
 
 **✅ Task 8: Factory Integration**
-- Updated LLMClient factory to include gemini-3-pro-preview provider
+- Updated LLMClient factory to include gemini-3.1-pro-preview provider
 - Added GeminiProvider import
 - Added provider availability tracking
 - Tested provider instantiation
@@ -785,7 +785,7 @@ All 8 tasks successfully completed:
 
 **Files Modified:**
 1. `backend/api/config.py` - Added Gemini environment variable loading and validation
-2. `backend/api/llm_client.py` - Added gemini-3-pro-preview to factory pattern
+2. `backend/api/llm_client.py` - Added gemini-3.1-pro-preview to factory pattern
 3. `backend/requirements.txt` - Added google-generativeai>=0.3.0
 4. `env.example` - Added Gemini configuration section with examples
 5. `docker-compose.yml` - Added Gemini environment variables to backend service
@@ -802,12 +802,12 @@ All 8 tasks successfully completed:
 
 | AC # | Requirement | Status | Evidence |
 |------|-------------|--------|----------|
-| AC #1 | User can set Gemini as LLM provider via environment variable | ✅ IMPLEMENTED | `config.py:137-152` - Provider validation for `gemini-3-pro-preview` with GEMINI_API_KEY loading |
+| AC #1 | User can set Gemini as LLM provider via environment variable | ✅ IMPLEMENTED | `config.py:137-152` - Provider validation for `gemini-3.1-pro-preview` with GEMINI_API_KEY loading |
 | AC #2 | Basic chat completion works with streaming | ✅ IMPLEMENTED | `gemini_provider.py:243` - `stream_chat_completion()` method with Gemini SDK integration |
 | AC #3 | Streaming format compatible with existing SSE implementation | ✅ IMPLEMENTED | `gemini_provider.py:262` - SSE-compatible token events `{"type": "token", "content": "text"}` |
 | AC #4 | Safety filter blocks handled gracefully with user-friendly errors | ✅ IMPLEMENTED | `gemini_provider.py:60-65, 359-409` - SAFETY_MESSAGES dict, prompt_feedback.block_reason detection, finish_reason='SAFETY' handling |
 | AC #5 | Quota errors return meaningful messages | ✅ IMPLEMENTED | `gemini_provider.py:623-633` - Detection of quota/429/ResourceExhausted errors, RateLimitError raised |
-| AC #6 | Environment validation ensures GEMINI_API_KEY is set when using Gemini | ✅ IMPLEMENTED | `config.py:140-143` - Validation with error message: "GEMINI_API_KEY is required when LLM_PROVIDER is set to 'gemini-3-pro-preview'" |
+| AC #6 | Environment validation ensures GEMINI_API_KEY is set when using Gemini | ✅ IMPLEMENTED | `config.py:140-143` - Validation with error message: "GEMINI_API_KEY is required when LLM_PROVIDER is set to 'gemini-3.1-pro-preview'" |
 
 **AC Coverage:** 6 of 6 acceptance criteria fully implemented ✅
 
@@ -867,7 +867,7 @@ All 8 tasks successfully completed:
 **Status:** PRESERVED ✅
 
 - No changes to existing Grok/ChatGPT providers
-- Factory pattern cleanly extends with gemini-3-pro-preview case
+- Factory pattern cleanly extends with gemini-3.1-pro-preview case
 - SSE streaming format fully compatible with existing Telegram bot
 - BaseProvider interface properly implemented
 - All existing tests continue to pass

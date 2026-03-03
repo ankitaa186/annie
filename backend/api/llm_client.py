@@ -211,7 +211,7 @@ class LLMClient:
         self.providers_available = {
             "grok-4": bool(grok_api_key and grok_api_key != "REPLACE_ME"),
             "chatgpt-5": bool(chatgpt_api_key and chatgpt_api_key != "REPLACE_ME"),
-            "gemini-3-pro-preview": bool(gemini_api_key and gemini_api_key != "REPLACE_ME"),  # Story 9.2
+            "gemini-3.1-pro-preview": bool(gemini_api_key and gemini_api_key != "REPLACE_ME"),  # Story 9.2
             "gemini-3-flash-preview": bool(gemini_api_key and gemini_api_key != "REPLACE_ME"),  # Fallback for Gemini 3 Pro
             "gemini-2.5-pro": bool(gemini_api_key and gemini_api_key != "REPLACE_ME")  # Legacy
         }
@@ -225,7 +225,7 @@ class LLMClient:
                 self.provider = GrokProvider()
             elif provider_name == "chatgpt-5" and self.providers_available["chatgpt-5"]:
                 self.provider = ChatGPTProvider()
-            elif provider_name == "gemini-3-pro-preview" and self.providers_available["gemini-3-pro-preview"]:
+            elif provider_name == "gemini-3.1-pro-preview" and self.providers_available["gemini-3.1-pro-preview"]:
                 # Story 9.2: Gemini 3 Pro support
                 self.provider = GeminiProvider()
             else:
@@ -246,9 +246,9 @@ class LLMClient:
                     self.primary_provider_name = "chatgpt-5"
                     logger.info("Using ChatGPT-5 as fallback provider")
                 # Try Gemini as tertiary fallback (Story 9.2)
-                elif self.providers_available["gemini-3-pro-preview"]:
+                elif self.providers_available["gemini-3.1-pro-preview"]:
                     self.provider = GeminiProvider()
-                    self.primary_provider_name = "gemini-3-pro-preview"
+                    self.primary_provider_name = "gemini-3.1-pro-preview"
                     logger.info("Using Gemini 3 Pro as fallback provider")
                 else:
                     raise ValueError(
@@ -293,7 +293,7 @@ class LLMClient:
         Fallback chains:
         - grok-4 → chatgpt-5
         - chatgpt-5 → grok-4
-        - gemini-3-pro-preview → chatgpt-5 (GPT-5.2) → gemini-3-flash-preview → grok-4
+        - gemini-3.1-pro-preview → chatgpt-5 (GPT-5.2) → gemini-3-flash-preview → grok-4
         - gemini-3-flash-preview → grok-4
         - gemini-2.5-pro → grok-4
 
@@ -307,7 +307,7 @@ class LLMClient:
             return "chatgpt-5"
         elif failed_provider == "chatgpt-5" and self.providers_available["grok-4"]:
             return "grok-4"
-        elif failed_provider == "gemini-3-pro-preview":
+        elif failed_provider == "gemini-3.1-pro-preview":
             # Gemini 3 Pro → ChatGPT (GPT-5.2) → Gemini 3 Flash → Grok-4
             if self.providers_available["chatgpt-5"]:
                 return "chatgpt-5"
@@ -525,8 +525,8 @@ class LLMClient:
                 fallback_provider = GeminiProvider(model_override="gemini-3-flash-preview")
             elif fallback_name == "gemini-2.5-pro":
                 fallback_provider = GeminiProvider(model_override="gemini-2.5-pro")
-            elif fallback_name == "gemini-3-pro-preview":
-                fallback_provider = GeminiProvider(model_override="gemini-3-pro-preview")
+            elif fallback_name == "gemini-3.1-pro-preview":
+                fallback_provider = GeminiProvider(model_override="gemini-3.1-pro-preview")
             else:
                 raise ValueError(f"Unknown fallback provider: {fallback_name}")
 

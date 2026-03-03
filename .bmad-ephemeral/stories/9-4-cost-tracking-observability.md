@@ -43,7 +43,7 @@
 
 ### AC#3: Langfuse Trace Integration
 - [ ] Gemini LLM calls create proper Langfuse generations:
-  - Model: `gemini-3-pro-preview`
+  - Model: `gemini-3.1-pro-preview`
   - Trace hierarchy: `chat_request` → `stream_request` → `gemini_llm_call` → `tool_calls`
   - Input: Full prompt with messages
   - Output: Generated response text
@@ -55,7 +55,7 @@
 - [ ] Each Langfuse generation includes cost metadata:
   ```python
   {
-      "model": "gemini-3-pro-preview",
+      "model": "gemini-3.1-pro-preview",
       "input_tokens": 1250,
       "output_tokens": 450,
       "cached_tokens": 0,
@@ -366,7 +366,7 @@
       assert len(traces) > 0
 
       generation = traces[0].get_generation("gemini_llm_streaming")
-      assert generation.model == "gemini-3-pro-preview"
+      assert generation.model == "gemini-3.1-pro-preview"
       assert generation.usage.input > 0
       assert generation.usage.output > 0
       assert "total_cost_usd" in generation.metadata

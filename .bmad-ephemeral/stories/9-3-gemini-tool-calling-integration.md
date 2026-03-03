@@ -287,7 +287,7 @@ tools = [{
 }]
 
 # Call with tools
-response = genai.GenerativeModel('gemini-3-pro-preview').generate_content(
+response = genai.GenerativeModel('gemini-3.1-pro-preview').generate_content(
     messages,
     tools=tools,
     stream=True

@@ -93,12 +93,12 @@ Enable Annie to support multiple LLM providers (Grok-4, ChatGPT-5, Gemini 3 Pro)
 ### Required Variables (add to `.env` and `env.example`)
 ```bash
 # LLM Provider Configuration
-# Options: grok-4 | chatgpt-5 | gemini-3-pro-preview
+# Options: grok-4 | chatgpt-5 | gemini-3.1-pro-preview
 LLM_PROVIDER=grok-4  # Default provider
 
 # Gemini 3 Pro Configuration
 GEMINI_API_KEY=REPLACE_ME                      # Get from: https://aistudio.google.com/app/apikey
-GEMINI_MODEL=gemini-3-pro-preview              # Model name (gemini-3-pro-preview)
+GEMINI_MODEL=gemini-3.1-pro-preview              # Model name (gemini-3.1-pro-preview)
 GEMINI_MAX_OUTPUT_TOKENS=8192                  # Max output tokens (default: 8192, max: 65536)
 GEMINI_TEMPERATURE=1.0                         # Temperature (default: 1.0, avoid lowering - causes looping)
 GEMINI_SAFETY_SETTING=BLOCK_NONE               # Safety: BLOCK_NONE (minimal), BLOCK_ONLY_HIGH
@@ -110,7 +110,7 @@ GEMINI_CONTEXT_CACHE_TTL=300                   # Context cache TTL in seconds (d
 backend:
   environment:
     - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-    - GEMINI_MODEL=${GEMINI_MODEL:-gemini-3-pro-preview}
+    - GEMINI_MODEL=${GEMINI_MODEL:-gemini-3.1-pro-preview}
     - GEMINI_TEMPERATURE=${GEMINI_TEMPERATURE:-1.0}
     - GEMINI_SAFETY_SETTING=${GEMINI_SAFETY_SETTING:-BLOCK_NONE}
 ```
@@ -157,7 +157,7 @@ backend:
 - Task 12: Gemini quota/rate limit handling
 
 **Acceptance Criteria:**
-- ✅ User can set `LLM_PROVIDER=gemini-3-pro-preview` in .env
+- ✅ User can set `LLM_PROVIDER=gemini-3.1-pro-preview` in .env
 - ✅ Basic chat completion works with streaming
 - ✅ Streaming format compatible with existing SSE implementation
 - ✅ Safety filter blocks handled gracefully (user-friendly errors)
@@ -224,7 +224,7 @@ backend:
   - Output tokens ≤200k: $12.00 per 1M tokens | >200k: $18.00 per 1M
   - Cached tokens ≤200k: $0.20 per 1M | >200k: $0.40 per 1M
 - ✅ Session traces link Gemini calls properly
-- ✅ Model metadata captured (gemini-3-pro-preview)
+- ✅ Model metadata captured (gemini-3.1-pro-preview)
 - ✅ Cost alerts work for Gemini (configurable threshold)
 - ✅ Cost comparison dashboard shows Grok vs ChatGPT vs Gemini
 
@@ -375,7 +375,7 @@ backend:
 ### Phase 1: Development
 - Epic 9 stories implemented
 - Gemini provider available but disabled by default
-- Can be enabled in dev by setting `LLM_PROVIDER=gemini-3-pro-preview`
+- Can be enabled in dev by setting `LLM_PROVIDER=gemini-3.1-pro-preview`
 
 ### Phase 2: Dev Environment Testing
 - Enable Gemini in dev `.env`

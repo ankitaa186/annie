@@ -319,7 +319,7 @@ class TestGeminiMultimodalIntegration:
         with patch("api.providers.gemini_provider.get_config") as mock_config:
             mock_config.return_value = {
                 "GEMINI_API_KEY": "test-key",
-                "GEMINI_MODEL": "gemini-3-pro-preview",
+                "GEMINI_MODEL": "gemini-3.1-pro-preview",
                 "GEMINI_MAX_OUTPUT_TOKENS": "16384",
                 "GEMINI_TEMPERATURE": "1.0",
                 "GEMINI_CONTEXT_CACHE_TTL": "300",

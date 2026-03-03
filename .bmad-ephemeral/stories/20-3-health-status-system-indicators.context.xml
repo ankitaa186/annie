@@ -154,7 +154,7 @@
   <constraints>
     <constraint source="Epic Tech Context">No additional backend changes needed - /health/full endpoint already exists and returns all required component status</constraint>
     <constraint source="Dev Notes">STATUS_COLORS mapping: ok->bg-green-500, degraded->bg-yellow-500, unavailable->bg-red-500, unknown->bg-gray-400</constraint>
-    <constraint source="Dev Notes">LLM_DISPLAY_NAMES mapping: 'gemini-3-pro-preview'->'Gemini 3 Pro', 'grok-4'->'Grok-4', 'chatgpt-5'->'ChatGPT-5'</constraint>
+    <constraint source="Dev Notes">LLM_DISPLAY_NAMES mapping: 'gemini-3.1-pro-preview'->'Gemini 3 Pro', 'grok-4'->'Grok-4', 'chatgpt-5'->'ChatGPT-5'</constraint>
     <constraint source="Architecture">Health dots must fit in Header component right side between logo and LLM indicator</constraint>
     <constraint source="Dev Notes">Polling interval is 30 seconds - do not poll more frequently to avoid unnecessary load</constraint>
     <constraint source="Accessibility">Tooltips must be keyboard accessible and screen-reader compatible</constraint>
