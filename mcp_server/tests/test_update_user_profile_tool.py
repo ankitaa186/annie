@@ -11,9 +11,8 @@ Story 15.4: Update User Profile Tool
 - Tests tool schema definition
 """
 
-import asyncio
 import pytest
-from unittest.mock import AsyncMock, Mock, patch, MagicMock
+from unittest.mock import AsyncMock, patch, MagicMock
 import httpx
 
 from mcp_server.tools import (

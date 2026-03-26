@@ -5,7 +5,6 @@ Tests the end-to-end flow of file upload from chat request through to LLM provid
 """
 
 import base64
-import json
 import os
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -318,7 +317,7 @@ class TestGeminiMultimodalIntegration:
 
         with patch("api.providers.gemini_provider.get_config") as mock_config:
             mock_config.return_value = {
-                "GEMINI_API_KEY": "test-key",
+                "GOOGLE_API_KEY": "test-key",
                 "GEMINI_MODEL": "gemini-3.1-pro-preview",
                 "GEMINI_MAX_OUTPUT_TOKENS": "16384",
                 "GEMINI_TEMPERATURE": "1.0",
@@ -367,7 +366,7 @@ class TestChatGPTMultimodalIntegration:
 
         with patch("api.providers.chatgpt_provider.get_config") as mock_config:
             mock_config.return_value = {
-                "CHATGPT_API_KEY": "test-key",
+                "OPENAI_API_KEY": "test-key",
                 "LLM_REQUEST_TIMEOUT": "300.0",
                 "LLM_STREAMING_TIMEOUT": "300.0"
             }
@@ -408,7 +407,7 @@ class TestChatGPTMultimodalIntegration:
 
         with patch("api.providers.chatgpt_provider.get_config") as mock_config:
             mock_config.return_value = {
-                "CHATGPT_API_KEY": "test-key",
+                "OPENAI_API_KEY": "test-key",
                 "LLM_REQUEST_TIMEOUT": "300.0",
                 "LLM_STREAMING_TIMEOUT": "300.0"
             }

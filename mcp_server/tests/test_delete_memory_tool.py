@@ -8,8 +8,6 @@ Story 14.3: Add delete_memory Tool
 - Tests tool schema definition
 """
 
-import asyncio
-import json
 import pytest
 from unittest.mock import AsyncMock, Mock, patch
 import httpx

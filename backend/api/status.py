@@ -12,7 +12,7 @@ This module follows the same pattern as Langfuse tracing (backend/api/observabil
 """
 from contextvars import ContextVar
 from functools import wraps
-from typing import Callable, Optional, Dict, Any
+from typing import Callable, Optional
 import time
 
 from api.logging import get_logger

@@ -74,9 +74,9 @@ OPTIONAL_VARS = {
 
 # Sensitive variables that should be masked in logs
 SENSITIVE_VARS = [
-    "GROK_API_KEY",
-    "CHATGPT_API_KEY",
-    "GEMINI_API_KEY",  # Story 9.2
+    "XAI_API_KEY",
+    "OPENAI_API_KEY",
+    "GOOGLE_API_KEY",
     "TELEGRAM_BOT_TOKEN",
     "BRAVE_SEARCH_API_KEY",
     "STOCK_API_KEY",
@@ -229,18 +229,17 @@ def validate_environment() -> dict:
             config["SUMMARY_LLM_MODEL"] = resolved
 
     # Load optional LLM keys (may be set even if not primary provider)
-    grok_key = get_env_var("GROK_API_KEY")
-    if grok_key and grok_key != "REPLACE_ME":
-        config["GROK_API_KEY"] = grok_key
+    xai_key = get_env_var("XAI_API_KEY")
+    if xai_key and xai_key != "REPLACE_ME":
+        config["XAI_API_KEY"] = xai_key
 
-    chatgpt_key = get_env_var("CHATGPT_API_KEY")
-    if chatgpt_key and chatgpt_key != "REPLACE_ME":
-        config["CHATGPT_API_KEY"] = chatgpt_key
+    openai_key = get_env_var("OPENAI_API_KEY")
+    if openai_key and openai_key != "REPLACE_ME":
+        config["OPENAI_API_KEY"] = openai_key
 
-    # Load optional Gemini API key (Story 9.2)
-    gemini_key = get_env_var("GEMINI_API_KEY")
-    if gemini_key and gemini_key != "REPLACE_ME":
-        config["GEMINI_API_KEY"] = gemini_key
+    google_key = get_env_var("GOOGLE_API_KEY")
+    if google_key and google_key != "REPLACE_ME":
+        config["GOOGLE_API_KEY"] = google_key
 
     # Epic 16: Home Assistant MQTT configuration (optional - for MQTT subscriber)
     # Uses module-level variables for easy access by subscriber

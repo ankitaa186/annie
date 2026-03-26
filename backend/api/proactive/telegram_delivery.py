@@ -285,8 +285,8 @@ def split_long_message(text: str, max_length: int = MAX_MESSAGE_LENGTH) -> list[
     return chunks
 
 
-from api.config import get_config
-from api.logging import get_logger
+from api.config import get_config  # noqa: E402
+from api.logging import get_logger  # noqa: E402
 
 try:
     from langfuse.decorators import observe

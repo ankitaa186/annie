@@ -8,7 +8,6 @@ Tests AC #2 (HA_MQTT_PASSWORD masking) and AC #4 (MQTT config loading).
 import os
 from unittest.mock import patch
 
-import pytest
 
 
 class TestMQTTConfigLoading:

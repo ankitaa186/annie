@@ -11,7 +11,6 @@ Tests cover:
 - AC #12-14: Unit tests for cooldown, validation, SSML
 """
 
-import os
 import time
 from unittest.mock import AsyncMock, patch, MagicMock
 import pytest
@@ -615,7 +614,7 @@ class TestNotifyAlexaMediaCall:
             mock_client.post.return_value = mock_response
             mock_client_class.return_value = mock_client
 
-            result = await send_voice_message_to_smart_home_handler(
+            await send_voice_message_to_smart_home_handler(
                 message="Hello",
                 devices=["media_player.kitchen_echo"],
                 voice_type="say"
@@ -652,7 +651,7 @@ class TestNotifyAlexaMediaCall:
             mock_client.post.return_value = mock_response
             mock_client_class.return_value = mock_client
 
-            result = await send_voice_message_to_smart_home_handler(
+            await send_voice_message_to_smart_home_handler(
                 message="Great news!",
                 devices=["media_player.kitchen_echo"],
                 voice_type="excited"

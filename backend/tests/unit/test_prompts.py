@@ -10,7 +10,6 @@ Coverage:
 - build_system_prompt() integration of memory management section
 - User ID placeholder formatting
 """
-import pytest
 
 
 class TestMemoryManagementSection:
@@ -113,7 +112,7 @@ class TestBuildSystemPromptMemorySection:
 
     def test_build_system_prompt_includes_memory_section(self):
         """Test that build_system_prompt includes MEMORY_MANAGEMENT_SECTION."""
-        from api.prompts import build_system_prompt, MEMORY_MANAGEMENT_SECTION
+        from api.prompts import build_system_prompt
 
         prompt = build_system_prompt(user_id="test_user")
 

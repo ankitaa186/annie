@@ -7,7 +7,7 @@ formats it into a brief (<50 chars when possible) summary string.
 
 Used by mcp_client.py to generate status messages after tool execution completes.
 """
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 
 def summarize_portfolio_result(result: Dict[str, Any]) -> str:

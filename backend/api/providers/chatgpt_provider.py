@@ -67,14 +67,14 @@ class ChatGPTProvider(BaseProvider):
         Initialize ChatGPT-5 provider with configuration from environment.
 
         Raises:
-            ValueError: If CHATGPT_API_KEY is not configured
+            ValueError: If OPENAI_API_KEY is not configured
         """
         config = get_config()
 
         # Get API key
-        self.api_key = config.get("CHATGPT_API_KEY")
+        self.api_key = config.get("OPENAI_API_KEY")
         if not self.api_key or self.api_key == "REPLACE_ME":
-            raise ValueError("CHATGPT_API_KEY not configured")
+            raise ValueError("OPENAI_API_KEY not configured")
 
         # Load timeout configuration from environment
         self.request_timeout = float(config.get("LLM_REQUEST_TIMEOUT", "300.0"))

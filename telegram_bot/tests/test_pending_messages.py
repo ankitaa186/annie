@@ -23,7 +23,6 @@ from handlers.message import (
     append_pending_message,
     count_pending_messages,
     get_and_clear_pending,
-    get_redis_client,
     handle_pending_messages
 )
 

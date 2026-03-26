@@ -7,7 +7,6 @@ Tests:
 3. LLMClient.stream_chat_completion recovers from ContextLengthError
 """
 
-import os
 import sys
 from pathlib import Path
 
@@ -15,12 +14,12 @@ from pathlib import Path
 backend_dir = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(backend_dir))
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+import pytest  # noqa: E402
+from unittest.mock import AsyncMock, MagicMock, patch  # noqa: E402
 
-from api.constants import MODEL_GROK_4, MODEL_GPT_5, MODEL_GEMINI_PRO
-from api.providers.base import ContextLengthError
-from api.providers.grok_provider import ProviderError, RateLimitError
+from api.constants import MODEL_GROK_4, MODEL_GPT_5, MODEL_GEMINI_PRO  # noqa: E402
+from api.providers.base import ContextLengthError  # noqa: E402
+from api.providers.grok_provider import ProviderError, RateLimitError  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -372,7 +371,7 @@ class TestOverflowRecoveryIntegration:
         """On ContextLengthError, compacts and retries successfully."""
         from api.llm_client import LLMClient
 
-        with patch('api.llm_client.GrokProvider') as MockProvider:
+        with patch('api.llm_client.GrokProvider'):
             client = LLMClient()
 
             call_count = 0
@@ -408,7 +407,7 @@ class TestOverflowRecoveryIntegration:
         """If compacted retry also fails, falls through to fallback provider."""
         from api.llm_client import LLMClient
 
-        with patch('api.llm_client.GrokProvider') as MockGrok, \
+        with patch('api.llm_client.GrokProvider'), \
              patch('api.llm_client.ChatGPTProvider') as MockChatGPT:
 
             client = LLMClient()

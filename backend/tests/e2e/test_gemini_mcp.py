@@ -3,7 +3,7 @@ Integration Tests for Gemini + MCP Tool Calling
 
 These tests require:
 1. Running MCP server (docker compose up mcp-server)
-2. Valid GEMINI_API_KEY in environment
+2. Valid GOOGLE_API_KEY in environment
 3. MCP tools configured and available
 
 Run with: pytest tests/integration/test_gemini_mcp.py
@@ -11,14 +11,12 @@ Run with: pytest tests/integration/test_gemini_mcp.py
 
 import pytest
 import os
-from api.providers.gemini_provider import GeminiProvider
-from api.mcp_client import MCPClient
 
 
-# Skip tests if GEMINI_API_KEY not configured
+# Skip tests if GOOGLE_API_KEY not configured
 pytestmark = pytest.mark.skipif(
-    not os.getenv("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY") == "REPLACE_ME",
-    reason="GEMINI_API_KEY not configured"
+    not os.getenv("GOOGLE_API_KEY") or os.getenv("GOOGLE_API_KEY") == "REPLACE_ME",
+    reason="GOOGLE_API_KEY not configured"
 )
 
 

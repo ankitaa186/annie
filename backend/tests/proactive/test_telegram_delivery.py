@@ -11,8 +11,7 @@ Tests:
 
 import pytest
 import json
-from unittest.mock import AsyncMock, Mock, patch, MagicMock
-from datetime import datetime
+from unittest.mock import AsyncMock, Mock, patch
 
 from api.proactive.telegram_delivery import (
     TelegramDelivery,
@@ -132,7 +131,7 @@ async def test_send_proactive_message_success(mock_redis):
 @pytest.mark.asyncio
 async def test_send_proactive_message_empty_user_id(mock_redis):
     """Test validation error for empty user_id."""
-    with patch('api.proactive.telegram_delivery.Bot') as mock_bot_class:
+    with patch('api.proactive.telegram_delivery.Bot'):
         delivery = TelegramDelivery(
             bot_token="test_token",
             redis_client=mock_redis
@@ -151,7 +150,7 @@ async def test_send_proactive_message_empty_user_id(mock_redis):
 @pytest.mark.asyncio
 async def test_send_proactive_message_empty_message(mock_redis):
     """Test validation error for empty message."""
-    with patch('api.proactive.telegram_delivery.Bot') as mock_bot_class:
+    with patch('api.proactive.telegram_delivery.Bot'):
         delivery = TelegramDelivery(
             bot_token="test_token",
             redis_client=mock_redis
@@ -170,7 +169,7 @@ async def test_send_proactive_message_empty_message(mock_redis):
 @pytest.mark.asyncio
 async def test_send_proactive_message_invalid_user_id(mock_redis):
     """Test validation error for non-numeric user_id."""
-    with patch('api.proactive.telegram_delivery.Bot') as mock_bot_class:
+    with patch('api.proactive.telegram_delivery.Bot'):
         delivery = TelegramDelivery(
             bot_token="test_token",
             redis_client=mock_redis

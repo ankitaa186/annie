@@ -13,7 +13,7 @@ import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from api.config import get_config
 from api.logging import get_logger
-from api.constants import MODEL_GEMINI_PRO, MODEL_GEMINI_FLASH, MODEL_GEMINI_LEGACY, PROVIDER_GOOGLE
+from api.constants import MODEL_GEMINI_PRO, MODEL_GEMINI_FLASH, MODEL_GEMINI_LEGACY
 from api.providers.base import BaseProvider, ContextLengthError
 from api.providers.grok_provider import ProviderError, RateLimitError
 from api.providers.gemini_tool_adapter import GeminiToolAdapter
@@ -61,14 +61,14 @@ class GeminiProvider(BaseProvider):
                            Useful for fallback scenarios (e.g., gemini-2.5-pro fallback)
 
         Raises:
-            ValueError: If GEMINI_API_KEY is not configured
+            ValueError: If GOOGLE_API_KEY is not configured
         """
         config = get_config()
 
         # Get API key
-        self.api_key = config.get("GEMINI_API_KEY")
+        self.api_key = config.get("GOOGLE_API_KEY")
         if not self.api_key or self.api_key == "REPLACE_ME":
-            raise ValueError("GEMINI_API_KEY not configured")
+            raise ValueError("GOOGLE_API_KEY not configured")
 
         # Load configuration from environment, with optional override
         # cost_model_id: the constant used for cost calculation and provider identity
@@ -438,7 +438,6 @@ class GeminiProvider(BaseProvider):
                 # Generate streaming response using ChatSession
                 try:
                     # Build generation config
-                    generation_config = {}
 
                     # Send message with streaming
                     # Note: system_instruction is handled at model initialization, not per-message
@@ -562,14 +561,11 @@ class GeminiProvider(BaseProvider):
                                             """Recursively convert protobuf objects to JSON-serializable dict."""
                                             # Import proto.marshal for type checking
                                             try:
-                                                from proto.marshal.collections import RepeatedComposite, MapComposite
-                                                from proto.marshal.collections.repeated import Repeated
-                                                from proto.marshal.collections.maps import MapComposite as MapComp
+                                                import proto.marshal.collections  # noqa: F401
+                                                import proto.marshal.collections.repeated  # noqa: F401
+                                                import proto.marshal.collections.maps  # noqa: F401
                                             except ImportError:
-                                                RepeatedComposite = type(None)
-                                                MapComposite = type(None)
-                                                Repeated = type(None)
-                                                MapComp = type(None)
+                                                pass
 
                                             # Handle proto.marshal wrapper types
                                             type_name = type(obj).__name__
@@ -1200,7 +1196,7 @@ class GeminiProvider(BaseProvider):
         """
         try:
             # Import MCPClient locally to avoid circular dependency
-            from api.mcp_client import MCPClient, MCPNetworkError, MCPToolError
+            from api.mcp_client import MCPNetworkError, MCPToolError
 
             # Inject correct user_id to override any LLM-inferred value
             inject_user_id(

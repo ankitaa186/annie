@@ -17,9 +17,9 @@ TEST_ENV_VARS = {
     # LLM Configuration
     "LLM_MODEL": "grok-4-fast",
     "LLM_PROVIDER": "grok-4-fast",
-    "GROK_API_KEY": "test-grok-key-12345",
-    "CHATGPT_API_KEY": "test-chatgpt-key-12345",
-    "GEMINI_API_KEY": "test-gemini-key-12345",
+    "XAI_API_KEY": "test-xai-key-12345",
+    "OPENAI_API_KEY": "test-openai-key-12345",
+    "GOOGLE_API_KEY": "test-google-key-12345",
     "GEMINI_MODEL": "gemini-3.1-pro-preview",
     "GEMINI_MAX_OUTPUT_TOKENS": "8192",
     "GEMINI_TEMPERATURE": "1.0",

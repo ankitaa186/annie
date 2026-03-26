@@ -257,7 +257,7 @@ class LLMClient:
 
                 if self.provider is None:
                     raise ValueError(
-                        "No LLM providers configured. Please set GROK_API_KEY, CHATGPT_API_KEY, or GEMINI_API_KEY."
+                        "No LLM providers configured. Please set XAI_API_KEY, OPENAI_API_KEY, or GOOGLE_API_KEY."
                     )
 
         except ValueError as e:

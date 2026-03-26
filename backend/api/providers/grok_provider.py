@@ -11,7 +11,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 import httpx
 from api.config import get_config
 from api.logging import get_logger
-from api.constants import MODEL_GROK_4, PROVIDER_XAI
+from api.constants import MODEL_GROK_4
 from api.providers.base import BaseProvider, ContextLengthError
 from api.observability.tracing import get_current_trace
 from api.observability.cost import calculate_llm_cost
@@ -60,14 +60,14 @@ class GrokProvider(BaseProvider):
         Initialize Grok-4 provider with configuration from environment.
 
         Raises:
-            ValueError: If GROK_API_KEY is not configured
+            ValueError: If XAI_API_KEY is not configured
         """
         config = get_config()
 
         # Get API key
-        self.api_key = config.get("GROK_API_KEY")
+        self.api_key = config.get("XAI_API_KEY")
         if not self.api_key or self.api_key == "REPLACE_ME":
-            raise ValueError("GROK_API_KEY not configured")
+            raise ValueError("XAI_API_KEY not configured")
 
         # Load timeout configuration from environment
         self.request_timeout = float(config.get("LLM_REQUEST_TIMEOUT", "300.0"))

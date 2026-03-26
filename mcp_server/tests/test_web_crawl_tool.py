@@ -13,7 +13,6 @@ Coverage targets:
 Run: pytest mcp_server/tests/test_web_crawl_tool.py -v --cov=mcp_server.tools
 """
 import pytest
-import re
 from unittest.mock import patch, AsyncMock, MagicMock
 
 # Import the functions to test
@@ -397,7 +396,7 @@ class TestJinaReaderFetch:
             with patch("mcp_server.tools.web_crawl.get_config") as mock_config:
                 mock_config.return_value = {"JINA_API_KEY": "test-key-123"}
 
-                result = await _jina_reader_fetch(
+                await _jina_reader_fetch(
                     url="https://example.com",
                     max_length=10000,
                     request_id="test123"

@@ -5,7 +5,6 @@ Async HTTP client for communicating with agentic-memories service.
 Provides memory storage operations with error handling and structured logging.
 """
 
-import json
 import time
 from typing import Any, Dict, Optional
 
@@ -366,7 +365,7 @@ class MemoryClient:
 
             return memories
 
-        except httpx.TimeoutException as e:
+        except httpx.TimeoutException:
             duration_ms = int((time.time() - start_time) * 1000)
             logger.warning(
                 "Memory retrieval timed out, returning empty list (graceful degradation)",

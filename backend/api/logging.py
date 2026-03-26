@@ -341,7 +341,7 @@ def log_performance(operation_name: Optional[str] = None):
                     )
                 
                 return result
-            except Exception as e:
+            except Exception:
                 duration_ms = int((time.time() - start_time) * 1000)
                 logger.error(
                     f"Operation failed: {op_name}",

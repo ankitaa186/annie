@@ -11,7 +11,7 @@ Tests:
 """
 
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 from datetime import datetime, timedelta, timezone
 from freezegun import freeze_time
 
@@ -332,7 +332,7 @@ async def test_context_manager_doesnt_close_provided_redis(mock_redis):
     """Test context manager doesn't close provided Redis connection."""
     mock_redis.close = AsyncMock()
 
-    async with ActivityTracker(redis_client=mock_redis) as tracker:
+    async with ActivityTracker(redis_client=mock_redis):
         pass
 
     # Should NOT close provided connection
