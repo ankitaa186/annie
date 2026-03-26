@@ -12,7 +12,6 @@ import asyncio
 import base64
 from dataclasses import dataclass, field
 from enum import Enum
-from io import BytesIO
 from typing import List, Optional, Tuple
 
 from telegram import Document, Message, PhotoSize, Video
@@ -853,7 +852,7 @@ def format_partial_success_acknowledgment(result: FileProcessingResult) -> str:
 
     # Add successful files
     for file in result.successful:
-        icon = get_file_icon(file.mime_type)
+        get_file_icon(file.mime_type)
         lines.append(f"• ✅ {file.filename} - ready")
 
     # Add failed files

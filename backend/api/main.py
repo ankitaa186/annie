@@ -494,7 +494,7 @@ def check_cloud_logging_health() -> Dict[str, Any]:
 async def startup_event():
     """Application startup handler."""
     import asyncio
-    from api.config import is_mqtt_configured, validate_mqtt_config, HA_MQTT_BROKER
+    from api.config import validate_mqtt_config, HA_MQTT_BROKER
 
     logger.info("Annie Backend API starting up...")
     logger.info(f"Environment: {config.get('ENVIRONMENT', 'unknown')}")

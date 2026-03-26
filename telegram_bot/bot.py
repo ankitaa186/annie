@@ -7,7 +7,6 @@ This module initializes and runs the Telegram bot with long polling.
 import asyncio
 import signal
 import sys
-import time
 from telegram.ext import Application, ApplicationBuilder
 
 from telegram_bot.config import get_config, mask_sensitive_value

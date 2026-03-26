@@ -13,7 +13,6 @@ to ensure they're available during module initialization.
 import os
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
 
 # Test environment variables - SET BEFORE ANY PROJECT IMPORTS
 TEST_ENV_VARS = {
@@ -40,7 +39,7 @@ for key, value in TEST_ENV_VARS.items():
     os.environ.setdefault(key, value)
 
 # Now safe to import pytest
-import pytest
+import pytest  # noqa: E402
 
 # Add mcp_server directory to Python path for imports
 mcp_server_dir = Path(__file__).parent.parent

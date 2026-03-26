@@ -17,7 +17,6 @@ graceful error handling, and comprehensive observability via Langfuse.
 
 import asyncio
 import json
-import os
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -28,15 +27,12 @@ from arq.connections import RedisSettings
 
 from api.config import get_config
 from api.logging import get_logger
-from api.proactive.activity_tracker import ActivityTracker
 from api.proactive.evaluators import evaluate_condition, EvaluatorResult
 from api.proactive.gate import SubconsciousGate, GateResult
 from api.proactive.agent import execute_wake_up_agent, WakeUpResult
 from api.proactive.intents_client import (
     IntentsClient,
-    IntentsClientError,
     IntentsNetworkError,
-    IntentsAPIError,
 )
 from api.proactive.telegram_delivery import TelegramDelivery, DeliveryResult
 from api.state import StateManager

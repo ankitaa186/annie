@@ -20,10 +20,8 @@ from telegram_bot.backend_client import get_backend_client
 from telegram_bot.config import get_config
 from telegram_bot.file_handler import (
     FileProcessingResult,
-    has_processable_files,
     process_message_files,
     format_file_acknowledgment,
-    format_file_error,
     format_partial_success_acknowledgment,
 )
 from telegram_bot.logger import get_logger
@@ -2278,7 +2276,6 @@ async def _process_media_group(media_group_id: str):
     from telegram_bot.file_handler import (
         FileProcessingResult,
         process_message_files,
-        format_file_acknowledgment,
         format_partial_success_acknowledgment,
     )
 

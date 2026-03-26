@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { LLMIndicator, getLLMDisplayName, LLM_DISPLAY_NAMES } from '../LLMIndicator';
+import { MODEL_GROK_4, MODEL_GPT_5, MODEL_GEMINI_PRO } from '@/lib/constants/llm';
 
 // Mock Radix UI Tooltip
 jest.mock('@radix-ui/react-tooltip', () => ({

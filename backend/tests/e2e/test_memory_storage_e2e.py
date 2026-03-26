@@ -4,15 +4,15 @@ Integration tests for end-to-end memory storage flow
 Tests the complete flow: chat request → memory storage (fire-and-forget on every message)
 """
 
-import asyncio
 import json
 import pytest
 from unittest.mock import AsyncMock, Mock, patch
 
 from api.routes.chat import ChatRequest, create_chat
 from api.memory import MemoryManager
-from api.state import StateManager
 from fastapi import BackgroundTasks
+from starlette.requests import Request
+from starlette.datastructures import Headers
 
 
 class TestMemoryStorageE2E:
@@ -57,8 +57,16 @@ class TestMemoryStorageE2E:
             mock_state.add_message = AsyncMock()
             mock_state_class.return_value = mock_state
 
+            # Create mock HTTP request
+            mock_http_request = Mock(spec=Request)
+            mock_http_request.client = Mock()
+            mock_http_request.client.host = "127.0.0.1"
+            mock_http_request.headers = Headers({})
+            mock_http_request.state = Mock()
+            mock_http_request.state.user_id = None  # No auth override
+
             # Call chat endpoint
-            response = await create_chat(chat_request, background_tasks)
+            response = await create_chat(chat_request, background_tasks, mock_http_request)
 
             # Verify background task was added (memory storage on every message)
             assert task_added is True

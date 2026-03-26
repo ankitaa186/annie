@@ -2,7 +2,7 @@
 Unit tests for MemoryClient
 """
 
-import json
+import os
 import pytest
 from unittest.mock import AsyncMock, Mock, patch
 import httpx
@@ -53,7 +53,8 @@ class TestMemoryClientInit:
         """Test initialization with default configuration from environment."""
         client = MemoryClient()
         # Uses AGENTIC_MEMORIES_URL from test environment (conftest.py)
-        assert client.memories_url == "http://localhost:8080"
+        # URL varies: localhost outside Docker, host.docker.internal inside Docker
+        assert client.memories_url == os.environ.get("AGENTIC_MEMORIES_URL", "http://localhost:8080")
         assert client.timeout == 240.0  # 4 minute default timeout
         assert client.client is not None
 
@@ -280,7 +281,7 @@ class TestRetrieveMemories:
         with patch.object(memory_client.client, 'get', new_callable=AsyncMock) as mock_get:
             mock_get.return_value = mock_response
 
-            result = await memory_client.retrieve_memories(
+            await memory_client.retrieve_memories(
                 "user123",
                 "stock investment",
                 limit=10,

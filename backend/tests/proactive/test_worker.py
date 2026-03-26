@@ -11,9 +11,7 @@ Tests:
 """
 
 import pytest
-from unittest.mock import AsyncMock, Mock, patch, MagicMock
-from datetime import datetime, timezone
-from freezegun import freeze_time
+from unittest.mock import AsyncMock, patch
 
 from api.proactive.worker import (
     process_trigger,

@@ -6,7 +6,7 @@ Tests text extraction fallback for documents when using ChatGPT instead of Gemin
 
 import base64
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 from api.providers.chatgpt_provider import ChatGPTProvider
 
 
@@ -25,7 +25,7 @@ def provider():
     """Create ChatGPT provider with mocked config."""
     with patch("api.providers.chatgpt_provider.get_config") as mock_config:
         mock_config.return_value = {
-            "CHATGPT_API_KEY": "test-api-key",
+            "OPENAI_API_KEY": "test-api-key",
             "LLM_REQUEST_TIMEOUT": "300.0",
             "LLM_STREAMING_TIMEOUT": "300.0",
         }
@@ -189,7 +189,7 @@ class TestPdfTextExtraction:
             from pypdf import PdfWriter
 
             writer = PdfWriter()
-            page = writer.add_blank_page(width=72, height=72)
+            writer.add_blank_page(width=72, height=72)
             # Note: Adding actual text to a blank page requires reportlab or similar
 
             buffer = BytesIO()

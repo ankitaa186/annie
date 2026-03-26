@@ -8,7 +8,7 @@ Tests status emissions for:
 - AC #4: Grok Live Search (if applicable)
 """
 import pytest
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
+from unittest.mock import Mock, AsyncMock, patch
 
 
 class TestMemoryStatusEmissions:
@@ -18,7 +18,6 @@ class TestMemoryStatusEmissions:
     async def test_memory_retrieval_status_in_stream(self):
         """Test that retrieve_memories tool emits start and completion status in stream context."""
         from api.routes.stream import stream_generator
-        from api.status import _status_context
 
         # Mock dependencies
         mock_request = Mock()

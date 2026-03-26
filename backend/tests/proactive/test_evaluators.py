@@ -10,12 +10,11 @@ Tests:
 """
 
 import pytest
-from unittest.mock import AsyncMock, Mock, patch, MagicMock
-from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, patch
+from datetime import timedelta
 
 from api.proactive.evaluators import (
     EvaluatorResult,
-    Evaluator,
     PriceEvaluator,
     PortfolioEvaluator,
     SilenceEvaluator,

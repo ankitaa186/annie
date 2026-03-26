@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { HealthIndicator, LLMIndicator } from '@/components/status';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { DEFAULT_MODEL } from '@/lib/constants/llm';
 
 /**
  * Header component with logo, health indicators, and LLM indicator
@@ -35,7 +36,7 @@ export function Header() {
 
   // Extract active LLM from health response (use llm_api status for now)
   // In production, this would come from a config endpoint or the health response
-  const activeLLM = health?.components?.llm_api === 'ok' ? 'gemini-3.1-pro-preview' : null;
+  const activeLLM = health?.components?.llm_api === 'ok' ? DEFAULT_MODEL : null;
 
   const transitionClasses = prefersReducedMotion
     ? ''

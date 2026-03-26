@@ -9,8 +9,6 @@ Story 14.2: Update store_memory Tool Handler
 - Tests 10s timeout
 """
 
-import asyncio
-import json
 import pytest
 from unittest.mock import AsyncMock, Mock, patch
 import httpx

@@ -12,13 +12,11 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-import redis.asyncio as redis
 
 from api.config import get_config
 from api.logging import get_logger
 from api.memory_client import MemoryClient, MemoryNetworkError, MemoryAPIError
 from api.state import StateManager
-from api.status import emit_status
 
 try:
     from langfuse.decorators import observe
@@ -475,13 +473,13 @@ class MemoryManager:
                     acquired = await lock.acquire()
                     if not acquired:
                         logger.debug(
-                            f"Retry worker skipped: another worker holds lock",
+                            "Retry worker skipped: another worker holds lock",
                             extra={"worker_id": worker_id}
                         )
                         continue
 
                     logger.debug(
-                        f"Retry worker lock acquired",
+                        "Retry worker lock acquired",
                         extra={"worker_id": worker_id}
                     )
 
@@ -491,13 +489,13 @@ class MemoryManager:
                         try:
                             await lock.release()
                             logger.debug(
-                                f"Retry worker lock released",
+                                "Retry worker lock released",
                                 extra={"worker_id": worker_id}
                             )
                         except Exception as release_err:
                             # Lock may have expired - that's OK, just log it
                             logger.debug(
-                                f"Retry worker lock release skipped (may have expired)",
+                                "Retry worker lock release skipped (may have expired)",
                                 extra={"worker_id": worker_id, "error": str(release_err)}
                             )
 
@@ -635,7 +633,7 @@ class MemoryManager:
                                                 pst_now = datetime.now(ZoneInfo("America/Los_Angeles"))
                                                 outbox_payload = json.dumps({
                                                     "user_id": user_id,
-                                                    "message": f"<i>Session summarized and saved to memory.</i>\n",
+                                                    "message": "<i>Session summarized and saved to memory.</i>\n",
                                                     "trigger_id": f"session_flush:{conversation_id}",
                                                     "is_html": True,
                                                     "metadata": {
@@ -738,13 +736,13 @@ class MemoryManager:
                     acquired = await lock.acquire()
                     if not acquired:
                         logger.debug(
-                            f"Flush worker skipped: another worker holds lock",
+                            "Flush worker skipped: another worker holds lock",
                             extra={"worker_id": worker_id}
                         )
                         continue
 
                     logger.debug(
-                        f"Flush worker lock acquired",
+                        "Flush worker lock acquired",
                         extra={"worker_id": worker_id}
                     )
 
@@ -754,13 +752,13 @@ class MemoryManager:
                         try:
                             await lock.release()
                             logger.debug(
-                                f"Flush worker lock released",
+                                "Flush worker lock released",
                                 extra={"worker_id": worker_id}
                             )
                         except Exception as release_err:
                             # Lock may have expired - that's OK, just log it
                             logger.debug(
-                                f"Flush worker lock release skipped (may have expired)",
+                                "Flush worker lock release skipped (may have expired)",
                                 extra={"worker_id": worker_id, "error": str(release_err)}
                             )
 
@@ -1029,7 +1027,7 @@ class MemoryManager:
                     try:
                         import json
                         tags = json.loads(tags)
-                    except:
+                    except (ValueError, TypeError):
                         pass
                 if isinstance(tags, list):
                     context_parts.append(f"   Tags: {', '.join(tags)}")

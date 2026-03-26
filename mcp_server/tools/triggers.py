@@ -9,7 +9,7 @@ or conditions.
 import json
 import time
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 from zoneinfo import ZoneInfo
 
 import httpx

@@ -4,7 +4,6 @@ Unit Tests for GeminiToolAdapter
 Tests schema conversion between OpenAI and Gemini formats.
 """
 
-import pytest
 from api.providers.gemini_tool_adapter import GeminiToolAdapter
 
 

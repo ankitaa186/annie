@@ -17,6 +17,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 import httpx
 from api.config import get_config
 from api.logging import get_logger
+from api.constants import MODEL_GPT_5
 from api.providers.base import BaseProvider, ContextLengthError
 from api.observability.tracing import get_current_trace
 from api.observability.cost import calculate_llm_cost
@@ -59,21 +60,21 @@ class ChatGPTProvider(BaseProvider):
 
     # ChatGPT-5 API configuration
     BASE_URL = "https://api.openai.com/v1"
-    MODEL_NAME = "gpt-5.2"  # Latest flagship model (Dec 2025) - 400k context, 128k output
+    MODEL_NAME = MODEL_GPT_5  # Latest flagship model (Dec 2025) - 400k context, 128k output
 
     def __init__(self):
         """
         Initialize ChatGPT-5 provider with configuration from environment.
 
         Raises:
-            ValueError: If CHATGPT_API_KEY is not configured
+            ValueError: If OPENAI_API_KEY is not configured
         """
         config = get_config()
 
         # Get API key
-        self.api_key = config.get("CHATGPT_API_KEY")
+        self.api_key = config.get("OPENAI_API_KEY")
         if not self.api_key or self.api_key == "REPLACE_ME":
-            raise ValueError("CHATGPT_API_KEY not configured")
+            raise ValueError("OPENAI_API_KEY not configured")
 
         # Load timeout configuration from environment
         self.request_timeout = float(config.get("LLM_REQUEST_TIMEOUT", "300.0"))
@@ -85,7 +86,7 @@ class ChatGPTProvider(BaseProvider):
         logger.info(
             "ChatGPT-5 provider initialized",
             extra={
-                "provider": "chatgpt-5",
+                "provider": MODEL_GPT_5,
                 "model": self.MODEL_NAME,
                 "request_timeout": self.request_timeout
             }
@@ -106,7 +107,7 @@ class ChatGPTProvider(BaseProvider):
 
     def get_provider_name(self) -> str:
         """Return provider name."""
-        return "chatgpt-5"
+        return MODEL_GPT_5
 
     def calculate_cost(self, usage: Dict[str, int]) -> Dict[str, float]:
         """
@@ -121,7 +122,7 @@ class ChatGPTProvider(BaseProvider):
             Cost details dictionary
         """
         return calculate_llm_cost(
-            provider="chatgpt-5",
+            provider=MODEL_GPT_5,
             prompt_tokens=usage.get("prompt_tokens", 0),
             completion_tokens=usage.get("completion_tokens", 0),
             sources_used=0  # ChatGPT-5 doesn't have Live Search
@@ -212,7 +213,7 @@ class ChatGPTProvider(BaseProvider):
         # Max iterations reached
         logger.warning(
             "ChatGPT-5 max tool iterations reached",
-            extra={"provider": "chatgpt-5", "max_iterations": max_tool_iterations}
+            extra={"provider": MODEL_GPT_5, "max_iterations": max_tool_iterations}
         )
 
     async def _stream_single_completion(
@@ -246,7 +247,7 @@ class ChatGPTProvider(BaseProvider):
                 payload["tools"] = tools
                 logger.debug(
                     "Function calling enabled for ChatGPT-5 streaming",
-                    extra={"provider": "chatgpt-5", "tool_count": len(tools)}
+                    extra={"provider": MODEL_GPT_5, "tool_count": len(tools)}
                 )
 
             # Detect if this is a multimodal request (messages have content arrays)
@@ -259,7 +260,7 @@ class ChatGPTProvider(BaseProvider):
             logger.info(
                 "Starting ChatGPT-5 streaming request",
                 extra={
-                    "provider": "chatgpt-5",
+                    "provider": MODEL_GPT_5,
                     "model": self.MODEL_NAME,
                     "message_count": len(messages),
                     "timeout_seconds": self.streaming_timeout,
@@ -285,12 +286,12 @@ class ChatGPTProvider(BaseProvider):
                     logger.warning(
                         "ChatGPT-5 rate limit hit during streaming",
                         extra={
-                            "provider": "chatgpt-5",
+                            "provider": MODEL_GPT_5,
                             "retry_after": retry_after_seconds
                         }
                     )
 
-                    raise RateLimitError("chatgpt-5", retry_after_seconds)
+                    raise RateLimitError(MODEL_GPT_5, retry_after_seconds)
 
                 # Check for other errors
                 if response.status_code != 200:
@@ -305,9 +306,9 @@ class ChatGPTProvider(BaseProvider):
                     # Detect context window overflow
                     error_lower = error_msg.lower()
                     if "context_length_exceeded" in error_lower or "maximum context length" in error_lower:
-                        raise ContextLengthError("chatgpt-5", error_msg)
+                        raise ContextLengthError(MODEL_GPT_5, error_msg)
 
-                    raise ProviderError("chatgpt-5", error_msg)
+                    raise ProviderError(MODEL_GPT_5, error_msg)
 
                 # Track metrics
                 first_token = True
@@ -359,7 +360,7 @@ class ChatGPTProvider(BaseProvider):
                                         logger.info(
                                             "ChatGPT-5 first token received",
                                             extra={
-                                                "provider": "chatgpt-5",
+                                                "provider": MODEL_GPT_5,
                                                 "latency_ms": first_token_latency_ms
                                             }
                                         )
@@ -409,7 +410,7 @@ class ChatGPTProvider(BaseProvider):
                                     logger.info(
                                         "ChatGPT-5 streaming completed",
                                         extra={
-                                            "provider": "chatgpt-5",
+                                            "provider": MODEL_GPT_5,
                                             "duration_ms": duration_ms,
                                             "token_count": token_count,
                                             "finish_reason": finish_reason,
@@ -422,6 +423,19 @@ class ChatGPTProvider(BaseProvider):
                                         # Convert streaming tool calls to list
                                         tool_calls_list = [streaming_tool_calls[i] for i in sorted(streaming_tool_calls.keys())]
                                         tool_results = []
+
+                                        # Emit persistence event for Redis storage (consumed by stream.py)
+                                        yield {
+                                            "type": "tool_persist_calls",
+                                            "tool_calls": [
+                                                {
+                                                    "id": tc["id"],
+                                                    "name": tc["function"]["name"],
+                                                    "arguments": tc["function"].get("arguments", "{}")
+                                                }
+                                                for tc in tool_calls_list
+                                            ]
+                                        }
 
                                         for tc in tool_calls_list:
                                             tool_name = tc["function"]["name"]
@@ -445,7 +459,7 @@ class ChatGPTProvider(BaseProvider):
                                                     # Inject correct user_id to override LLM-inferred value
                                                     inject_user_id(
                                                         args, user_id, logger,
-                                                        {"provider": "chatgpt-5", "tool_name": tool_name}
+                                                        {"provider": MODEL_GPT_5, "tool_name": tool_name}
                                                     )
                                                     result = await mcp_client.call_tool(tool_name, args)
                                                     result_str = json.dumps(result) if isinstance(result, (dict, list)) else str(result)
@@ -457,6 +471,14 @@ class ChatGPTProvider(BaseProvider):
                                                         "result_summary": result_str[:200] + "..." if len(result_str) > 200 else result_str
                                                     }
 
+                                                    # Emit persistence event for Redis storage
+                                                    yield {
+                                                        "type": "tool_persist_result",
+                                                        "tool_name": tool_name,
+                                                        "tool_call_id": tool_call_id,
+                                                        "result_content": result_str
+                                                    }
+
                                                     tool_results.append({
                                                         "tool_call_id": tool_call_id,
                                                         "content": result_str
@@ -466,7 +488,7 @@ class ChatGPTProvider(BaseProvider):
                                                     logger.error(
                                                         "ChatGPT-5 tool execution failed",
                                                         extra={
-                                                            "provider": "chatgpt-5",
+                                                            "provider": MODEL_GPT_5,
                                                             "tool": tool_name,
                                                             "error": error_msg
                                                         }
@@ -479,9 +501,19 @@ class ChatGPTProvider(BaseProvider):
                                                         "error": error_msg
                                                     }
 
+                                                    error_content = f"Error: {error_msg}"
+
+                                                    # Emit persistence event for Redis storage
+                                                    yield {
+                                                        "type": "tool_persist_result",
+                                                        "tool_name": tool_name,
+                                                        "tool_call_id": tool_call_id,
+                                                        "result_content": error_content
+                                                    }
+
                                                     tool_results.append({
                                                         "tool_call_id": tool_call_id,
-                                                        "content": f"Error: {error_msg}"
+                                                        "content": error_content
                                                     })
                                             else:
                                                 # No MCP client, return error
@@ -513,7 +545,7 @@ class ChatGPTProvider(BaseProvider):
 
                                             # Calculate costs
                                             cost_info = calculate_llm_cost(
-                                                provider="chatgpt-5",
+                                                provider=MODEL_GPT_5,
                                                 prompt_tokens=prompt_tokens,
                                                 completion_tokens=completion_tokens,
                                                 sources_used=0
@@ -531,7 +563,7 @@ class ChatGPTProvider(BaseProvider):
                                                 input=truncated_prompt,
                                                 model=self.MODEL_NAME,
                                                 metadata={
-                                                    "provider": "chatgpt-5",
+                                                    "provider": MODEL_GPT_5,
                                                     "streaming": True
                                                 }
                                             )
@@ -554,7 +586,7 @@ class ChatGPTProvider(BaseProvider):
                                             logger.info(
                                                 "Langfuse generation tracked successfully",
                                                 extra={
-                                                    "provider": "chatgpt-5",
+                                                    "provider": MODEL_GPT_5,
                                                     "prompt_tokens": prompt_tokens,
                                                     "completion_tokens": completion_tokens,
                                                     "cost_usd": cost_info.get("total_cost", 0)
@@ -564,7 +596,7 @@ class ChatGPTProvider(BaseProvider):
                                             # Fire-and-forget: log but don't fail stream
                                             logger.warning(
                                                 f"Failed to track ChatGPT-5 streaming generation in Langfuse: {str(e)}",
-                                                extra={"provider": "chatgpt-5", "error": str(e)}
+                                                extra={"provider": MODEL_GPT_5, "error": str(e)}
                                             )
 
                                     # Yield completion event
@@ -580,7 +612,7 @@ class ChatGPTProvider(BaseProvider):
                             logger.warning(
                                 "Failed to parse ChatGPT-5 streaming chunk",
                                 extra={
-                                    "provider": "chatgpt-5",
+                                    "provider": MODEL_GPT_5,
                                     "line": data_str[:100],
                                     "error": str(e)
                                 }
@@ -592,24 +624,24 @@ class ChatGPTProvider(BaseProvider):
             logger.warning(
                 "ChatGPT-5 streaming timeout",
                 extra={
-                    "provider": "chatgpt-5",
+                    "provider": MODEL_GPT_5,
                     "duration_ms": duration_ms,
                     "timeout": self.streaming_timeout
                 }
             )
-            raise ProviderError("chatgpt-5", "Streaming timeout", e)
+            raise ProviderError(MODEL_GPT_5, "Streaming timeout", e)
 
         except httpx.NetworkError as e:
             duration_ms = int((time.time() - start_time) * 1000)
             logger.warning(
                 "ChatGPT-5 streaming network error",
                 extra={
-                    "provider": "chatgpt-5",
+                    "provider": MODEL_GPT_5,
                     "duration_ms": duration_ms,
                     "error": str(e)
                 }
             )
-            raise ProviderError("chatgpt-5", "Network error during streaming", e)
+            raise ProviderError(MODEL_GPT_5, "Network error during streaming", e)
 
         except RateLimitError:
             # Re-raise rate limit errors as-is
@@ -624,13 +656,13 @@ class ChatGPTProvider(BaseProvider):
             logger.error(
                 "Unexpected ChatGPT-5 streaming error",
                 extra={
-                    "provider": "chatgpt-5",
+                    "provider": MODEL_GPT_5,
                     "duration_ms": duration_ms,
                     "error_type": type(e).__name__,
                     "error": str(e)
                 }
             )
-            raise ProviderError("chatgpt-5", f"Unexpected streaming error: {type(e).__name__}", e)
+            raise ProviderError(MODEL_GPT_5, f"Unexpected streaming error: {type(e).__name__}", e)
 
     def _truncate_text(self, text: str, max_length: int) -> str:
         """Truncate text to max_length, adding ellipsis if truncated."""

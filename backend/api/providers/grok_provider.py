@@ -11,6 +11,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 import httpx
 from api.config import get_config
 from api.logging import get_logger
+from api.constants import MODEL_GROK_4
 from api.providers.base import BaseProvider, ContextLengthError
 from api.observability.tracing import get_current_trace
 from api.observability.cost import calculate_llm_cost
@@ -52,21 +53,21 @@ class GrokProvider(BaseProvider):
 
     # Grok-4 API configuration
     BASE_URL = "https://api.x.ai/v1"
-    MODEL_NAME = "grok-4-fast"
+    MODEL_NAME = MODEL_GROK_4
 
     def __init__(self):
         """
         Initialize Grok-4 provider with configuration from environment.
 
         Raises:
-            ValueError: If GROK_API_KEY is not configured
+            ValueError: If XAI_API_KEY is not configured
         """
         config = get_config()
 
         # Get API key
-        self.api_key = config.get("GROK_API_KEY")
+        self.api_key = config.get("XAI_API_KEY")
         if not self.api_key or self.api_key == "REPLACE_ME":
-            raise ValueError("GROK_API_KEY not configured")
+            raise ValueError("XAI_API_KEY not configured")
 
         # Load timeout configuration from environment
         self.request_timeout = float(config.get("LLM_REQUEST_TIMEOUT", "300.0"))
@@ -83,7 +84,7 @@ class GrokProvider(BaseProvider):
         logger.info(
             "Grok-4 provider initialized",
             extra={
-                "provider": "grok-4",
+                "provider": MODEL_GROK_4,
                 "model": self.MODEL_NAME,
                 "live_search_mode": self.live_search_mode,
                 "live_search_max_results": self.live_search_max_results,
@@ -106,7 +107,7 @@ class GrokProvider(BaseProvider):
 
     def get_provider_name(self) -> str:
         """Return provider name."""
-        return "grok-4"
+        return MODEL_GROK_4
 
     def calculate_cost(self, usage: Dict[str, int]) -> Dict[str, float]:
         """
@@ -122,7 +123,7 @@ class GrokProvider(BaseProvider):
             Cost details dictionary
         """
         return calculate_llm_cost(
-            provider="grok-4",
+            provider=MODEL_GROK_4,
             prompt_tokens=usage.get("prompt_tokens", 0),
             completion_tokens=usage.get("completion_tokens", 0),
             sources_used=usage.get("sources_used", 0)
@@ -173,13 +174,13 @@ class GrokProvider(BaseProvider):
                 payload["tools"] = tools
                 logger.debug(
                     "Function calling enabled for Grok-4 streaming",
-                    extra={"provider": "grok-4", "tool_count": len(tools)}
+                    extra={"provider": MODEL_GROK_4, "tool_count": len(tools)}
                 )
 
             logger.info(
                 "Starting Grok-4 streaming request",
                 extra={
-                    "provider": "grok-4",
+                    "provider": MODEL_GROK_4,
                     "model": self.MODEL_NAME,
                     "message_count": len(messages),
                     "timeout_seconds": self.streaming_timeout,
@@ -203,12 +204,12 @@ class GrokProvider(BaseProvider):
                     logger.warning(
                         "Grok-4 rate limit hit during streaming",
                         extra={
-                            "provider": "grok-4",
+                            "provider": MODEL_GROK_4,
                             "retry_after": retry_after_seconds
                         }
                     )
 
-                    raise RateLimitError("grok-4", retry_after_seconds)
+                    raise RateLimitError(MODEL_GROK_4, retry_after_seconds)
 
                 # Check for other errors
                 if response.status_code != 200:
@@ -223,9 +224,9 @@ class GrokProvider(BaseProvider):
                     # Detect context window overflow
                     error_lower = error_msg.lower()
                     if "context_length_exceeded" in error_lower or "maximum context length" in error_lower:
-                        raise ContextLengthError("grok-4", error_msg)
+                        raise ContextLengthError(MODEL_GROK_4, error_msg)
 
-                    raise ProviderError("grok-4", error_msg)
+                    raise ProviderError(MODEL_GROK_4, error_msg)
 
                 # Track metrics
                 first_token = True
@@ -267,7 +268,7 @@ class GrokProvider(BaseProvider):
                                         logger.info(
                                             "Grok-4 first token received",
                                             extra={
-                                                "provider": "grok-4",
+                                                "provider": MODEL_GROK_4,
                                                 "latency_ms": first_token_latency_ms
                                             }
                                         )
@@ -300,7 +301,7 @@ class GrokProvider(BaseProvider):
                                         logger.info(
                                             "Grok-4 Live Search activated (streaming)",
                                             extra={
-                                                "provider": "grok-4",
+                                                "provider": MODEL_GROK_4,
                                                 "search_activated": True,
                                                 "sources_accessed": sources_used,
                                                 "citations_count": len(citations),
@@ -314,7 +315,7 @@ class GrokProvider(BaseProvider):
                                     logger.info(
                                         "Grok-4 streaming completed",
                                         extra={
-                                            "provider": "grok-4",
+                                            "provider": MODEL_GROK_4,
                                             "duration_ms": duration_ms,
                                             "token_count": token_count,
                                             "finish_reason": finish_reason
@@ -331,7 +332,7 @@ class GrokProvider(BaseProvider):
 
                                             # Calculate costs
                                             cost_info = calculate_llm_cost(
-                                                provider="grok-4",
+                                                provider=MODEL_GROK_4,
                                                 prompt_tokens=prompt_tokens,
                                                 completion_tokens=completion_tokens,
                                                 sources_used=sources_used
@@ -350,7 +351,7 @@ class GrokProvider(BaseProvider):
                                                 input=truncated_prompt,
                                                 model=self.MODEL_NAME,
                                                 metadata={
-                                                    "provider": "grok-4",
+                                                    "provider": MODEL_GROK_4,
                                                     "sources_used": sources_used,
                                                     "streaming": True
                                                 }
@@ -374,7 +375,7 @@ class GrokProvider(BaseProvider):
                                             logger.info(
                                                 "Langfuse generation tracked successfully",
                                                 extra={
-                                                    "provider": "grok-4",
+                                                    "provider": MODEL_GROK_4,
                                                     "prompt_tokens": prompt_tokens,
                                                     "completion_tokens": completion_tokens,
                                                     "cost_usd": cost_info.get("total_cost", 0)
@@ -384,7 +385,7 @@ class GrokProvider(BaseProvider):
                                             # Fire-and-forget: log but don't fail stream
                                             logger.warning(
                                                 f"Failed to track Grok-4 streaming generation in Langfuse: {str(e)}",
-                                                extra={"provider": "grok-4", "error": str(e)}
+                                                extra={"provider": MODEL_GROK_4, "error": str(e)}
                                             )
 
                                     # Yield completion event
@@ -401,7 +402,7 @@ class GrokProvider(BaseProvider):
                             logger.warning(
                                 "Failed to parse Grok-4 streaming chunk",
                                 extra={
-                                    "provider": "grok-4",
+                                    "provider": MODEL_GROK_4,
                                     "line": data_str[:100],
                                     "error": str(e)
                                 }
@@ -413,24 +414,24 @@ class GrokProvider(BaseProvider):
             logger.warning(
                 "Grok-4 streaming timeout",
                 extra={
-                    "provider": "grok-4",
+                    "provider": MODEL_GROK_4,
                     "duration_ms": duration_ms,
                     "timeout": self.streaming_timeout
                 }
             )
-            raise ProviderError("grok-4", "Streaming timeout", e)
+            raise ProviderError(MODEL_GROK_4, "Streaming timeout", e)
 
         except httpx.NetworkError as e:
             duration_ms = int((time.time() - start_time) * 1000)
             logger.warning(
                 "Grok-4 streaming network error",
                 extra={
-                    "provider": "grok-4",
+                    "provider": MODEL_GROK_4,
                     "duration_ms": duration_ms,
                     "error": str(e)
                 }
             )
-            raise ProviderError("grok-4", "Network error during streaming", e)
+            raise ProviderError(MODEL_GROK_4, "Network error during streaming", e)
 
         except RateLimitError:
             # Re-raise rate limit errors as-is
@@ -445,10 +446,10 @@ class GrokProvider(BaseProvider):
             logger.error(
                 "Unexpected Grok-4 streaming error",
                 extra={
-                    "provider": "grok-4",
+                    "provider": MODEL_GROK_4,
                     "duration_ms": duration_ms,
                     "error_type": type(e).__name__,
                     "error": str(e)
                 }
             )
-            raise ProviderError("grok-4", f"Unexpected streaming error: {type(e).__name__}", e)
+            raise ProviderError(MODEL_GROK_4, f"Unexpected streaming error: {type(e).__name__}", e)
