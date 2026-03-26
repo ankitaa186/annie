@@ -23,6 +23,11 @@ Sources:
 Last Updated: December 2025
 """
 
+from api.constants import (
+    MODEL_GROK_4, MODEL_GPT_5,
+    MODEL_GEMINI_PRO, MODEL_GEMINI_PRO_3, MODEL_GEMINI_FLASH, MODEL_GEMINI_LEGACY,
+)
+
 
 def calculate_grok_cost(prompt_tokens: int, completion_tokens: int, sources_used: int = 0) -> dict:
     """
@@ -187,7 +192,7 @@ def calculate_llm_cost(provider: str, prompt_tokens: int, completion_tokens: int
     Calculate cost for LLM API usage based on provider.
 
     Args:
-        provider: LLM provider name ("grok-4", "chatgpt-5", "gemini-3-pro-preview", "gemini-3-flash-preview", "gemini-2.5-pro")
+        provider: LLM provider name ("grok-4", "chatgpt-5", "gemini-3.1-pro-preview", "gemini-3-flash-preview", "gemini-2.5-pro")
         prompt_tokens: Number of input tokens
         completion_tokens: Number of output tokens
         sources_used: Number of Live Search sources accessed (Grok-4 only)
@@ -199,14 +204,14 @@ def calculate_llm_cost(provider: str, prompt_tokens: int, completion_tokens: int
     Raises:
         ValueError: If provider is unknown
     """
-    if provider == "grok-4":
+    if provider == MODEL_GROK_4:
         return calculate_grok_cost(prompt_tokens, completion_tokens, sources_used)
-    elif provider == "chatgpt-5":
+    elif provider == MODEL_GPT_5:
         return calculate_chatgpt_cost(prompt_tokens, completion_tokens)
-    elif provider == "gemini-3-flash-preview":
+    elif provider == MODEL_GEMINI_FLASH:
         # Gemini 3 Flash has different (cheaper) pricing than Pro
         return calculate_gemini_flash_cost(prompt_tokens, completion_tokens, cached_tokens)
-    elif provider in ("gemini-3-pro-preview", "gemini-2.5-pro"):
+    elif provider in (MODEL_GEMINI_PRO, MODEL_GEMINI_PRO_3, MODEL_GEMINI_LEGACY):
         # Pro models use tiered pricing
         return calculate_gemini_cost(prompt_tokens, completion_tokens, cached_tokens)
     else:

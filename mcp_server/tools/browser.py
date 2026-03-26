@@ -13,15 +13,13 @@ import random
 import time
 import uuid
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 import httpx
 
-from mcp_server.config import get_config
 from mcp_server.logging import get_logger
 
 logger = get_logger(__name__)
-
-from urllib.parse import urlparse
 
 # Default browser service URL (overridable via env)
 _BROWSER_SERVICE_URL: Optional[str] = None

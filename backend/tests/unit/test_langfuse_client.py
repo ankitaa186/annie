@@ -5,7 +5,7 @@ Tests AC #1, #2, #5, #6: Client initialization, graceful degradation, and health
 """
 import os
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 
 # Reset the singleton before each test

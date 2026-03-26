@@ -5,18 +5,15 @@ Implements MCP (Model Context Protocol) server with HTTP transport
 and JSON-RPC 2.0 protocol support.
 """
 
-import asyncio
 import inspect
 import json
 import os
 import time
 from datetime import datetime
-import pytz
-
-_PACIFIC_TZ = pytz.timezone("America/Los_Angeles")
 from typing import Any, Dict, Optional
 
-from fastapi import FastAPI, Request, HTTPException
+import pytz
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from mcp_server.config import get_config
@@ -53,6 +50,7 @@ from mcp_server.tools import (
     execute_command_tool,  # Host terminal command execution
 )
 
+_PACIFIC_TZ = pytz.timezone("America/Los_Angeles")
 logger = get_logger(__name__)
 config = get_config()
 

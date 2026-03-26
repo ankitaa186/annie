@@ -10,7 +10,7 @@ Epic 15 - Story 15.3
 
 import asyncio
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 import httpx
 

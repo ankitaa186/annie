@@ -4,6 +4,7 @@ Unit tests for LLM cost calculation utilities.
 Tests AC #3: Cost calculation for Grok-4, ChatGPT-5, and Gemini 3 Pro
 """
 import pytest
+from api.constants import MODEL_GROK_4, MODEL_GPT_5, MODEL_GEMINI_PRO
 from api.observability.cost import (
     calculate_grok_cost,
     calculate_chatgpt_cost,
@@ -188,7 +189,7 @@ class TestUnifiedCostCalculation:
 
     def test_calculate_llm_cost_grok(self):
         """Test unified function with Grok-4 provider."""
-        result = calculate_llm_cost("grok-4", prompt_tokens=1000, completion_tokens=500, sources_used=3)
+        result = calculate_llm_cost(MODEL_GROK_4, prompt_tokens=1000, completion_tokens=500, sources_used=3)
 
         # Should match Grok cost calculation
         assert result["input_cost"] == 0.0  # Promo period
@@ -196,7 +197,7 @@ class TestUnifiedCostCalculation:
 
     def test_calculate_llm_cost_chatgpt(self):
         """Test unified function with ChatGPT-5 provider."""
-        result = calculate_llm_cost("chatgpt-5", prompt_tokens=1000, completion_tokens=500)
+        result = calculate_llm_cost(MODEL_GPT_5, prompt_tokens=1000, completion_tokens=500)
 
         # Should match ChatGPT cost calculation (GPT-5.2 pricing)
         assert result["input_cost"] == 0.00175
@@ -205,7 +206,7 @@ class TestUnifiedCostCalculation:
 
     def test_calculate_llm_cost_gemini(self):
         """Test unified function with Gemini 3 Pro Preview provider."""
-        result = calculate_llm_cost("gemini-3-pro-preview", prompt_tokens=1000, completion_tokens=500)
+        result = calculate_llm_cost(MODEL_GEMINI_PRO, prompt_tokens=1000, completion_tokens=500)
 
         # Should match Gemini cost calculation
         assert result["input_cost"] == 0.002
@@ -215,7 +216,7 @@ class TestUnifiedCostCalculation:
     def test_calculate_llm_cost_gemini_with_cached(self):
         """Test unified function with Gemini 3 Pro and cached tokens."""
         result = calculate_llm_cost(
-            "gemini-3-pro-preview",
+            "gemini-3.1-pro-preview",
             prompt_tokens=1000,
             completion_tokens=500,
             cached_tokens=200
@@ -236,7 +237,7 @@ class TestUnifiedCostCalculation:
     def test_calculate_llm_cost_no_search_for_chatgpt(self):
         """Test that sources_used is ignored for ChatGPT-5."""
         # ChatGPT doesn't have Live Search, so sources_used should be ignored
-        result = calculate_llm_cost("chatgpt-5", prompt_tokens=1000, completion_tokens=500, sources_used=10)
+        result = calculate_llm_cost(MODEL_GPT_5, prompt_tokens=1000, completion_tokens=500, sources_used=10)
 
         # Result should not include search_cost
         assert "search_cost" not in result

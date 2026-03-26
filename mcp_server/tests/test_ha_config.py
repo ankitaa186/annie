@@ -8,7 +8,6 @@ Tests AC #2 (HA_ACCESS_TOKEN masking) and AC #4 (config loading).
 import os
 from unittest.mock import patch
 
-import pytest
 
 
 class TestHAConfigLoading:

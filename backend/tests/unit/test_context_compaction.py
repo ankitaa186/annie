@@ -9,9 +9,8 @@ Tests:
 - build_llm_context with summarization: mocked dependencies
 """
 
-import asyncio
 import json
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -179,7 +178,7 @@ class TestPruneToolResults:
                 "content": "",
                 "is_tool_call": True,
                 "tool_calls": [
-                    {"id": "tc1", "function": {"name": "web_search", "arguments": '{"query": "AAPL stock"}'}}
+                    {"id": "tc1", "type": "function", "function": {"name": "web_search", "arguments": '{"query": "AAPL stock"}'}}
                 ]
             },
             {
@@ -204,10 +203,11 @@ class TestPruneToolResults:
         assert tool_result_msg["_pruned"] is True
         assert "[Returned 5 results]" in tool_result_msg["content"]
 
-        # Tool call arguments in turn 1 should be stripped
+        # Tool call arguments in turn 1 should be stripped, type preserved
         tool_call_msg = result[1]
         assert tool_call_msg["_pruned"] is True
         assert tool_call_msg["tool_calls"][0]["function"]["arguments"] == "{}"
+        assert tool_call_msg["tool_calls"][0]["type"] == "function"
 
         # Recent turns should be untouched
         assert result[4]["content"] == "What about NVDA?"
@@ -496,7 +496,7 @@ User wanted advice.
         assert result["user_name"] == "Ankit"
         assert result["source"] == "session_summary"
         assert result["message_count"] == 15
-        assert "-08:00" in result["timestamp"]
+        assert "-08:00" in result["timestamp"] or "-07:00" in result["timestamp"]
         # LLM fields
         assert result["topics"] == ["investing", "nvda"]
         assert result["mood"] == "stressed"
@@ -608,9 +608,6 @@ class TestGetOrCreateSummary:
         state._is_healthy = True
 
         # Mock the LLM call
-        mock_response = {
-            "choices": [{"message": {"content": "New summary of conversation"}}]
-        }
 
         with patch("api.state.get_config", return_value={
             "REDIS_HOST": "localhost",
@@ -760,7 +757,7 @@ class TestBuildLLMContextSummarization:
         state._is_healthy = True
 
         with patch.object(state, "get_or_create_summary", new_callable=AsyncMock) as mock_summary:
-            result = await state.build_llm_context("conv_123", "You are Annie")
+            await state.build_llm_context("conv_123", "You are Annie")
 
         # Should NOT call summarization
         mock_summary.assert_not_called()
@@ -879,7 +876,8 @@ The user was stressed about their portfolio and wanted reassurance about holding
             assert call_kwargs["metadata"]["message_count"] == 10
             assert call_kwargs["metadata"]["mood"] == "stressed"
             assert call_kwargs["metadata"]["category"] == "advice"
-            assert "-08:00" in call_kwargs["metadata"]["timestamp"]
+            ts = call_kwargs["metadata"]["timestamp"]
+            assert "-08:00" in ts or "-07:00" in ts
 
     @pytest.mark.asyncio
     async def test_echo_skips_when_no_user_id(self):

@@ -18,7 +18,6 @@ from mcp_server.config import (
     HA_ACCESS_TOKEN,
     HA_CONTROL_ALLOWLIST,
     HA_TIMEOUT,
-    is_ha_configured,
 )
 from mcp_server.logging import get_logger
 

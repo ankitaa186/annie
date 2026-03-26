@@ -9,7 +9,7 @@ Tests:
 """
 
 import pytest
-from unittest.mock import AsyncMock, Mock, patch, MagicMock
+from unittest.mock import AsyncMock, Mock, patch
 import httpx
 
 from api.proactive.intents_client import (
@@ -330,7 +330,6 @@ async def test_fire_intent_condition_not_met():
 @pytest.mark.asyncio
 async def test_network_error():
     """Test network error handling."""
-    import httpx
     client = IntentsClient(intents_url="http://localhost:8080")
 
     with patch.object(client.client, 'get', new_callable=AsyncMock) as mock_get:
@@ -379,7 +378,6 @@ async def test_api_error_500():
 @pytest.mark.asyncio
 async def test_timeout_error():
     """Test timeout error handling."""
-    import httpx
     client = IntentsClient(intents_url="http://localhost:8080")
 
     with patch.object(client.client, 'get', new_callable=AsyncMock) as mock_get:
@@ -413,7 +411,6 @@ async def test_health_check_ok():
 @pytest.mark.asyncio
 async def test_health_check_error():
     """Test health check returns False on error."""
-    import httpx
     client = IntentsClient(intents_url="http://localhost:8080")
 
     with patch.object(client.client, 'get', new_callable=AsyncMock) as mock_get:

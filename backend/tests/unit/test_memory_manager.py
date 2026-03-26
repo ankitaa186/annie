@@ -5,7 +5,7 @@ Unit tests for MemoryManager
 import json
 import pytest
 import time
-from unittest.mock import AsyncMock, Mock, patch, MagicMock
+from unittest.mock import AsyncMock, patch
 from datetime import datetime, timezone
 
 from api.memory import MemoryManager
@@ -650,7 +650,7 @@ class TestFlushStaleSessions:
     async def test_flush_stale_sessions_flushes_inactive(self, memory_manager):
         """Test flush worker flushes sessions inactive > 10 minutes."""
         # Create a stale session (15 minutes old)
-        old_timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         # Simulate 15 minutes ago by manipulating the session data
         from datetime import timedelta
         stale_time = (datetime.now(timezone.utc) - timedelta(minutes=15)).isoformat().replace("+00:00", "Z")

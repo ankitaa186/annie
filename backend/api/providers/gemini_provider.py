@@ -13,6 +13,7 @@ import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from api.config import get_config
 from api.logging import get_logger
+from api.constants import MODEL_GEMINI_PRO, MODEL_GEMINI_FLASH, MODEL_GEMINI_LEGACY
 from api.providers.base import BaseProvider, ContextLengthError
 from api.providers.grok_provider import ProviderError, RateLimitError
 from api.providers.gemini_tool_adapter import GeminiToolAdapter
@@ -34,14 +35,14 @@ class GeminiProvider(BaseProvider):
     - Quota and rate limit handling
     - Cost calculation with tiered pricing
     - Langfuse tracing integration (fire-and-forget)
-    - Supports multiple Gemini models (gemini-3-pro-preview, gemini-2.5-pro, etc.)
+    - Supports multiple Gemini models (gemini-3.1-pro-preview, gemini-2.5-pro, etc.)
     """
 
     # Default Gemini model
-    DEFAULT_MODEL = "gemini-3-pro-preview"
+    DEFAULT_MODEL = MODEL_GEMINI_PRO
 
     # Supported Gemini models
-    SUPPORTED_MODELS = ["gemini-3-pro-preview", "gemini-3-flash-preview", "gemini-2.5-pro"]
+    SUPPORTED_MODELS = [MODEL_GEMINI_PRO, MODEL_GEMINI_FLASH, MODEL_GEMINI_LEGACY]
 
     # Safety filter user-friendly messages
     SAFETY_MESSAGES = {
@@ -60,19 +61,23 @@ class GeminiProvider(BaseProvider):
                            Useful for fallback scenarios (e.g., gemini-2.5-pro fallback)
 
         Raises:
-            ValueError: If GEMINI_API_KEY is not configured
+            ValueError: If GOOGLE_API_KEY is not configured
         """
         config = get_config()
 
         # Get API key
-        self.api_key = config.get("GEMINI_API_KEY")
+        self.api_key = config.get("GOOGLE_API_KEY")
         if not self.api_key or self.api_key == "REPLACE_ME":
-            raise ValueError("GEMINI_API_KEY not configured")
+            raise ValueError("GOOGLE_API_KEY not configured")
 
         # Load configuration from environment, with optional override
+        # cost_model_id: the constant used for cost calculation and provider identity
+        # model_name: what gets sent to the Gemini SDK (may differ, e.g. user sets GEMINI_MODEL)
         if model_override:
+            self.cost_model_id = model_override
             self.model_name = model_override
         else:
+            self.cost_model_id = self.DEFAULT_MODEL
             self.model_name = config.get("GEMINI_MODEL", self.DEFAULT_MODEL)
         self.max_output_tokens = int(config.get("GEMINI_MAX_OUTPUT_TOKENS", "16384"))
         self.temperature = float(config.get("GEMINI_TEMPERATURE", "1.0"))
@@ -163,16 +168,16 @@ class GeminiProvider(BaseProvider):
         """
         Normalize model name by removing 'models/' prefix if present.
 
-        The Gemini SDK uses full paths like 'models/gemini-3-pro-preview',
-        but the cost calculator expects just 'gemini-3-pro-preview'.
+        The Gemini SDK uses full paths like 'models/gemini-3.1-pro-preview',
+        but the cost calculator expects just 'gemini-3.1-pro-preview'.
         """
         if model_name.startswith("models/"):
             return model_name[7:]  # Remove 'models/' prefix
         return model_name
 
     def get_provider_name(self) -> str:
-        """Return provider name (model identifier without 'models/' prefix)."""
-        return self._normalize_model_name(self.model_name)
+        """Return provider name (constant model identifier for cost/routing)."""
+        return self.cost_model_id
 
     def calculate_cost(self, usage: Dict[str, int]) -> Dict[str, float]:
         """
@@ -188,7 +193,7 @@ class GeminiProvider(BaseProvider):
             Cost details dictionary
         """
         return calculate_llm_cost(
-            provider=self._normalize_model_name(self.model_name),
+            provider=self.cost_model_id,
             prompt_tokens=usage.get("prompt_tokens", 0),
             completion_tokens=usage.get("completion_tokens", 0),
             sources_used=0,  # Gemini doesn't have live search
@@ -433,7 +438,6 @@ class GeminiProvider(BaseProvider):
                 # Generate streaming response using ChatSession
                 try:
                     # Build generation config
-                    generation_config = {}
 
                     # Send message with streaming
                     # Note: system_instruction is handled at model initialization, not per-message
@@ -557,14 +561,11 @@ class GeminiProvider(BaseProvider):
                                             """Recursively convert protobuf objects to JSON-serializable dict."""
                                             # Import proto.marshal for type checking
                                             try:
-                                                from proto.marshal.collections import RepeatedComposite, MapComposite
-                                                from proto.marshal.collections.repeated import Repeated
-                                                from proto.marshal.collections.maps import MapComposite as MapComp
+                                                import proto.marshal.collections  # noqa: F401
+                                                import proto.marshal.collections.repeated  # noqa: F401
+                                                import proto.marshal.collections.maps  # noqa: F401
                                             except ImportError:
-                                                RepeatedComposite = type(None)
-                                                MapComposite = type(None)
-                                                Repeated = type(None)
-                                                MapComp = type(None)
+                                                pass
 
                                             # Handle proto.marshal wrapper types
                                             type_name = type(obj).__name__
@@ -1195,7 +1196,7 @@ class GeminiProvider(BaseProvider):
         """
         try:
             # Import MCPClient locally to avoid circular dependency
-            from api.mcp_client import MCPClient, MCPNetworkError, MCPToolError
+            from api.mcp_client import MCPNetworkError, MCPToolError
 
             # Inject correct user_id to override any LLM-inferred value
             inject_user_id(

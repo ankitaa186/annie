@@ -7,9 +7,9 @@ Tests profile caching, background refresh, and trigger logic.
 import json
 import pytest
 from datetime import datetime, timezone, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
-from api.profile import ProfileManager, ProfileCacheError
+from api.profile import ProfileManager
 
 
 @pytest.fixture
@@ -59,7 +59,7 @@ async def test_load_profile_from_cache_hit(profile_manager, redis_mock):
     # Assertions
     assert result["user_id"] == user_id
     assert result["completeness"] == 45
-    assert result["cached"] == True
+    assert result["cached"]
     assert result["basics"]["name"] == "Sarah"
     redis_mock.get.assert_called_once_with(f"profile:{user_id}")
 
@@ -77,7 +77,7 @@ async def test_load_profile_from_cache_miss(profile_manager, redis_mock):
     # Assertions
     assert result["user_id"] == user_id
     assert result["completeness"] == 0
-    assert result["cached"] == False
+    assert not result["cached"]
     assert result["basics"] == {}
     assert result["preferences"] == {}
     redis_mock.get.assert_called_once_with(f"profile:{user_id}")
@@ -97,7 +97,7 @@ async def test_load_profile_redis_error_graceful_degradation(profile_manager, re
     # Should return empty profile, not raise exception
     assert result["user_id"] == user_id
     assert result["completeness"] == 0
-    assert result["cached"] == False
+    assert not result["cached"]
 
 
 @pytest.mark.asyncio
@@ -187,7 +187,7 @@ async def test_check_refresh_triggers_first_time(profile_manager, redis_mock):
 
     result = await profile_manager.check_refresh_triggers(user_id)
 
-    assert result == True  # Should trigger on first time
+    assert result  # Should trigger on first time
     redis_mock.hgetall.assert_called_once_with(f"profile_meta:{user_id}")
 
 
@@ -206,7 +206,7 @@ async def test_check_refresh_triggers_message_count(profile_manager, redis_mock)
         redis_mock.hgetall.return_value = metadata
 
         result = await profile_manager.check_refresh_triggers(user_id)
-        assert result == True, f"Should trigger at message count {count}"
+        assert result, f"Should trigger at message count {count}"
 
     # Test NO trigger at message 4, 6, 7, 8, 9
     for count in [4, 6, 7, 8, 9]:
@@ -218,7 +218,7 @@ async def test_check_refresh_triggers_message_count(profile_manager, redis_mock)
         redis_mock.hgetall.return_value = metadata
 
         result = await profile_manager.check_refresh_triggers(user_id)
-        assert result == False, f"Should NOT trigger at message count {count}"
+        assert not result, f"Should NOT trigger at message count {count}"
 
 
 @pytest.mark.asyncio
@@ -236,7 +236,7 @@ async def test_check_refresh_triggers_time_based(profile_manager, redis_mock):
     redis_mock.hgetall.return_value = metadata
 
     result = await profile_manager.check_refresh_triggers(user_id)
-    assert result == True  # Should trigger based on time
+    assert result  # Should trigger based on time
 
     # Last refresh was 14 minutes ago (should NOT trigger)
     last_refresh = datetime.now(timezone.utc) - timedelta(minutes=14)
@@ -244,7 +244,7 @@ async def test_check_refresh_triggers_time_based(profile_manager, redis_mock):
     redis_mock.hgetall.return_value = metadata
 
     result = await profile_manager.check_refresh_triggers(user_id)
-    assert result == False  # Should NOT trigger yet
+    assert not result  # Should NOT trigger yet
 
 
 @pytest.mark.asyncio
@@ -304,7 +304,7 @@ async def test_profile_manager_close_owned_redis():
 
         # Create ProfileManager without providing redis_client (creates own)
         manager = ProfileManager()
-        assert manager._owned_redis == True
+        assert manager._owned_redis
 
         await manager.close()
 

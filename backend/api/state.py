@@ -158,7 +158,10 @@ class StateManager:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async context manager exit."""
         if self._should_close and self.redis_client:
-            await self.redis_client.close()
+            try:
+                await asyncio.wait_for(self.redis_client.aclose(), timeout=3.0)
+            except (asyncio.TimeoutError, Exception) as e:
+                logger.debug(f"Redis close: {e}")
             logger.info("StateManager closed")
 
     async def check_health(self) -> bool:
@@ -280,7 +283,7 @@ class StateManager:
 
         # Auto-generate title if not provided
         if not title:
-            title = f"New Chat"
+            title = "New Chat"
 
         # Create unified session/conversation structure
         session = {
@@ -1151,6 +1154,7 @@ class StateManager:
                     for tc in pruned_msg["tool_calls"]:
                         compact_calls.append({
                             "id": tc.get("id", ""),
+                            "type": "function",
                             "function": {
                                 "name": tc.get("function", {}).get("name", ""),
                                 "arguments": "{}"
@@ -1232,7 +1236,7 @@ class StateManager:
             from api.profile import ProfileManager
 
             config = get_config()
-            provider_override = config.get("SUMMARY_LLM_PROVIDER")
+            provider_override = config.get("SUMMARY_LLM_MODEL")
 
             transcript = self._format_messages_for_summary(messages)
             if not transcript.strip():

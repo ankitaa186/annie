@@ -11,7 +11,7 @@ Usage in GitHub Actions:
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         # Secrets must be explicit (GitHub security)
-        GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
+        XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
         ...
       run: python scripts/ci_env.py --env prod
 """

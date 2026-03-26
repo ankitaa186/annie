@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
 from api.llm_client import LLMClient, LLMClientError
+from api.constants import MODELS_WITH_INTERNAL_TOOL_HANDLING
 from api.mcp_client import MCPClient, MCPClientError, MCPToolError, MCPNetworkError
 from api.models.file_attachment import FileAttachment, get_files_metadata
 from api.state import StateManager, StateError
@@ -528,13 +529,13 @@ async def stream_generator(
 
             # IMPORTANT: Gemini handles tool execution internally during streaming
             # Skip the OpenAI-style tool orchestration loop for Gemini providers
-            if llm_client.primary_provider_name == "gemini-3-pro-preview":
+            if llm_client.primary_provider_name in MODELS_WITH_INTERNAL_TOOL_HANDLING:
                 # Gemini: Stream directly with mcp_client - tools are handled automatically
                 logger.info(
                     "Using Gemini streaming (internal tool handling)",
                     extra={
                         "conversation_id": conversation_id,
-                        "provider": "gemini-3-pro-preview"
+                        "provider": llm_client.primary_provider_name
                     }
                 )
 

@@ -290,7 +290,7 @@ make clean              # Clean up Docker resources
 - `ENVIRONMENT` - `dev`, `staging`, `prod` (default: `dev`)
 - `BACKEND_PORT` - Backend API port (default: `8001`)
 - `GROK_LIVE_SEARCH_MODE` - `auto`, `on`, `off` (default: `auto`)
-- `GEMINI_MODEL` - Gemini model ID (default: `gemini-3-pro-preview`)
+- `GEMINI_MODEL` - Gemini model ID (default: `gemini-3.1-pro-preview`)
 
 ### Environment-Specific Configuration
 

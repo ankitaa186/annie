@@ -152,7 +152,7 @@ const STATUS_COLORS = {
 
 ```typescript
 const LLM_DISPLAY_NAMES: Record<string, string> = {
-  'gemini-3-pro-preview': 'Gemini 3 Pro',
+  'gemini-3.1-pro-preview': 'Gemini 3 Pro',
   'grok-4': 'Grok-4',
   'chatgpt-5': 'ChatGPT-5',
 };

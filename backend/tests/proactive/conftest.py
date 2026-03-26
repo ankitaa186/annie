@@ -12,8 +12,8 @@ Provides fixtures for:
 """
 
 import pytest
-from datetime import datetime, timedelta
-from unittest.mock import AsyncMock, Mock, MagicMock
+from datetime import datetime
+from unittest.mock import AsyncMock, Mock
 from typing import Dict, Any
 
 

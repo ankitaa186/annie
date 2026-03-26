@@ -30,11 +30,12 @@ TEST_ENV_VARS = {
     "ENVIRONMENT": "test",
     "LOG_LEVEL": "DEBUG",
     # LLM Configuration
-    "LLM_PROVIDER": "grok-4",
-    "GROK_API_KEY": "test-grok-key-12345",
-    "CHATGPT_API_KEY": "test-chatgpt-key-12345",
-    "GEMINI_API_KEY": "test-gemini-key-12345",
-    "GEMINI_MODEL": "gemini-3-pro-preview",
+    "LLM_MODEL": "grok-4-fast",
+    "LLM_PROVIDER": "grok-4-fast",
+    "XAI_API_KEY": "test-xai-key-12345",
+    "OPENAI_API_KEY": "test-openai-key-12345",
+    "GOOGLE_API_KEY": "test-google-key-12345",
+    "GEMINI_MODEL": "gemini-3.1-pro-preview",
     "GEMINI_MAX_OUTPUT_TOKENS": "8192",
     "GEMINI_TEMPERATURE": "1.0",
     "GEMINI_SAFETY_SETTING": "BLOCK_NONE",
@@ -80,7 +81,7 @@ for key, value in TEST_ENV_VARS.items():
     os.environ.setdefault(key, value)
 
 # Now safe to import pytest
-import pytest
+import pytest  # noqa: E402
 
 # Add backend directory to Python path for imports
 backend_dir = Path(__file__).parent.parent

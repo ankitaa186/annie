@@ -345,7 +345,7 @@ class TestConcurrentOperationsLive:
 
         # Most should succeed
         success_count = sum(1 for r in results if r["status"] == "success")
-        assert success_count >= len(memory_ids) * 0.8, f"Expected at least 80% successful deletes"
+        assert success_count >= len(memory_ids) * 0.8, "Expected at least 80% successful deletes"
 
     @pytest.mark.asyncio
     async def test_mixed_concurrent_operations(self, cleanup_memory):

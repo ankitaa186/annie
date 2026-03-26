@@ -76,7 +76,7 @@ create_env_file() {
             echo -e "${YELLOW}⚠ IMPORTANT: Please edit .env and fill in your actual API keys and tokens${NC}"
             echo "Required variables:"
             echo "  - TELEGRAM_BOT_TOKEN"
-            echo "  - GROK_API_KEY or CHATGPT_API_KEY (based on LLM_PROVIDER)"
+            echo "  - XAI_API_KEY, OPENAI_API_KEY, or GOOGLE_API_KEY (based on LLM_MODEL)"
             echo "  - AGENTIC_MEMORIES_URL"
             echo "  - BRAVE_SEARCH_API_KEY (for internet access tool)"
             echo "  - STOCK_API_KEY (for stock trader tool)"
@@ -91,52 +91,104 @@ create_env_file() {
     fi
 }
 
+# Helper: check if a variable is set and not a placeholder
+is_set() {
+    local val="${!1}"
+    [ -n "$val" ] && [ "$val" != "REPLACE_ME" ]
+}
+
 # Function: Validate .env file has required variables
 validate_env() {
     if [ ! -f ".env" ]; then
         echo -e "${RED}Error: .env file not found${NC}"
+        echo "Run: cp env.example .env"
         exit 1
     fi
-    
+
     # Source .env file
     set -a
     source .env
     set +a
-    
-    # Check for required variables
-    MISSING_VARS=()
-    
-    if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ "$TELEGRAM_BOT_TOKEN" = "REPLACE_ME" ]; then
-        MISSING_VARS+=("TELEGRAM_BOT_TOKEN")
+
+    ERRORS=()
+    WARNINGS=()
+
+    # --- Required: Telegram ---
+    if ! is_set TELEGRAM_BOT_TOKEN; then
+        ERRORS+=("TELEGRAM_BOT_TOKEN - required for Telegram bot")
     fi
-    
-    if [ -z "$AGENTIC_MEMORIES_URL" ] || [ "$AGENTIC_MEMORIES_URL" = "REPLACE_ME" ]; then
-        MISSING_VARS+=("AGENTIC_MEMORIES_URL")
+    if ! is_set AUTHORIZED_USER_IDS; then
+        ERRORS+=("AUTHORIZED_USER_IDS - required to authorize Telegram users")
     fi
-    
-    # Check LLM provider keys
-    if [ "$LLM_PROVIDER" = "grok-4" ]; then
-        if [ -z "$GROK_API_KEY" ] || [ "$GROK_API_KEY" = "REPLACE_ME" ]; then
-            MISSING_VARS+=("GROK_API_KEY")
-        fi
-    elif [ "$LLM_PROVIDER" = "chatgpt-5" ]; then
-        if [ -z "$CHATGPT_API_KEY" ] || [ "$CHATGPT_API_KEY" = "REPLACE_ME" ]; then
-            MISSING_VARS+=("CHATGPT_API_KEY")
-        fi
+
+    # --- Required: External services ---
+    if ! is_set AGENTIC_MEMORIES_URL; then
+        ERRORS+=("AGENTIC_MEMORIES_URL - required for memory service")
     fi
-    
-    if [ ${#MISSING_VARS[@]} -gt 0 ]; then
-        echo -e "${YELLOW}Warning: The following required variables are missing or not set in .env:${NC}"
-        for var in "${MISSING_VARS[@]}"; do
-            echo "  - $var"
+
+    # --- Required: LLM API key for configured model ---
+    # Resolve which model is configured
+    LLM_MODEL_VAL="${LLM_MODEL:-grok-4-fast}"
+
+    # Map model → required API key env var
+    case "$LLM_MODEL_VAL" in
+        grok-4-fast|grok-4)
+            REQUIRED_KEY="XAI_API_KEY"
+            REQUIRED_KEY_LABEL="XAI_API_KEY (required for model: $LLM_MODEL_VAL)"
+            ;;
+        gpt-5.2|chatgpt-5)
+            REQUIRED_KEY="OPENAI_API_KEY"
+            REQUIRED_KEY_LABEL="OPENAI_API_KEY (required for model: $LLM_MODEL_VAL)"
+            ;;
+        gemini-3.1-pro-preview|gemini-3-pro-preview|gemini-3-flash-preview|gemini-2.5-pro)
+            REQUIRED_KEY="GOOGLE_API_KEY"
+            REQUIRED_KEY_LABEL="GOOGLE_API_KEY (required for model: $LLM_MODEL_VAL)"
+            ;;
+        *)
+            REQUIRED_KEY=""
+            WARNINGS+=("LLM_MODEL='$LLM_MODEL_VAL' is not a recognized model")
+            ;;
+    esac
+
+    if [ -n "$REQUIRED_KEY" ] && ! is_set "$REQUIRED_KEY"; then
+        ERRORS+=("$REQUIRED_KEY_LABEL")
+    fi
+
+    # Also check that at least one LLM key exists (for fallback support)
+    if ! is_set XAI_API_KEY && ! is_set OPENAI_API_KEY && ! is_set GOOGLE_API_KEY; then
+        ERRORS+=("No LLM API keys set at all - need at least one of: XAI_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY")
+    fi
+
+    # --- Optional but recommended: warn if missing ---
+    if ! is_set LANGFUSE_PUBLIC_KEY || ! is_set LANGFUSE_SECRET_KEY; then
+        WARNINGS+=("LANGFUSE keys not set - LLM observability/tracing will be disabled")
+    fi
+
+    # --- Print results ---
+    if [ ${#ERRORS[@]} -gt 0 ]; then
+        echo ""
+        echo -e "${RED}✗ Missing required environment variables:${NC}"
+        for err in "${ERRORS[@]}"; do
+            echo -e "  ${RED}✗${NC} $err"
         done
+    fi
+
+    if [ ${#WARNINGS[@]} -gt 0 ]; then
         echo ""
-        echo "Services may fail to start without these variables."
-        read -p "Continue anyway? (y/n): " -n 1 -r
+        echo -e "${YELLOW}⚠ Warnings:${NC}"
+        for warn in "${WARNINGS[@]}"; do
+            echo -e "  ${YELLOW}⚠${NC} $warn"
+        done
+    fi
+
+    if [ ${#ERRORS[@]} -gt 0 ]; then
         echo ""
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            exit 1
-        fi
+        echo -e "${RED}Fix the errors above in .env and try again.${NC}"
+        exit 1
+    fi
+
+    if [ ${#ERRORS[@]} -eq 0 ] && [ ${#WARNINGS[@]} -eq 0 ]; then
+        echo -e "${GREEN}✓ All required environment variables are set${NC}"
     else
         echo -e "${GREEN}✓ Required environment variables are set${NC}"
     fi
@@ -262,6 +314,47 @@ manage_host_terminal_mcp() {
     fi
 }
 
+# Function: Clear stale session state from Redis
+# Removes pending message locks and active request flags that survive restarts
+clear_stale_redis_state() {
+    echo ""
+    echo "Clearing stale session state from Redis..."
+
+    # Wait for Redis to be healthy
+    local retries=10
+    while [ $retries -gt 0 ]; do
+        if $COMPOSE_CMD exec -T redis redis-cli PING 2>/dev/null | grep -q PONG; then
+            break
+        fi
+        retries=$((retries - 1))
+        sleep 1
+    done
+
+    if [ $retries -eq 0 ]; then
+        echo -e "${YELLOW}Warning: Redis not ready, skipping stale state cleanup${NC}"
+        return 0
+    fi
+
+    # Delete stale keys that block message processing after crashes
+    local cleared=0
+    for pattern in "pending_message:*" "active_request:*"; do
+        local keys
+        keys=$($COMPOSE_CMD exec -T redis redis-cli KEYS "$pattern" 2>/dev/null | tr -d '\r')
+        if [ -n "$keys" ]; then
+            for key in $keys; do
+                $COMPOSE_CMD exec -T redis redis-cli DEL "$key" > /dev/null 2>&1
+                cleared=$((cleared + 1))
+            done
+        fi
+    done
+
+    if [ $cleared -gt 0 ]; then
+        echo -e "${GREEN}✓ Cleared $cleared stale session key(s)${NC}"
+    else
+        echo -e "${GREEN}✓ No stale session state found${NC}"
+    fi
+}
+
 # Function: Start Docker services
 start_services() {
     echo ""
@@ -283,6 +376,9 @@ start_services() {
         echo ""
         echo -e "${GREEN}✓ Services started in development mode${NC}"
     fi
+
+    # Clear stale locks/pending states from previous crashes
+    clear_stale_redis_state
 
     echo ""
     echo "Use 'make logs' to view logs"

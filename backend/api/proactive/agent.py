@@ -163,7 +163,7 @@ async def gather_dynamic_state(user_id: str, user_timezone: str = "America/Los_A
         # Uses 24h lookback for tone adjustment
         recent_context = None
         try:
-            memory_client = MemoryClient()
+            MemoryClient()
             # Try to get recent context - this is a best-effort call
             # The MemoryClient doesn't have a get_recent_summary method, so we'll use a placeholder
             # In production, this would call the agentic-memories API for recent conversations
@@ -734,7 +734,7 @@ async def execute_wake_up_agent(
         provider_override = None
         if is_research_trigger(trigger_data):
             config = get_config()
-            research_provider = config.get("RESEARCH_LLM_PROVIDER")
+            research_provider = config.get("RESEARCH_LLM_MODEL")
             if research_provider:
                 provider_override = research_provider
                 logger.info(

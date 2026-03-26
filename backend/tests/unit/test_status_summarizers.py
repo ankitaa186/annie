@@ -11,7 +11,6 @@ Coverage:
 - Edge cases (missing fields, null values, empty results)
 - Generic fallback behavior
 """
-import pytest
 
 
 class TestPortfolioSummarizers:

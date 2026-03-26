@@ -3,7 +3,7 @@ Shared utility functions for the Annie backend API.
 """
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 import logging
 
 # Threshold for considering a string "large base64" (matches stream.py MEDIA_OFFLOAD_THRESHOLD)

@@ -16,9 +16,7 @@ from mcp_server.tools.web_search import (
     web_search_tool_handler,
     web_search_tool,
     _tavily_search,
-    _duckduckgo_search,
-    _is_circuit_open,
-    _open_circuit
+    _duckduckgo_search
 )
 
 

@@ -9,7 +9,6 @@ Story 15.3: Reddit Search Tool (PRAW + JSON API)
 - Tests fallback trigger conditions
 """
 
-import asyncio
 import pytest
 from unittest.mock import AsyncMock, Mock, patch, MagicMock
 
@@ -529,7 +528,7 @@ class TestJSONAPIFallback:
             mock_client.get = AsyncMock(return_value=mock_response)
             mock_client_class.return_value = mock_client
 
-            result = await _reddit_json_search(
+            await _reddit_json_search(
                 query="test",
                 subreddit="python",
                 sort="relevance",
@@ -824,7 +823,7 @@ class TestIncludeComments:
             mock_reddit.subreddit.return_value = mock_subreddit
             mock_subreddit.search.return_value = [mock_praw_submission]
 
-            result = _praw_search_sync(
+            _praw_search_sync(
                 query="test",
                 subreddit=None,
                 sort="relevance",

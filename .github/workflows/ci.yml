@@ -105,9 +105,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Secrets must be passed explicitly (GitHub security requirement)
           # Variables are fetched dynamically from the environment
-          GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
-          CHATGPT_API_KEY: ${{ secrets.CHATGPT_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           AUTHORIZED_USER_IDS: ${{ secrets.AUTHORIZED_USER_IDS }}
           BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}

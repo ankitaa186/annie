@@ -79,7 +79,6 @@ class TestEndToEndStreaming:
         assert chat_response["status"] == "streaming"
         assert "stream_url" in chat_response
 
-        conversation_id = chat_response["conversation_id"]
         stream_url = chat_response["stream_url"]
 
         # Step 2: Connect to streaming endpoint
@@ -102,13 +101,13 @@ class TestEndToEndStreaming:
             })
 
             # Mock streaming response
-            async def mock_stream(messages, tools=None):
+            async def mock_stream(messages, tools=None, **kwargs):
                 yield {"type": "token", "content": "I'm"}
                 yield {"type": "token", "content": " doing"}
                 yield {"type": "token", "content": " well!"}
                 yield {"type": "done", "tokens_used": {"prompt": 15, "completion": 3}}
 
-            mock_llm_instance.chat_completion_stream = mock_stream
+            mock_llm_instance.stream_chat_completion = mock_stream
 
             # Make streaming request
             with client.stream("GET", stream_url) as stream_response:
@@ -173,11 +172,11 @@ class TestEndToEndStreaming:
                 "choices": [{"message": {"role": "assistant", "content": "test"}}]
             })
 
-            async def mock_stream(messages, tools=None):
+            async def mock_stream(messages, tools=None, **kwargs):
                 yield {"type": "token", "content": "Response"}
                 yield {"type": "done", "tokens_used": {"prompt": 10, "completion": 1}}
 
-            mock_llm_instance.chat_completion_stream = mock_stream
+            mock_llm_instance.stream_chat_completion = mock_stream
 
             # Test that all streams can be established concurrently
             # (Note: TestClient doesn't support true async, so we test sequentially)
@@ -228,12 +227,12 @@ class TestEndToEndStreaming:
             })
 
             # Mock streaming response with immediate first token
-            async def mock_stream(messages, tools=None):
+            async def mock_stream(messages, tools=None, **kwargs):
                 # Simulate fast first token
                 yield {"type": "token", "content": "Fast"}
                 yield {"type": "done", "tokens_used": {"prompt": 5, "completion": 1}}
 
-            mock_llm_instance.chat_completion_stream = mock_stream
+            mock_llm_instance.stream_chat_completion = mock_stream
 
             # Measure time to first token
             start_time = time.time()
@@ -291,7 +290,7 @@ class TestEndToEndStreaming:
             })
 
             # Mock streaming response with error
-            async def mock_stream(messages, tools=None):
+            async def mock_stream(messages, tools=None, **kwargs):
                 yield {"type": "token", "content": "Start"}
                 # Simulate LLM error mid-stream
                 yield {
@@ -300,7 +299,7 @@ class TestEndToEndStreaming:
                     "code": "RATE_LIMIT_ERROR"
                 }
 
-            mock_llm_instance.chat_completion_stream = mock_stream
+            mock_llm_instance.stream_chat_completion = mock_stream
 
             with client.stream("GET", f"/api/stream/{conversation_id}") as stream_response:
                 assert stream_response.status_code == 200
@@ -309,7 +308,10 @@ class TestEndToEndStreaming:
                 for line in stream_response.iter_lines():
                     if line.startswith("data: "):
                         data_str = line[6:]
-                        events.append(json.loads(data_str))
+                        event = json.loads(data_str)
+                        # Skip status events (e.g. "Composing response...")
+                        if event.get("type") != "status":
+                            events.append(event)
 
                 # Verify we got partial response and error
                 assert len(events) >= 2
@@ -327,13 +329,13 @@ class TestEndToEndStreaming:
             MockLLMClient.return_value.__aenter__.return_value = mock_client_instance
 
             # Mock empty stream (simulating no conversation found)
-            async def mock_stream(messages):
+            async def mock_stream(messages, **kwargs):
                 # For now, we'll just yield a normal response
                 # TODO: In Story 2.5, implement proper conversation validation
                 yield {"type": "token", "content": "Response"}
                 yield {"type": "done", "tokens_used": {"prompt": 5, "completion": 1}}
 
-            mock_client_instance.chat_completion_stream = mock_stream
+            mock_client_instance.stream_chat_completion = mock_stream
 
             # Should still return 200 (for now, until Redis validation in Story 2.5)
             with client.stream("GET", f"/api/stream/{invalid_id}") as response:

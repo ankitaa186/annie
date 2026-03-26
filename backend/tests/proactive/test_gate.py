@@ -12,11 +12,11 @@ Tests:
 
 import pytest
 import json
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, patch
 from datetime import datetime, timedelta, timezone
 from freezegun import freeze_time
 
-from api.proactive.gate import SubconsciousGate, GateResult, GateError
+from api.proactive.gate import SubconsciousGate, GateResult
 
 
 # ============================================================================
@@ -92,7 +92,7 @@ def test_gate_result_default_checks_passed():
 
 def test_gate_init_with_redis(mock_redis):
     """Test SubconsciousGate initialization with Redis client."""
-    with patch('api.proactive.gate.ProfileManager') as mock_pm_class:
+    with patch('api.proactive.gate.ProfileManager'):
         gate = SubconsciousGate(redis_client=mock_redis)
 
         assert gate.redis_client is mock_redis
@@ -396,7 +396,7 @@ async def test_increment_daily_count(mock_redis):
     mock_redis.incr = AsyncMock(return_value=3)
     mock_redis.expire = AsyncMock()
 
-    with patch('api.proactive.gate.ProfileManager') as mock_pm_class:
+    with patch('api.proactive.gate.ProfileManager'):
         gate = SubconsciousGate(redis_client=mock_redis)
 
         count = await gate.increment_daily_count("user_456")
@@ -411,7 +411,7 @@ async def test_increment_daily_count_sets_ttl_on_first(mock_redis):
     mock_redis.incr = AsyncMock(return_value=1)  # First increment
     mock_redis.expire = AsyncMock()
 
-    with patch('api.proactive.gate.ProfileManager') as mock_pm_class:
+    with patch('api.proactive.gate.ProfileManager'):
         gate = SubconsciousGate(redis_client=mock_redis)
 
         await gate.increment_daily_count("user_456")

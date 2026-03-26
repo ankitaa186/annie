@@ -15,14 +15,13 @@ Tests cover:
 import json
 import time
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import Request
 from fastapi.testclient import TestClient
 
 # Import test environment setup first
-from tests.conftest import TEST_ENV_VARS
 
 
 class TestConversationModels:

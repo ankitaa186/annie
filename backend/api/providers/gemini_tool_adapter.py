@@ -6,7 +6,7 @@ Enables seamless MCP tool integration with Gemini 3 Pro provider.
 """
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from api.logging import get_logger
 
 logger = get_logger(__name__)

@@ -13,15 +13,13 @@ IMPORTANT: These tests require running Redis service.
 import asyncio
 import json
 import pytest
-import time
 from datetime import datetime, timezone, timedelta
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
 from api.main import app
 from api.profile import ProfileManager
-from api.state import StateManager
 
 
 def check_redis_available() -> bool:
@@ -143,15 +141,14 @@ async def test_complete_profile_flow(client, redis_client, cleanup_redis):
     assert profile_from_cache["completeness"] == 60
     assert profile_from_cache["basics"]["name"] == "Alice"
 
-    # Step 3: Verify message count was incremented
+    # Step 3: Verify message count was incremented (profile_meta is a Redis Hash)
     meta_key = f"profile_meta:{user_id}"
-    meta_data = await redis_client.get(meta_key)
-    assert meta_data is not None
+    metadata = await redis_client.hgetall(meta_key)
+    assert metadata is not None and len(metadata) > 0
 
-    metadata = json.loads(meta_data)
-    assert metadata["message_count"] == 1
+    assert int(metadata["message_count"]) == 1
 
-    print(f"✅ Complete profile flow test passed")
+    print("✅ Complete profile flow test passed")
 
 
 @pytest.mark.asyncio
@@ -181,15 +178,14 @@ async def test_empty_profile_handling(client, redis_client, cleanup_redis):
     # Should be None since completeness is 0
     assert cached_profile is None
 
-    # Verify message count was still incremented
+    # Verify message count was still incremented (profile_meta is a Redis Hash)
     meta_key = f"profile_meta:{user_id}"
-    meta_data = await redis_client.get(meta_key)
-    assert meta_data is not None
+    metadata = await redis_client.hgetall(meta_key)
+    assert metadata is not None and len(metadata) > 0
 
-    metadata = json.loads(meta_data)
-    assert metadata["message_count"] == 1
+    assert int(metadata["message_count"]) == 1
 
-    print(f"✅ Empty profile handling test passed")
+    print("✅ Empty profile handling test passed")
 
 
 @pytest.mark.asyncio
@@ -230,16 +226,15 @@ async def test_message_count_trigger(client, redis_client, cleanup_redis):
         # Small delay to avoid race conditions
         await asyncio.sleep(0.1)
 
-    # Verify message count is 5
+    # Verify message count is 5 (profile_meta is a Redis Hash)
     meta_key = f"profile_meta:{user_id}"
-    meta_data = await redis_client.get(meta_key)
-    metadata = json.loads(meta_data)
-    assert metadata["message_count"] == 5
+    metadata = await redis_client.hgetall(meta_key)
+    assert int(metadata["message_count"]) == 5
 
     # Note: We can't easily verify background refresh was triggered in test,
     # but we verified the trigger logic returns True in unit tests
 
-    print(f"✅ Message count trigger test passed")
+    print("✅ Message count trigger test passed")
 
 
 @pytest.mark.asyncio
@@ -287,20 +282,19 @@ async def test_profile_manager_refresh_with_mcp(redis_client, cleanup_redis):
     assert profile["basics"]["name"] == "Charlie"
     assert profile["basics"]["age"] == 30
 
-    # Verify metadata was updated with last_refresh
+    # Verify metadata was updated with last_refresh (profile_meta is a Redis Hash)
     meta_key = f"profile_meta:{user_id}"
-    meta_data = await redis_client.get(meta_key)
-    assert meta_data is not None
+    metadata = await redis_client.hgetall(meta_key)
+    assert metadata is not None and len(metadata) > 0
 
-    metadata = json.loads(meta_data)
-    assert metadata["last_refresh"] is not None
+    assert metadata.get("last_refresh") is not None
 
     # Verify last_refresh is recent (within last 5 seconds)
     last_refresh = datetime.fromisoformat(metadata["last_refresh"])
     time_diff = datetime.now(timezone.utc) - last_refresh
     assert time_diff.total_seconds() < 5
 
-    print(f"✅ ProfileManager refresh with MCP test passed")
+    print("✅ ProfileManager refresh with MCP test passed")
 
 
 @pytest.mark.asyncio
@@ -357,7 +351,7 @@ async def test_profile_injection_in_prompt():
     assert "Data Scientist" in system_prompt
     assert "Profile Completeness: 80%" in system_prompt
 
-    print(f"✅ Profile injection in prompt test passed")
+    print("✅ Profile injection in prompt test passed")
 
 
 @pytest.mark.asyncio
@@ -384,7 +378,7 @@ async def test_graceful_degradation_profile_error(client, redis_client, cleanup_
         data = response.json()
         assert "conversation_id" in data
 
-    print(f"✅ Graceful degradation test passed")
+    print("✅ Graceful degradation test passed")
 
 
 @pytest.mark.asyncio
@@ -395,39 +389,33 @@ async def test_time_based_trigger(redis_client, cleanup_redis):
     """
     user_id = "test_user_time_trigger"
 
-    # Setup metadata with last_refresh > 15 minutes ago
+    # Setup metadata with last_refresh > 15 minutes ago using Redis Hash
+    # (check_refresh_triggers uses hgetall/hget, not get/json)
     old_refresh = datetime.now(timezone.utc) - timedelta(minutes=16)
-    metadata = {
-        "message_count": 3,  # Not a message count trigger
-        "last_refresh": old_refresh.isoformat()
-    }
+    meta_key = f"profile_meta:{user_id}"
 
-    await redis_client.setex(
-        f"profile_meta:{user_id}",
-        86400,
-        json.dumps(metadata)
-    )
+    await redis_client.hset(meta_key, mapping={
+        "message_count": "3",  # Not a message count trigger
+        "last_refresh": old_refresh.isoformat()
+    })
+    await redis_client.expire(meta_key, 86400)
 
     # Check if trigger fires
     profile_manager = ProfileManager(redis_client=redis_client)
     should_refresh = await profile_manager.check_refresh_triggers(user_id)
 
-    assert should_refresh == True
+    assert should_refresh is True
 
     # Test with recent refresh (should NOT trigger)
     recent_refresh = datetime.now(timezone.utc) - timedelta(minutes=10)
-    metadata["last_refresh"] = recent_refresh.isoformat()
 
-    await redis_client.setex(
-        f"profile_meta:{user_id}",
-        86400,
-        json.dumps(metadata)
-    )
+    await redis_client.hset(meta_key, "last_refresh", recent_refresh.isoformat())
+    await redis_client.expire(meta_key, 86400)
 
     should_refresh = await profile_manager.check_refresh_triggers(user_id)
-    assert should_refresh == False
+    assert should_refresh is False
 
-    print(f"✅ Time-based trigger test passed")
+    print("✅ Time-based trigger test passed")
 
 
 @pytest.mark.asyncio
@@ -463,7 +451,7 @@ async def test_empty_profile_skips_injection():
     # Should still contain user_id
     assert "test_user_empty" in system_prompt
 
-    print(f"✅ Empty profile skips injection test passed")
+    print("✅ Empty profile skips injection test passed")
 
 
 if __name__ == "__main__":

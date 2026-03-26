@@ -16,7 +16,7 @@ from telegram_bot.logger import get_logger
 # Import FileAttachment for type hints (avoid circular import)
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from telegram_bot.file_handler import FileAttachment
+    pass
 
 logger = get_logger(__name__)
 

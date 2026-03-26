@@ -12,7 +12,6 @@ Tests cover:
 - AC #8: Unit tests with mocked HA responses
 """
 
-import os
 from unittest.mock import AsyncMock, patch, MagicMock
 import pytest
 import httpx

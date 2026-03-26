@@ -6,7 +6,7 @@ Tests for file validation, processing, and acknowledgment formatting.
 
 import base64
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 from telegram_bot.file_handler import (
     FileAttachment,
@@ -15,7 +15,6 @@ from telegram_bot.file_handler import (
     FileErrorType,
     FileProcessingResult,
     SUPPORTED_MIME_TYPES,
-    FILE_SIZE_LIMITS,
     get_file_category,
     is_mime_type_supported,
     get_size_limit,
@@ -26,7 +25,6 @@ from telegram_bot.file_handler import (
     download_file_with_retry,
     process_photo,
     process_document,
-    process_message_files,
     has_processable_files,
     format_file_acknowledgment,
     format_file_error,

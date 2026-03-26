@@ -4,9 +4,10 @@ Unit tests for Langfuse tracing utilities with contextvars.
 Tests AC #4: Trace context is maintained correctly using contextvars without cross-request contamination.
 Tests AC #5: Application continues without errors when Langfuse is unavailable (fire-and-forget).
 """
+import logging
 import pytest
 import asyncio
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 
 # Reset context vars before each test
@@ -100,7 +101,7 @@ class TestTraceContextManagement:
         from api.observability.tracing import start_trace, start_span, end_span
 
         # Setup trace and span
-        trace = start_trace(name="test_trace", user_id="user123")
+        start_trace(name="test_trace", user_id="user123")
         span = start_span(name="test_span")
 
         # End the span
@@ -143,7 +144,7 @@ class TestAsyncContextIsolation:
 
         async def request_handler(user_id: str, trace_name: str):
             """Simulate a request handler with its own trace."""
-            trace = start_trace(name=trace_name, user_id=user_id)
+            start_trace(name=trace_name, user_id=user_id)
             await asyncio.sleep(0.01)  # Simulate async work
             current = get_current_trace()
             return current.id if current else None
@@ -169,10 +170,10 @@ class TestAsyncContextIsolation:
 
         async def nested_operation(operation_id: int):
             """Simulate nested span creation."""
-            trace = start_trace(name=f"trace-{operation_id}", user_id=f"user{operation_id}")
-            span1 = start_span(name=f"span1-{operation_id}")
+            start_trace(name=f"trace-{operation_id}", user_id=f"user{operation_id}")
+            start_span(name=f"span1-{operation_id}")
             await asyncio.sleep(0.01)
-            span2 = start_span(name=f"span2-{operation_id}")
+            start_span(name=f"span2-{operation_id}")
             await asyncio.sleep(0.01)
             return operation_id
 
@@ -195,7 +196,8 @@ class TestFireAndForgetPattern:
         """Test that start_trace returns None gracefully when Langfuse is disabled."""
         from api.observability.tracing import start_trace
 
-        trace = start_trace(name="test_trace", user_id="user123")
+        with caplog.at_level(logging.DEBUG, logger="api.observability.tracing"):
+            trace = start_trace(name="test_trace", user_id="user123")
 
         # Verify no trace created (graceful degradation)
         assert trace is None
@@ -210,7 +212,8 @@ class TestFireAndForgetPattern:
         """Test that start_span returns None gracefully when no active trace."""
         from api.observability.tracing import start_span
 
-        span = start_span(name="test_span")
+        with caplog.at_level(logging.DEBUG, logger="api.observability.tracing"):
+            span = start_span(name="test_span")
 
         # Verify no span created (graceful degradation)
         assert span is None
@@ -254,7 +257,7 @@ class TestFireAndForgetPattern:
         from api.observability.tracing import start_trace, start_span, end_span
 
         # Setup trace and span
-        trace = start_trace(name="test_trace", user_id="user123")
+        start_trace(name="test_trace", user_id="user123")
         span = start_span(name="test_span")
 
         # Make span.end() raise an exception

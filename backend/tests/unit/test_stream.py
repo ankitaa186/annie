@@ -5,11 +5,9 @@ Tests SSE streaming handler, client disconnection handling,
 error handling, and concurrent stream management.
 """
 
-import asyncio
 import json
 from unittest.mock import AsyncMock, Mock, patch
 import pytest
-from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from api.main import app

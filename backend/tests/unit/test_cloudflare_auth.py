@@ -6,10 +6,9 @@ Tests authentication scenarios for web users via Cloudflare Access JWT tokens.
 
 import pytest
 import jwt
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
-from fastapi.responses import JSONResponse
 
 from api.middleware.cloudflare_auth import (
     cloudflare_auth_middleware,

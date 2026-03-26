@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { LLMIndicator, getLLMDisplayName, LLM_DISPLAY_NAMES } from '../LLMIndicator';
+import { MODEL_GROK_4, MODEL_GPT_5, MODEL_GEMINI_PRO } from '@/lib/constants/llm';
 
 // Mock Radix UI Tooltip
 jest.mock('@radix-ui/react-tooltip', () => ({
@@ -15,8 +16,8 @@ jest.mock('@radix-ui/react-tooltip', () => ({
 
 describe('LLMIndicator', () => {
   describe('display name mapping', () => {
-    it('maps gemini-3-pro-preview to Gemini 3 Pro', () => {
-      expect(getLLMDisplayName('gemini-3-pro-preview')).toBe('Gemini 3 Pro');
+    it('maps gemini-3.1-pro-preview to Gemini 3 Pro', () => {
+      expect(getLLMDisplayName('gemini-3.1-pro-preview')).toBe('Gemini 3 Pro');
     });
 
     it('maps grok-4 to Grok-4', () => {
@@ -39,7 +40,7 @@ describe('LLMIndicator', () => {
 
   describe('rendering', () => {
     it('displays friendly name for known provider', () => {
-      render(<LLMIndicator activeLLM="gemini-3-pro-preview" llmStatus="ok" />);
+      render(<LLMIndicator activeLLM="gemini-3.1-pro-preview" llmStatus="ok" />);
 
       expect(screen.getByText('Gemini 3 Pro')).toBeInTheDocument();
     });
@@ -92,13 +93,13 @@ describe('LLMIndicator', () => {
 
   describe('tooltip content', () => {
     it('shows Active AI Provider title', () => {
-      render(<LLMIndicator activeLLM="gemini-3-pro-preview" llmStatus="ok" />);
+      render(<LLMIndicator activeLLM="gemini-3.1-pro-preview" llmStatus="ok" />);
 
       expect(screen.getByText('Active AI Provider')).toBeInTheDocument();
     });
 
     it('shows model name in tooltip', () => {
-      render(<LLMIndicator activeLLM="gemini-3-pro-preview" llmStatus="ok" />);
+      render(<LLMIndicator activeLLM="gemini-3.1-pro-preview" llmStatus="ok" />);
 
       // The display name appears in both the main indicator and tooltip
       const modelTexts = screen.getAllByText('Gemini 3 Pro');
@@ -106,10 +107,10 @@ describe('LLMIndicator', () => {
     });
 
     it('shows model ID when different from display name', () => {
-      render(<LLMIndicator activeLLM="gemini-3-pro-preview" llmStatus="ok" />);
+      render(<LLMIndicator activeLLM="gemini-3.1-pro-preview" llmStatus="ok" />);
 
       // Should show the raw ID in tooltip
-      expect(screen.getByText('gemini-3-pro-preview')).toBeInTheDocument();
+      expect(screen.getByText('gemini-3.1-pro-preview')).toBeInTheDocument();
     });
 
     it('shows status text in tooltip', () => {
@@ -165,7 +166,7 @@ describe('LLMIndicator', () => {
 
   describe('LLM_DISPLAY_NAMES constant', () => {
     it('includes all expected Gemini variants', () => {
-      expect(LLM_DISPLAY_NAMES['gemini-3-pro-preview']).toBe('Gemini 3 Pro');
+      expect(LLM_DISPLAY_NAMES['gemini-3.1-pro-preview']).toBe('Gemini 3 Pro');
       expect(LLM_DISPLAY_NAMES['gemini-2.0-flash-exp']).toBe('Gemini 2.0');
       expect(LLM_DISPLAY_NAMES['gemini-1.5-pro']).toBe('Gemini 1.5');
       expect(LLM_DISPLAY_NAMES['gemini-1.5-flash']).toBe('Gemini 1.5 Flash');

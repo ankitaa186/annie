@@ -10,15 +10,13 @@ Tests:
 """
 
 import pytest
-from unittest.mock import AsyncMock, Mock, patch, MagicMock
+from unittest.mock import AsyncMock, patch
 from datetime import datetime, timezone
-from dataclasses import asdict
 
 from api.proactive.agent import (
     DynamicState,
     WakeUpResult,
     RESTRICTED_TOOLS,
-    gather_dynamic_state,
     build_agent_prompt,
     parse_agent_response,
     execute_wake_up_agent,

@@ -38,7 +38,7 @@ for key, value in TEST_ENV_VARS.items():
     os.environ.setdefault(key, value)
 
 # Now safe to import pytest
-import pytest
+import pytest  # noqa: E402
 
 # Add telegram_bot directory to Python path for imports
 telegram_bot_dir = Path(__file__).parent.parent
