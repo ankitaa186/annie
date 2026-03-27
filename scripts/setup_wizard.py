@@ -250,11 +250,44 @@ def configure_essentials(existing: dict[str, str], defaults: dict[str, str]) -> 
 
     if is_placeholder(current):
         print()
-        info("Create a bot via https://t.me/BotFather and paste the token below.")
+        needs_help = questionary.confirm(
+            "Do you already have a Telegram Bot Token?",
+            default=False,
+            style=STYLE,
+        ).ask()
+
+        if not needs_help:
+            # Show step-by-step instructions
+            print()
+            print(f"  {C_CYAN}{C_BOLD}How to create a Telegram bot:{C_RESET}")
+            print()
+            print(f"  {C_BOLD}Step 1:{C_RESET} Open Telegram and search for {C_CYAN}@BotFather{C_RESET}")
+            print(f"         (or open: https://t.me/BotFather)")
+            print()
+            print(f"  {C_BOLD}Step 2:{C_RESET} Send the command {C_CYAN}/newbot{C_RESET}")
+            print()
+            print(f"  {C_BOLD}Step 3:{C_RESET} Choose a {C_BOLD}display name{C_RESET} for your bot")
+            print(f"         (e.g. \"Annie AI\" — this is what users see)")
+            print()
+            print(f"  {C_BOLD}Step 4:{C_RESET} Choose a {C_BOLD}username{C_RESET} ending in 'bot'")
+            print(f"         (e.g. \"my_annie_bot\" — must be unique on Telegram)")
+            print()
+            print(f"  {C_BOLD}Step 5:{C_RESET} BotFather will reply with a token like:")
+            print(f"         {C_DIM}123456789:ABCdefGHIjklMNOpqrsTUVwxyz{C_RESET}")
+            print(f"         Copy this entire token.")
+            print()
+            print(f"  {C_YELLOW}Optional:{C_RESET} Send {C_CYAN}/setdescription{C_RESET} to BotFather to set")
+            print(f"           what users see before starting a chat with your bot.")
+            print()
+            info("Complete the steps above, then paste your token below.")
+            print()
+
         token = questionary.text(
             "Telegram Bot Token:",
             style=STYLE,
-            validate=lambda t: len(t) > 20 or "Token looks too short — check your BotFather message",
+            validate=lambda t: (
+                len(t) > 20 and ":" in t
+            ) or "Token should look like 123456789:ABCdef... — check your BotFather message",
         ).ask()
         if token is None:
             sys.exit(1)
@@ -271,12 +304,32 @@ def configure_essentials(existing: dict[str, str], defaults: dict[str, str]) -> 
 
     if is_placeholder(current):
         print()
-        info("Get your Telegram user ID from https://t.me/userinfobot")
-        info("Comma-separate multiple IDs (e.g. 12345,67890)")
-        user_ids = questionary.text(
-            "Authorized Telegram User ID(s):",
+        knows_id = questionary.confirm(
+            "Do you know your Telegram user ID?",
+            default=False,
             style=STYLE,
-            validate=lambda v: bool(re.match(r"^\d+(,\d+)*$", v.strip())) or "Enter numeric IDs separated by commas",
+        ).ask()
+
+        if not knows_id:
+            print()
+            print(f"  {C_CYAN}{C_BOLD}How to find your Telegram user ID:{C_RESET}")
+            print()
+            print(f"  {C_BOLD}Step 1:{C_RESET} Open Telegram and search for {C_CYAN}@userinfobot{C_RESET}")
+            print(f"         (or open: https://t.me/userinfobot)")
+            print()
+            print(f"  {C_BOLD}Step 2:{C_RESET} Send any message (e.g. \"hi\")")
+            print()
+            print(f"  {C_BOLD}Step 3:{C_RESET} The bot replies with your ID — a number like {C_DIM}123456789{C_RESET}")
+            print()
+            print(f"  {C_YELLOW}Why is this needed?{C_RESET} Annie only responds to authorized users.")
+            print(f"  This prevents random people from using your bot and your API credits.")
+            print()
+
+        info("Comma-separate multiple IDs to authorize more than one person (e.g. 12345,67890)")
+        user_ids = questionary.text(
+            "Your Telegram User ID(s):",
+            style=STYLE,
+            validate=lambda v: bool(re.match(r"^\d+(,\d+)*$", v.strip())) or "Enter numeric IDs separated by commas (e.g. 12345 or 12345,67890)",
         ).ask()
         if user_ids is None:
             sys.exit(1)
