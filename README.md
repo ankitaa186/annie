@@ -52,20 +52,21 @@ See [`docs/`](./docs/) for comprehensive documentation:
 ## Quick Start
 
 **Prerequisites**:
-- Docker 20.10+ and Docker Compose 2.0+
-- Python 3.12+ (for local development)
+- Python 3.12+ (for local development and setup wizard)
+- Docker 20.10+ and Docker Compose 2.0+ (the setup wizard will detect and guide you if missing)
 - API Keys: XAI (Grok-4), Telegram Bot Token, Brave Search API, Stock API
 - agentic-memories service running (for memory features)
 
-**Setup** (once implementation is complete):
+**Setup**:
 
 ```bash
 # Clone repository
 git clone https://github.com/yourusername/annie.git
 cd annie
 
-# Run setup script (creates .env interactively and starts services)
-./run_docker.sh
+# Recommended: Run the interactive setup wizard
+# Checks prerequisites, creates .env, validates API keys, and starts services
+make setup
 
 # Or manually:
 # 1. Copy env.example to .env
@@ -85,8 +86,6 @@ make stop
 # Clean up
 make clean
 ```
-
-**Note**: The `run_docker.sh` script and `Makefile` will be created in Story 1.5. For now, setup instructions are documented here.
 
 ## V1 Scope
 
@@ -220,7 +219,9 @@ annie/
 │   ├── Dockerfile
 │   └── requirements.txt
 ├── scripts/              # Operational scripts
-│   └── run_docker.sh     # Main startup script
+│   ├── run_docker.sh     # Main startup script
+│   ├── setup.sh          # Setup wizard launcher
+│   └── setup_wizard.py   # Interactive first-boot setup
 ├── docs/                 # Documentation
 ├── docker-compose.yml    # 4-service orchestration
 ├── Makefile              # Development commands
@@ -230,6 +231,7 @@ annie/
 
 **Development Commands**:
 ```bash
+make setup              # Interactive first-boot setup wizard
 make start              # Start all services
 make stop               # Stop all services
 make restart            # Restart services
@@ -245,6 +247,16 @@ make clean              # Clean up Docker resources
 
 ### Quick Start
 
+The easiest way to set up Annie is with the interactive setup wizard:
+
+```bash
+make setup
+```
+
+This checks prerequisites (Docker, Python, etc.), walks you through creating `.env` with your API keys, validates connectivity, and optionally starts services.
+
+**Manual setup** (if you prefer):
+
 1. **Copy environment template**:
    ```bash
    cp env.example .env
@@ -259,12 +271,7 @@ make clean              # Clean up Docker resources
 
 3. **Start services**:
    ```bash
-   ./scripts/run_docker.sh
-   ```
-   
-   Or use Docker Compose directly:
-   ```bash
-   docker-compose up --build
+   make start
    ```
 
 ### Environment Variables
