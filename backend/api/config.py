@@ -9,6 +9,13 @@ import os
 from functools import lru_cache
 from typing import List, Optional
 
+# Sanitize Langfuse env vars before any langfuse imports elsewhere.
+# The @observe() decorators auto-create a Langfuse client from env vars.
+# If keys are placeholder values, clear them so the SDK stays disabled.
+for _lf_key in ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"):
+    if os.environ.get(_lf_key) in (None, "", "REPLACE_ME"):
+        os.environ.pop(_lf_key, None)
+
 
 def mask_sensitive_value(value: str, show_first: int = 4, show_last: int = 4) -> str:
     """

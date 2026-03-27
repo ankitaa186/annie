@@ -478,7 +478,7 @@ def check_agentic_memories(values: dict[str, str], prereqs: dict) -> dict[str, s
     if not am_path.exists():
         print()
         info(f"Cloning agentic-memories to {am_path} ...")
-        r = run_cmd(["git", "clone", "https://github.com/agentic-memories/agentic-memories.git", str(am_path)])
+        r = run_cmd(["git", "clone", "https://github.com/ankitaa186/agentic-memories.git", str(am_path)])
         if r.returncode != 0:
             err(f"Git clone failed: {r.stderr.strip()}")
             warn("You can clone it manually and run `make setup` again.")
@@ -487,33 +487,29 @@ def check_agentic_memories(values: dict[str, str], prereqs: dict) -> dict[str, s
     else:
         ok(f"agentic-memories repo exists at {am_path}")
 
-    # Check for docker-compose / run_docker.sh
-    compose_file = am_path / "docker-compose.yml"
-    run_script = am_path / "run_docker.sh"
+    # Pre-create data directories to avoid Docker chown permission errors
+    for subdir in ["chromadb", "timescaledb"]:
+        data_dir = am_path / "data" / subdir
+        data_dir.mkdir(parents=True, exist_ok=True)
 
-    if run_script.exists():
-        info(f"Starting agentic-memories via {run_script} ...")
+    # Start agentic-memories via make start (preferred) or fallback methods
+    makefile = am_path / "Makefile"
+
+    if makefile.exists():
+        info("Starting agentic-memories via make start ...")
         print()
         info("This may take a few minutes on first run (building images)...")
         print()
 
-        # Run in foreground so user sees output
         result = subprocess.run(
-            ["bash", str(run_script)],
+            ["make", "start"],
             cwd=str(am_path),
         )
         if result.returncode != 0:
             warn("agentic-memories startup may have had issues. Check its logs.")
-    elif compose_file.exists():
+    elif (am_path / "docker-compose.yml").exists():
         info("Starting agentic-memories via docker compose ...")
         print()
-
-        # Check for .env in agentic-memories
-        am_env = am_path / ".env"
-        am_env_example = am_path / "env.example"
-        if not am_env.exists() and am_env_example.exists():
-            shutil.copy2(am_env_example, am_env)
-            info("Created .env from env.example in agentic-memories")
 
         result = subprocess.run(
             ["docker", "compose", "up", "-d", "--build"],
@@ -522,7 +518,7 @@ def check_agentic_memories(values: dict[str, str], prereqs: dict) -> dict[str, s
         if result.returncode != 0:
             warn("agentic-memories startup may have had issues.")
     else:
-        warn(f"No docker-compose.yml or run_docker.sh found in {am_path}")
+        warn(f"No Makefile or docker-compose.yml found in {am_path}")
         info("You may need to set it up manually. Check the repo's README.")
         return values
 
