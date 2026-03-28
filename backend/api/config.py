@@ -220,7 +220,7 @@ def validate_environment() -> dict:
         config["GEMINI_CONTEXT_CACHE_TTL"] = get_env_var("GEMINI_CONTEXT_CACHE_TTL", default="300")
 
     # Load research-specific LLM model (optional, falls back to LLM_MODEL)
-    # This allows using a different model for deep research tasks (e.g., GPT-5.2 for 128K output)
+    # This allows using a different model for deep research tasks (e.g., GPT-5.4 for 128K output)
     research_model = get_env_var("RESEARCH_LLM_MODEL") or get_env_var("RESEARCH_LLM_PROVIDER")
     if research_model and research_model != "REPLACE_ME":
         resolved = LEGACY_PROVIDER_TO_MODEL.get(research_model, research_model)
