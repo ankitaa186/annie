@@ -36,7 +36,7 @@ logger = get_logger(__name__)
 IS_DEV_MODE = os.getenv("ENVIRONMENT", "dev").lower() == "dev"
 
 # Default user_id for dev mode (same as the mapped user)
-DEV_MODE_USER_ID = "YOUR_USER_ID"
+DEV_MODE_USER_ID = os.getenv("DEV_MODE_USER_ID", "YOUR_USER_ID")
 DEV_MODE_EMAIL = "dev@localhost"
 
 # Email to Telegram user_id mapping

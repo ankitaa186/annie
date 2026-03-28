@@ -1,0 +1,32 @@
+Annie
+Copyright 2025-2026 Annie Contributors
+
+This product includes software developed as part of the Annie project
+(https://github.com/ankitaa186/annie).
+
+Licensed under the Apache License, Version 2.0.
+
+---
+
+Third-Party Dependencies and Licenses:
+
+Backend:
+- FastAPI (MIT) - https://github.com/tiangolo/fastapi
+- httpx (BSD-3-Clause) - https://github.com/encode/httpx
+- Redis-py (MIT) - https://github.com/redis/redis-py
+- Pydantic (MIT) - https://github.com/pydantic/pydantic
+- Langfuse (MIT) - https://github.com/langfuse/langfuse-python
+- PyJWT (MIT) - https://github.com/jpadilla/pyjwt
+
+MCP Server:
+- MCP SDK (MIT) - https://github.com/modelcontextprotocol/python-sdk
+- Tavily Python (MIT) - https://github.com/tavily-ai/tavily-python
+- PRAW (BSD-2-Clause) - https://github.com/praw-dev/praw
+- crawl4ai (Apache-2.0) - https://github.com/unclecode/crawl4ai
+
+Telegram Bot:
+- python-telegram-bot (LGPL-3.0) - https://github.com/python-telegram-bot/python-telegram-bot
+
+Infrastructure:
+- Redis (BSD-3-Clause) - https://github.com/redis/redis
+- Docker (Apache-2.0) - https://github.com/docker

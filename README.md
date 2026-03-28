@@ -61,7 +61,7 @@ See [`docs/`](./docs/) for comprehensive documentation:
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/annie.git
+git clone https://github.com/ankitaa186/annie.git
 cd annie
 
 # Recommended: Run the interactive setup wizard
@@ -332,7 +332,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for contribution guidelines.
 ## References
 
 - [xAI Grok](https://grok.x.ai/) - Inspiration
-- [agentic-memories](https://github.com/yourusername/agentic-memories) - Memory system
+- [agentic-memories](https://github.com/ankitaa186/agentic-memories) - Memory system
 - [Model Context Protocol](https://modelcontextprotocol.io) - MCP specification
 - [Langfuse](https://langfuse.com) - LLM observability
 

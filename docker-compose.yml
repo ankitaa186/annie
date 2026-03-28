@@ -46,6 +46,9 @@ services:
       - HA_MQTT_PASSWORD=${HA_MQTT_PASSWORD}
       - HA_MQTT_TOPICS=${HA_MQTT_TOPICS:-annie/alerts/#}
       - HA_MQTT_ALERT_USER_ID=${HA_MQTT_ALERT_USER_ID}
+      # Cloudflare Access auth (web UI)
+      - CF_USER_MAPPING=${CF_USER_MAPPING:-}
+      - DEV_MODE_USER_ID=${DEV_MODE_USER_ID:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -96,7 +99,7 @@ services:
       - BROWSER_SERVICE_URL=http://browser:8003
       # Host Terminal (host-terminal-mcp HTTP bridge)
       - HOST_TERMINAL_URL=${HOST_TERMINAL_URL:-http://host.docker.internal:8099}
-      - ADMIN_USER_IDS=${ADMIN_USER_IDS:-YOUR_USER_ID}
+      - ADMIN_USER_IDS=${ADMIN_USER_IDS:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
