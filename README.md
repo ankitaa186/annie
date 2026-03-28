@@ -327,7 +327,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for contribution guidelines.
 
 ## License
 
-[MIT License](./LICENSE)
+[Apache License 2.0](./LICENSE)
 
 ## References
 
