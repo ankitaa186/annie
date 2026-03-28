@@ -25,7 +25,7 @@ Last Updated: December 2025
 
 from api.constants import (
     MODEL_GROK_4, MODEL_GPT_5,
-    MODEL_GEMINI_PRO, MODEL_GEMINI_PRO_3, MODEL_GEMINI_FLASH, MODEL_GEMINI_LEGACY,
+    MODEL_GEMINI_PRO, MODEL_GEMINI_FLASH, MODEL_GEMINI_LEGACY,
 )
 
 
@@ -211,7 +211,7 @@ def calculate_llm_cost(provider: str, prompt_tokens: int, completion_tokens: int
     elif provider == MODEL_GEMINI_FLASH:
         # Gemini 3 Flash has different (cheaper) pricing than Pro
         return calculate_gemini_flash_cost(prompt_tokens, completion_tokens, cached_tokens)
-    elif provider in (MODEL_GEMINI_PRO, MODEL_GEMINI_PRO_3, MODEL_GEMINI_LEGACY):
+    elif provider in (MODEL_GEMINI_PRO, MODEL_GEMINI_LEGACY):
         # Pro models use tiered pricing
         return calculate_gemini_cost(prompt_tokens, completion_tokens, cached_tokens)
     else:

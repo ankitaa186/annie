@@ -140,7 +140,7 @@ validate_env() {
             REQUIRED_KEY="OPENAI_API_KEY"
             REQUIRED_KEY_LABEL="OPENAI_API_KEY (required for model: $LLM_MODEL_VAL)"
             ;;
-        gemini-3.1-pro-preview|gemini-3-pro-preview|gemini-3-flash-preview|gemini-2.5-pro)
+        gemini-3.1-pro-preview|gemini-3-flash-preview|gemini-2.5-pro)
             REQUIRED_KEY="GOOGLE_API_KEY"
             REQUIRED_KEY_LABEL="GOOGLE_API_KEY (required for model: $LLM_MODEL_VAL)"
             ;;
