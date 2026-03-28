@@ -153,7 +153,7 @@ class TestExecuteCommandHandler:
 
             result = await execute_command_tool_handler(
                 command="echo 'Hello, World!'",
-                user_id="YOUR_USER_ID",
+                user_id="test-user-123",
             )
 
             assert result["status"] == "success"
@@ -183,7 +183,7 @@ class TestExecuteCommandHandler:
 
             result = await execute_command_tool_handler(
                 command="pwd",
-                user_id="YOUR_USER_ID",
+                user_id="test-user-123",
                 working_directory="/home/user",
             )
 
@@ -238,7 +238,7 @@ class TestErrorHandling:
 
             result = await execute_command_tool_handler(
                 command="sleep 999",
-                user_id="YOUR_USER_ID",
+                user_id="test-user-123",
             )
 
             assert result["status"] == "error"
@@ -257,7 +257,7 @@ class TestErrorHandling:
 
             result = await execute_command_tool_handler(
                 command="ls",
-                user_id="YOUR_USER_ID",
+                user_id="test-user-123",
             )
 
             assert result["status"] == "error"
@@ -277,7 +277,7 @@ class TestErrorHandling:
 
             result = await execute_command_tool_handler(
                 command="ls",
-                user_id="YOUR_USER_ID",
+                user_id="test-user-123",
             )
 
             assert result["status"] == "error"
