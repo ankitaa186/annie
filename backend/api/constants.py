@@ -10,7 +10,7 @@ PROVIDER_GOOGLE = "google"
 
 # ---- Model identifiers (what gets sent to the API / what users set in LLM_MODEL) ----
 MODEL_GROK_4 = "grok-4-fast"
-MODEL_GPT_5 = "gpt-5.2"
+MODEL_GPT_5 = "gpt-5.4"
 MODEL_GEMINI_PRO = "gemini-3.1-pro-preview"
 MODEL_GEMINI_FLASH = "gemini-3-flash-preview"
 MODEL_GEMINI_LEGACY = "gemini-2.5-pro"
@@ -58,6 +58,7 @@ MODELS_WITH_INTERNAL_TOOL_HANDLING = {MODEL_GPT_5, MODEL_GEMINI_PRO, MODEL_GEMIN
 LEGACY_PROVIDER_TO_MODEL = {
     "grok-4": MODEL_GROK_4,
     "chatgpt-5": MODEL_GPT_5,
+    "gpt-5.2": MODEL_GPT_5,
     "gemini-3.1-pro-preview": MODEL_GEMINI_PRO,
 }
 

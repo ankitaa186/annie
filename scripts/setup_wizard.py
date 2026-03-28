@@ -339,7 +339,7 @@ def configure_essentials(existing: dict[str, str], defaults: dict[str, str]) -> 
     print()
     models = [
         {"name": "Grok-4 Fast (xAI) — recommended, fast + capable", "value": "grok-4-fast"},
-        {"name": "GPT-5.2 (OpenAI) — large output capacity", "value": "gpt-5.2"},
+        {"name": "GPT-5.4 (OpenAI) — large output capacity", "value": "gpt-5.4"},
         {"name": "Gemini 3.1 Pro (Google) — multimodal, context caching", "value": "gemini-3.1-pro-preview"},
     ]
 
@@ -360,7 +360,7 @@ def configure_essentials(existing: dict[str, str], defaults: dict[str, str]) -> 
     # ── 4. API key for chosen model ──
     key_map = {
         "grok-4-fast": ("XAI_API_KEY", "xAI", "https://x.ai/api"),
-        "gpt-5.2": ("OPENAI_API_KEY", "OpenAI", "https://platform.openai.com/api-keys"),
+        "gpt-5.4": ("OPENAI_API_KEY", "OpenAI", "https://platform.openai.com/api-keys"),
         "gemini-3.1-pro-preview": ("GOOGLE_API_KEY", "Google AI", "https://aistudio.google.com/app/apikey"),
     }
     key_var, provider_name, key_url = key_map[model]
@@ -637,7 +637,7 @@ def configure_optional(values: dict[str, str]) -> dict[str, str]:
     primary_model = values.get("LLM_MODEL", "grok-4-fast")
     other_keys = {
         "grok-4-fast": [("OPENAI_API_KEY", "OpenAI"), ("GOOGLE_API_KEY", "Google AI")],
-        "gpt-5.2": [("XAI_API_KEY", "xAI"), ("GOOGLE_API_KEY", "Google AI")],
+        "gpt-5.4": [("XAI_API_KEY", "xAI"), ("GOOGLE_API_KEY", "Google AI")],
         "gemini-3.1-pro-preview": [("XAI_API_KEY", "xAI"), ("OPENAI_API_KEY", "OpenAI")],
     }
     fallbacks = other_keys.get(primary_model, [])
