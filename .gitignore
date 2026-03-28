@@ -117,6 +117,9 @@ celerybeat.pid
 
 # Virtual environments
 .env
+.env.*
+.env.backup
+.env.*.backup
 .envrc
 .venv
 .setup_venv
