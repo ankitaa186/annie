@@ -81,6 +81,7 @@ See [`docs/`](./docs/) for comprehensive documentation:
 - Docker 20.10+ and Docker Compose 2.0+
 - Telegram Bot Token (from [@BotFather](https://t.me/BotFather))
 - At least one LLM API key (xAI, Google AI, or OpenAI)
+- **Highly recommended:** [agentic-memories](https://github.com/ankitaa186/agentic-memories) running locally — provides persistent memory, user profiles, and portfolio management. Annie works without it, but won't remember conversations across sessions.
 
 **Setup**:
 
