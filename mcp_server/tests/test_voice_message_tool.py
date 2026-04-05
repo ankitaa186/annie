@@ -28,6 +28,13 @@ from mcp_server.tools.home_assistant import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _bypass_admin_check():
+    """Bypass admin authorization for all voice message tests."""
+    with patch("mcp_server.tools.home_assistant.is_admin", return_value=True):
+        yield
+
+
 class TestVoiceTypes:
     """Tests for VOICE_TYPES configuration."""
 

@@ -11,7 +11,6 @@ needed to get Annie running. Handles:
   5. Service launch and health verification
 """
 
-import os
 import re
 import shutil
 import signal
@@ -160,7 +159,6 @@ def check_prerequisites() -> dict:
     header("Phase 1: Checking Prerequisites")
 
     status = {"docker": False, "compose": False, "daemon": False, "git": False}
-    warnings = []
 
     # Docker
     if shutil.which("docker"):
@@ -262,22 +260,22 @@ def configure_essentials(existing: dict[str, str], defaults: dict[str, str]) -> 
             print(f"  {C_CYAN}{C_BOLD}How to create a Telegram bot:{C_RESET}")
             print()
             print(f"  {C_BOLD}Step 1:{C_RESET} Open Telegram and search for {C_CYAN}@BotFather{C_RESET}")
-            print(f"         (or open: https://t.me/BotFather)")
+            print("         (or open: https://t.me/BotFather)")
             print()
             print(f"  {C_BOLD}Step 2:{C_RESET} Send the command {C_CYAN}/newbot{C_RESET}")
             print()
             print(f"  {C_BOLD}Step 3:{C_RESET} Choose a {C_BOLD}display name{C_RESET} for your bot")
-            print(f"         (e.g. \"Annie AI\" — this is what users see)")
+            print("         (e.g. \"Annie AI\" — this is what users see)")
             print()
             print(f"  {C_BOLD}Step 4:{C_RESET} Choose a {C_BOLD}username{C_RESET} ending in 'bot'")
-            print(f"         (e.g. \"my_annie_bot\" — must be unique on Telegram)")
+            print("         (e.g. \"my_annie_bot\" — must be unique on Telegram)")
             print()
             print(f"  {C_BOLD}Step 5:{C_RESET} BotFather will reply with a token like:")
             print(f"         {C_DIM}123456789:ABCdefGHIjklMNOpqrsTUVwxyz{C_RESET}")
-            print(f"         Copy this entire token.")
+            print("         Copy this entire token.")
             print()
             print(f"  {C_YELLOW}Optional:{C_RESET} Send {C_CYAN}/setdescription{C_RESET} to BotFather to set")
-            print(f"           what users see before starting a chat with your bot.")
+            print("           what users see before starting a chat with your bot.")
             print()
             info("Complete the steps above, then paste your token below.")
             print()
@@ -315,14 +313,14 @@ def configure_essentials(existing: dict[str, str], defaults: dict[str, str]) -> 
             print(f"  {C_CYAN}{C_BOLD}How to find your Telegram user ID:{C_RESET}")
             print()
             print(f"  {C_BOLD}Step 1:{C_RESET} Open Telegram and search for {C_CYAN}@userinfobot{C_RESET}")
-            print(f"         (or open: https://t.me/userinfobot)")
+            print("         (or open: https://t.me/userinfobot)")
             print()
             print(f"  {C_BOLD}Step 2:{C_RESET} Send any message (e.g. \"hi\")")
             print()
             print(f"  {C_BOLD}Step 3:{C_RESET} The bot replies with your ID — a number like {C_DIM}123456789{C_RESET}")
             print()
             print(f"  {C_YELLOW}Why is this needed?{C_RESET} Annie only responds to authorized users.")
-            print(f"  This prevents random people from using your bot and your API credits.")
+            print("  This prevents random people from using your bot and your API credits.")
             print()
 
         info("Comma-separate multiple IDs to authorize more than one person (e.g. 12345,67890)")
@@ -766,13 +764,13 @@ def write_and_launch(values: dict[str, str], prereqs: dict):
         print(f"{C_GREEN}{C_BOLD}║     Annie is running! 🎉                ║{C_RESET}")
         print(f"{C_GREEN}{C_BOLD}╚══════════════════════════════════════════╝{C_RESET}")
         print()
-        print(f"  Open Telegram and message your bot to start chatting.")
+        print("  Open Telegram and message your bot to start chatting.")
         print()
         print(f"  {C_DIM}Useful commands:{C_RESET}")
-        print(f"    make logs       — View live logs")
-        print(f"    make health     — Check service status")
-        print(f"    make stop       — Stop all services")
-        print(f"    make restart    — Restart services")
+        print("    make logs       — View live logs")
+        print("    make health     — Check service status")
+        print("    make stop       — Stop all services")
+        print("    make restart    — Restart services")
     else:
         warn("Services may still be starting up.")
         info("Check status with: make health")

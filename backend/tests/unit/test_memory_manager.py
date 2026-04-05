@@ -648,12 +648,12 @@ class TestFlushStaleSessions:
 
     @pytest.mark.asyncio
     async def test_flush_stale_sessions_flushes_inactive(self, memory_manager):
-        """Test flush worker flushes sessions inactive > 10 minutes."""
-        # Create a stale session (15 minutes old)
+        """Test flush worker flushes sessions inactive > 2 hours."""
+        # Create a stale session (3 hours old - above INACTIVE_THRESHOLD of 7200s)
         datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        # Simulate 15 minutes ago by manipulating the session data
+        # Simulate 3 hours ago by manipulating the session data
         from datetime import timedelta
-        stale_time = (datetime.now(timezone.utc) - timedelta(minutes=15)).isoformat().replace("+00:00", "Z")
+        stale_time = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat().replace("+00:00", "Z")
 
         session_data = {
             "user_id": "user_123",
@@ -801,7 +801,7 @@ class TestFlushStaleSessions:
     async def test_flush_stale_sessions_handles_string_keys(self, memory_manager):
         """Test flush worker handles string Redis keys (not just bytes)."""
         from datetime import timedelta
-        stale_time = (datetime.now(timezone.utc) - timedelta(minutes=15)).isoformat().replace("+00:00", "Z")
+        stale_time = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat().replace("+00:00", "Z")
 
         session_data = {
             "user_id": "user_123",
@@ -838,12 +838,12 @@ class TestFlushWorkerConstants:
     """Test flush worker configuration constants."""
 
     def test_flush_check_interval(self, memory_manager):
-        """Test flush check interval is 5 minutes."""
-        assert memory_manager.FLUSH_CHECK_INTERVAL == 300
+        """Test flush check interval is 30 minutes."""
+        assert memory_manager.FLUSH_CHECK_INTERVAL == 1800
 
     def test_inactive_threshold(self, memory_manager):
-        """Test inactive threshold is 10 minutes."""
-        assert memory_manager.INACTIVE_THRESHOLD == 600
+        """Test inactive threshold is 2 hours."""
+        assert memory_manager.INACTIVE_THRESHOLD == 7200
 
     def test_flush_marker_ttl(self, memory_manager):
         """Test flush marker TTL is 1 hour."""

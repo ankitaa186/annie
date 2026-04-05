@@ -17,6 +17,13 @@ import pytest
 import httpx
 
 
+@pytest.fixture(autouse=True)
+def _bypass_admin_check():
+    """Bypass admin authorization for all HA query tests."""
+    with patch("mcp_server.tools.home_assistant.is_admin", return_value=True):
+        yield
+
+
 class TestHomeAssistantClient:
     """Tests for HomeAssistantClient class."""
 

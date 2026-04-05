@@ -17,6 +17,13 @@ from unittest.mock import AsyncMock, patch, MagicMock
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _bypass_admin_check():
+    """Bypass admin authorization for all HA control tests."""
+    with patch("mcp_server.tools.home_assistant.is_admin", return_value=True):
+        yield
+
+
 class TestAllowlistValidator:
     """Tests for AllowlistValidator class (AC #1, #2, #3, #4)."""
 
