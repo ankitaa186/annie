@@ -15,11 +15,12 @@ on:
 jobs:
   deploy:
     runs-on: self-hosted
+    env:
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
     steps:
       - name: Deploy to Specific Directory
         run: |
-          # 1. Go to the project folder (set DEPLOY_PATH in repo secrets or runner env)
-          cd "${DEPLOY_PATH:-$HOME/annie}"
+          cd "$DEPLOY_PATH"
 
           # 2. Update the code safely
           echo "Fetching latest code for branch: ${{ inputs.branch }}..."
@@ -33,7 +34,7 @@ jobs:
 
       - name: Healthcheck and Validation
         run: |
-          cd "${DEPLOY_PATH:-$HOME/annie}"
+          cd "$DEPLOY_PATH"
 
           echo "Waiting for services to be ready..."
           sleep 10
