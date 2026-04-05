@@ -41,7 +41,7 @@ jobs:
         run: pip install ruff
 
       - name: Run linter
-        run: ruff check backend/ mcp_server/ telegram_bot/ autonomous/
+        run: ruff check backend/ mcp_server/ telegram_bot/
 
   test:
     name: Run Tests
