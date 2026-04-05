@@ -18,6 +18,7 @@ from mcp_server.config import (
     HA_ACCESS_TOKEN,
     HA_CONTROL_ALLOWLIST,
     HA_TIMEOUT,
+    is_admin,
 )
 from mcp_server.logging import get_logger
 
@@ -588,6 +589,7 @@ def _is_disabled_entity(entity: Dict[str, Any]) -> bool:
 
 
 async def home_assistant_query_handler(
+    user_id: str = "",
     entity_ids: Optional[List[str]] = None,
     domain: Optional[str] = None,
     exclude_disabled: bool = True
@@ -605,6 +607,18 @@ async def home_assistant_query_handler(
     Returns:
         Dict with status, provider, entities list, and query_count
     """
+    # Admin-only: smart home tools restricted to admin users
+    if not is_admin(user_id):
+        logger.error(
+            "Unauthorized home_assistant_query attempt",
+            extra={"user_id": user_id},
+        )
+        return {
+            "status": "error",
+            "error_code": "UNAUTHORIZED",
+            "error": "Smart home access is restricted to admin users only.",
+        }
+
     start_time = time.time()
 
     # Validate input - must have exactly one of entity_ids or domain
@@ -670,11 +684,16 @@ home_assistant_query_tool = {
         "Query entity states from Home Assistant smart home system. "
         "Returns current state, attributes, and last_changed timestamp for entities. "
         "Use for checking device status (lights, switches), sensor readings (temperature, humidity), "
-        "or any home automation state. Provide either specific entity_ids OR a domain to query."
+        "or any home automation state. Provide either specific entity_ids OR a domain to query. "
+        "IMPORTANT: Restricted to admin users only (configured via ADMIN_USER_IDS)."
     ),
     "inputSchema": {
         "type": "object",
         "properties": {
+            "user_id": {
+                "type": "string",
+                "description": "User ID of the requester (for authorization)"
+            },
             "entity_ids": {
                 "type": "array",
                 "items": {"type": "string"},
@@ -714,6 +733,7 @@ home_assistant_query_tool = {
 async def home_assistant_control_handler(
     entity_id: str,
     action: str,
+    user_id: str = "",
     parameters: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
@@ -721,15 +741,29 @@ async def home_assistant_control_handler(
 
     SECURITY: Only entities in HA_CONTROL_ALLOWLIST can be controlled.
     Attempting to control non-allowlisted entities returns FORBIDDEN error.
+    Restricted to admin users only.
 
     Args:
         entity_id: Entity ID to control (e.g., "light.living_room")
         action: Action to perform (turn_on, turn_off, toggle, set_brightness, etc.)
+        user_id: User ID of the requester (for authorization)
         parameters: Optional parameters for the action (e.g., {"brightness": 200})
 
     Returns:
         Dict with status, previous_state, new_state, or error info
     """
+    # Admin-only: smart home control restricted to admin users
+    if not is_admin(user_id):
+        logger.error(
+            "Unauthorized home_assistant_control attempt",
+            extra={"user_id": user_id, "entity_id": entity_id, "action": action},
+        )
+        return {
+            "status": "error",
+            "error_code": "UNAUTHORIZED",
+            "error": "Smart home control is restricted to admin users only.",
+        }
+
     start_time = time.time()
 
     # STEP 1: Check allowlist FIRST (CRITICAL - never bypass)
@@ -863,12 +897,17 @@ home_assistant_control_tool = {
         "Control Home Assistant entities (lights, switches, climate, covers). "
         "SECURITY: Only entities in HA_CONTROL_ALLOWLIST can be controlled. "
         "Attempting to control non-allowlisted entities returns FORBIDDEN error. "
+        "IMPORTANT: Restricted to admin users only (configured via ADMIN_USER_IDS). "
         "Use for actions like turning on/off lights, setting thermostat temperature, "
         "or adjusting cover positions."
     ),
     "inputSchema": {
         "type": "object",
         "properties": {
+            "user_id": {
+                "type": "string",
+                "description": "User ID of the requester (for authorization)"
+            },
             "entity_id": {
                 "type": "string",
                 "description": (
@@ -1073,13 +1112,14 @@ def get_voice_delivery_method(voice_type: str) -> str:
 async def send_voice_message_to_smart_home_handler(
     message: str,
     devices: List[str],
-    voice_type: str = "say"
+    voice_type: str = "say",
+    user_id: str = ""
 ) -> Dict[str, Any]:
     """
     Send a voice message to smart home speakers (Alexa) via Home Assistant.
 
     This tool calls the notify.alexa_media service with SSML-wrapped messages
-    for emotional voice expression.
+    for emotional voice expression. Restricted to admin users only.
 
     CONSTRAINTS:
     - Only effective when user is physically at home
@@ -1095,6 +1135,18 @@ async def send_voice_message_to_smart_home_handler(
     Returns:
         Dict with status, devices, message, voice_type, or error info
     """
+    # Admin-only: voice messages restricted to admin users
+    if not is_admin(user_id):
+        logger.error(
+            "Unauthorized send_voice_message attempt",
+            extra={"user_id": user_id},
+        )
+        return {
+            "status": "error",
+            "error_code": "UNAUTHORIZED",
+            "error": "Smart home voice messages are restricted to admin users only.",
+        }
+
     start_time = time.time()
 
     # STEP 1: Check cooldown (fail fast)
@@ -1400,11 +1452,16 @@ send_voice_message_to_smart_home_tool = {
         "Send a voice message to Alexa devices via Home Assistant. "
         "COMPLEMENT to text responses, not a direct replacement. "
         "Has 60-second cooldown. Use only when user is at home. "
+        "IMPORTANT: Restricted to admin users only (configured via ADMIN_USER_IDS). "
         "Voice types: say, announce, whisper, excited, disappointed, conversational, news, fun."
     ),
     "inputSchema": {
         "type": "object",
         "properties": {
+            "user_id": {
+                "type": "string",
+                "description": "User ID of the requester (for authorization)"
+            },
             "message": {
                 "type": "string",
                 "description": "The message to speak aloud"

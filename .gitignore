@@ -117,8 +117,12 @@ celerybeat.pid
 
 # Virtual environments
 .env
+.env.*
+.env.backup
+.env.*.backup
 .envrc
 .venv
+.setup_venv
 venv/
 env/
 ENV/
@@ -170,8 +174,13 @@ cython_debug/
 .pypirc
 
 # Cursor
+.cursor/
 .cursorignore
 .cursorindexingignore
+
+# BMAD (internal project management)
+.bmad/
+.bmad-ephemeral/
 
 # Marimo
 marimo/_static/
@@ -184,3 +193,6 @@ Thumbs.db
 
 # Docker (handled separately by .dockerignore)
 # Docker-related files are excluded via .dockerignore
+
+
+.github-backup/

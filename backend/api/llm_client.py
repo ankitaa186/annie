@@ -15,7 +15,7 @@ from api.logging import get_logger
 from api.models.file_attachment import FileAttachment, get_files_metadata
 from api.constants import (
     ALL_MODELS, MODEL_API_KEY_MAP, FALLBACK_CHAIN,
-    MODEL_GROK_4, MODEL_GPT_5, MODEL_GEMINI_PRO, MODEL_GEMINI_PRO_3, MODEL_GEMINI_FLASH, MODEL_GEMINI_LEGACY,
+    MODEL_GROK_4, MODEL_GPT_5, MODEL_GEMINI_PRO, MODEL_GEMINI_FLASH, MODEL_GEMINI_LEGACY,
     LEGACY_PROVIDER_TO_MODEL, DEFAULT_MODEL,
 )
 from api.providers import (
@@ -39,7 +39,6 @@ def _get_provider_factory():
         MODEL_GROK_4: (GrokProvider, {}),
         MODEL_GPT_5: (ChatGPTProvider, {}),
         MODEL_GEMINI_PRO: (GeminiProvider, {}),
-        MODEL_GEMINI_PRO_3: (GeminiProvider, {"model_override": MODEL_GEMINI_PRO_3}),
         MODEL_GEMINI_FLASH: (GeminiProvider, {"model_override": MODEL_GEMINI_FLASH}),
         MODEL_GEMINI_LEGACY: (GeminiProvider, {"model_override": MODEL_GEMINI_LEGACY}),
     }

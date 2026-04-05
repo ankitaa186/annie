@@ -110,7 +110,7 @@ All 12 research areas completed:
 annie/
 ├── README.md                 ✅ Project overview
 ├── PROJECT_STATUS.md         ✅ This file
-├── LICENSE                   ✅ MIT License
+├── LICENSE                   ✅ Apache License 2.0
 ├── .gitignore               ✅ Git exclusions
 ├── .dockerignore            ✅ Docker exclusions
 ├── env.example              ✅ Environment template

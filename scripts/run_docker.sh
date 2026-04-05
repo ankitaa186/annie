@@ -136,11 +136,11 @@ validate_env() {
             REQUIRED_KEY="XAI_API_KEY"
             REQUIRED_KEY_LABEL="XAI_API_KEY (required for model: $LLM_MODEL_VAL)"
             ;;
-        gpt-5.2|chatgpt-5)
+        gpt-5.4|chatgpt-5)
             REQUIRED_KEY="OPENAI_API_KEY"
             REQUIRED_KEY_LABEL="OPENAI_API_KEY (required for model: $LLM_MODEL_VAL)"
             ;;
-        gemini-3.1-pro-preview|gemini-3-pro-preview|gemini-3-flash-preview|gemini-2.5-pro)
+        gemini-3.1-pro-preview|gemini-3-flash-preview|gemini-2.5-pro)
             REQUIRED_KEY="GOOGLE_API_KEY"
             REQUIRED_KEY_LABEL="GOOGLE_API_KEY (required for model: $LLM_MODEL_VAL)"
             ;;

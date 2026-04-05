@@ -50,8 +50,8 @@ class MemoryManager:
     CIRCUIT_BREAKER_TIMEOUT = 900  # 15 minutes
 
     # Flush worker constants (Story 12-5)
-    FLUSH_CHECK_INTERVAL = 300   # 5 minutes between flush checks
-    INACTIVE_THRESHOLD = 600     # 10 minutes of inactivity before flush
+    FLUSH_CHECK_INTERVAL = 1800   # 30 minutes between flush checks
+    INACTIVE_THRESHOLD = 7200    # 2 hours of inactivity before flush
     FLUSH_MARKER_TTL = 3600      # 1 hour TTL for "already flushed" marker
 
     # Distributed lock constants (for multi-worker environments)

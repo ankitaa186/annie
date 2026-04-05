@@ -15,24 +15,7 @@ Thank you for your interest in contributing to Annie! This document provides gui
 
 ## Code of Conduct
 
-### Our Pledge
-
-We are committed to providing a welcoming and inspiring community for all. Please be respectful and constructive in your interactions.
-
-### Expected Behavior
-
-- Use welcoming and inclusive language
-- Be respectful of differing viewpoints
-- Accept constructive criticism gracefully
-- Focus on what is best for the community
-- Show empathy towards other community members
-
-### Unacceptable Behavior
-
-- Trolling, insulting comments, or personal attacks
-- Public or private harassment
-- Publishing others' private information
-- Other conduct which could reasonably be considered inappropriate
+Please read and follow our [Code of Conduct](./CODE_OF_CONDUCT.md). We are committed to providing a welcoming and inclusive community for all.
 
 ## Getting Started
 
@@ -41,7 +24,7 @@ We are committed to providing a welcoming and inspiring community for all. Pleas
 1. Read the [Development Setup Guide](./docs/04-implementation/DEVELOPMENT_SETUP_GUIDE.md)
 2. Set up your local development environment
 3. Familiarize yourself with the [Architecture Plan](./docs/02-architecture/ARCHITECTURE_PLAN.md)
-4. Review existing [Issues](https://github.com/yourusername/annie/issues)
+4. Review existing [Issues](https://github.com/ankitaa186/annie/issues)
 
 ### Finding Something to Work On
 
@@ -69,7 +52,7 @@ git clone https://github.com/YOUR_USERNAME/annie.git
 cd annie
 
 # Add upstream remote
-git remote add upstream https://github.com/yourusername/annie.git
+git remote add upstream https://github.com/ankitaa186/annie.git
 ```
 
 ### 2. Create a Branch
@@ -517,7 +500,7 @@ Contributors will be:
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the MIT License.
+By contributing, you agree that your contributions will be licensed under the Apache License 2.0.
 
 ## Questions?
 

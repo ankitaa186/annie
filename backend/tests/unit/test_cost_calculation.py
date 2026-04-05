@@ -49,44 +49,59 @@ class TestGrokCostCalculation:
 
 
 class TestChatGPTCostCalculation:
-    """Test cost calculation for ChatGPT-5 (GPT-5.2)."""
+    """Test cost calculation for ChatGPT-5 (GPT-5.4)."""
 
     def test_chatgpt_cost_calculation(self):
         """Test ChatGPT-5 cost calculation with known values."""
         # 1000 prompt tokens, 500 completion tokens
-        # GPT-5.2 pricing: $1.75/1M input, $14.00/1M output
-        # Input: 1000 / 1,000,000 * $1.75 = $0.00175
-        # Output: 500 / 1,000,000 * $14.00 = $0.007
-        # Total: $0.00875
+        # GPT-5.4 pricing: $2.50/1M input, $15.00/1M output
+        # Input: 1000 / 1,000,000 * $2.50 = $0.0025
+        # Output: 500 / 1,000,000 * $15.00 = $0.0075
+        # Total: $0.01
         result = calculate_chatgpt_cost(prompt_tokens=1000, completion_tokens=500)
 
-        assert result["input_cost"] == 0.00175
-        assert result["output_cost"] == 0.007
-        assert result["total_cost"] == 0.00875
+        assert result["input_cost"] == 0.0025
+        assert result["output_cost"] == 0.0075
+        assert result["cached_cost"] == 0.0
+        assert result["total_cost"] == 0.01
+
+    def test_chatgpt_cost_with_cached_tokens(self):
+        """Test ChatGPT-5 cost with cached input tokens."""
+        # 1000 prompt tokens, 500 completion tokens, 200 cached tokens
+        # Input: 1000 / 1M * $2.50 = $0.0025
+        # Output: 500 / 1M * $15.00 = $0.0075
+        # Cached: 200 / 1M * $0.25 = $0.00005
+        # Total: $0.01005
+        result = calculate_chatgpt_cost(prompt_tokens=1000, completion_tokens=500, cached_tokens=200)
+
+        assert result["input_cost"] == 0.0025
+        assert result["output_cost"] == 0.0075
+        assert result["cached_cost"] == 0.00005
+        assert result["total_cost"] == 0.01005
 
     def test_chatgpt_cost_small_usage(self):
         """Test ChatGPT-5 cost with small token counts."""
         # 100 prompt tokens, 50 completion tokens
-        # Input: 100 / 1,000,000 * $1.75 = $0.000175
-        # Output: 50 / 1,000,000 * $14.00 = $0.0007
-        # Total: $0.000875
+        # Input: 100 / 1,000,000 * $2.50 = $0.00025
+        # Output: 50 / 1,000,000 * $15.00 = $0.00075
+        # Total: $0.001
         result = calculate_chatgpt_cost(prompt_tokens=100, completion_tokens=50)
 
-        assert result["input_cost"] == 0.000175
-        assert result["output_cost"] == 0.0007
-        assert result["total_cost"] == 0.000875
+        assert result["input_cost"] == 0.00025
+        assert result["output_cost"] == 0.00075
+        assert result["total_cost"] == 0.001
 
     def test_chatgpt_cost_large_usage(self):
         """Test ChatGPT-5 cost with large token counts."""
         # 10000 prompt tokens, 5000 completion tokens
-        # Input: 10000 / 1,000,000 * $1.75 = $0.0175
-        # Output: 5000 / 1,000,000 * $14.00 = $0.07
-        # Total: $0.0875
+        # Input: 10000 / 1,000,000 * $2.50 = $0.025
+        # Output: 5000 / 1,000,000 * $15.00 = $0.075
+        # Total: $0.1
         result = calculate_chatgpt_cost(prompt_tokens=10000, completion_tokens=5000)
 
-        assert result["input_cost"] == 0.0175
-        assert result["output_cost"] == 0.07
-        assert result["total_cost"] == 0.0875
+        assert result["input_cost"] == 0.025
+        assert result["output_cost"] == 0.075
+        assert result["total_cost"] == 0.1
 
     def test_chatgpt_cost_rounding(self):
         """Test that ChatGPT-5 costs are rounded to 6 decimal places."""
@@ -199,10 +214,10 @@ class TestUnifiedCostCalculation:
         """Test unified function with ChatGPT-5 provider."""
         result = calculate_llm_cost(MODEL_GPT_5, prompt_tokens=1000, completion_tokens=500)
 
-        # Should match ChatGPT cost calculation (GPT-5.2 pricing)
-        assert result["input_cost"] == 0.00175
-        assert result["output_cost"] == 0.007
-        assert result["total_cost"] == 0.00875
+        # Should match ChatGPT cost calculation (GPT-5.4 pricing)
+        assert result["input_cost"] == 0.0025
+        assert result["output_cost"] == 0.0075
+        assert result["total_cost"] == 0.01
 
     def test_calculate_llm_cost_gemini(self):
         """Test unified function with Gemini 3 Pro Preview provider."""
@@ -241,4 +256,4 @@ class TestUnifiedCostCalculation:
 
         # Result should not include search_cost
         assert "search_cost" not in result
-        assert result["total_cost"] == 0.00875  # GPT-5.2 pricing
+        assert result["total_cost"] == 0.01  # GPT-5.4 pricing

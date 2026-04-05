@@ -398,7 +398,7 @@ async def web_search_tool_handler(
         }
 
     # Validate and cap max_results to range 1-10
-    max_results = max(1, min(max_results, 10))
+    max_results = int(max(1, min(max_results, 10)))
 
     # Validate search_depth
     if search_depth not in ("basic", "advanced"):

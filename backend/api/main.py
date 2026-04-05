@@ -62,8 +62,8 @@ app.include_router(session.router)
 
 # Add CORS middleware
 # Configured via CORS_ORIGINS env var (comma-separated) or defaults
-_default_origins = "https://annie.memoryforge.io,http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173"
-CORS_ORIGINS = os.getenv("CORS_ORIGINS", _default_origins).split(",")
+_default_origins = "http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173"
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", _default_origins).split(",")  # Set CORS_ORIGINS env var for production domains
 
 app.add_middleware(
     CORSMiddleware,

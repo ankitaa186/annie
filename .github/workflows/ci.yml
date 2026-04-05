@@ -11,6 +11,7 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # Lint job - enable after running `ruff format` on the codebase (118 files need reformatting)
   # lint:
   #   name: Lint
   #   runs-on: ubuntu-latest
@@ -24,13 +25,13 @@ jobs:
   #         python-version: "3.12"
   #
   #     - name: Install ruff
-  #       run: pip install ruff
+  #       run: pip install ruff==0.15.8
   #
   #     - name: Run linter
-  #       run: ruff check backend/ mcp_server/ telegram_bot/
+  #       run: ruff check backend/ mcp_server/ telegram_bot/ autonomous/
   #
   #     - name: Check formatting
-  #       run: ruff format --check backend/ mcp_server/ telegram_bot/
+  #       run: ruff format --check backend/ mcp_server/ telegram_bot/ autonomous/
 
   test:
     name: Run Tests
@@ -82,7 +83,7 @@ jobs:
 
   build:
     name: Build Docker Image
-    needs: test
+    needs: test  # add lint when enabled: needs: [lint, test]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
     # prod for main branch pushes, dev for all PR builds

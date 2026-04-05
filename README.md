@@ -1,34 +1,59 @@
 # Annie - Personal AI Companion
 
-> A personal AI companion chatbot that provides decision-making support through intelligent, context-aware advice powered by real-time information, persistent memory, and specialized investment tools.
+> A personal AI companion that remembers everything, searches the web, manages your portfolio, controls your smart home, understands files you share, and reaches out proactively when something matters.
 
-## Overview
+## What Annie Can Do
 
-Annie is a personal AI companion chatbot that provides decision-making support across financial, career, life, and business decisions. Built with advanced LLM integration, persistent memory, and real-time information access.
+### Conversation & Intelligence
+- **Multi-provider LLM** — Grok-4, Gemini 3.1 Pro, ChatGPT-5 with automatic failover and streaming responses
+- **Persistent Memory** — Remembers conversations, decisions, preferences, and context across sessions via agentic-memories
+- **User Profiles** — Automatically builds and updates a profile of your goals, interests, risk tolerance, and background
+- **File Understanding** — Share images, PDFs, spreadsheets, Word docs, and CSVs via Telegram for multimodal analysis (up to 10 files per message)
 
-**Implemented Features (V1.0):**
-- **LLM Integration** - Grok-4 (primary), Gemini 3 Pro, ChatGPT-5 with streaming responses
-- **Persistent Memory** - agentic-memories integration for context-aware conversations
-- **User Profiles** - Automatic extraction of preferences, goals, and background from conversations
-- **Portfolio Management** - Track stock holdings, calculate performance, gain/loss metrics
-- **Stock Analysis** - Real-time prices, technicals (RSI, moving averages), fundamentals via yfinance
-- **Grok Live Search** - Real-time internet access for time-sensitive queries
-- **LLM Observability** - Full tracing via Langfuse (costs, latency, token usage)
-- **Telegram Interface** - Primary user interface with streaming responses
+### Research & Information
+- **Web Search** — Real-time web search via Tavily (primary) with DuckDuckGo fallback
+- **Web Crawl** — Fetch and parse full webpage content from URLs you share (crawl4ai + Jina Reader fallback)
+- **Reddit Search** — Search Reddit for community opinions and discussions (PRAW + JSON API fallback)
+- **Grok Live Search** — Real-time internet access built into Grok-4 for time-sensitive queries
+
+### Finance & Portfolio
+- **Portfolio Management** — Track stock holdings, cost basis, and calculate performance with real-time prices
+- **Stock Analysis** — Real-time prices, technicals (RSI, moving averages, MACD), and fundamentals via yfinance
+- **Decision Support** — Annie remembers your risk tolerance and investment goals to provide personalized analysis
+
+### Smart Home (Home Assistant)
+- **Query Devices** — Check status of lights, sensors, thermostats, locks, and any Home Assistant entity
+- **Control Devices** — Turn on/off lights, set temperatures, adjust covers (restricted to admin users and allowlisted entities)
+- **Voice Messages** — Send voice messages to Alexa devices with emotional delivery (whisper, excited, conversational, etc.)
+
+### Proactive Outreach
+- **Intent-driven Messages** — Annie reaches out via Telegram when something matters (price alerts, reminders, insights)
+- **Smart Gating** — Rate limiting, quiet hours, daily caps, and cooldowns prevent notification spam
+- **Subconscious Processing** — Background worker monitors triggers from agentic-memories and fires when conditions are met
+
+### Observability & Security
+- **LLM Tracing** — Full request tracing via Langfuse (costs, latency, token usage, tool calls)
+- **Admin Controls** — Smart home and terminal tools restricted to `ADMIN_USER_IDS`
+- **User Authorization** — Telegram whitelist via `AUTHORIZED_USER_IDS`, Cloudflare Access for web UI
+- **API Key Masking** — All sensitive values automatically masked in logs
 
 ## Project Status
 
-**Current Phase**: V1.0 MVP - Feature Complete, Optimizing
+**Current Phase**: V1.0 Complete, V2 Autonomous Architecture In Progress
 
 - [x] Core infrastructure (Docker, Redis, health checks)
-- [x] LLM integration with streaming (Grok-4, Gemini, ChatGPT-5)
+- [x] Multi-provider LLM with streaming (Grok-4, Gemini 3.1 Pro, ChatGPT-5)
+- [x] LLM Provider Registry with automatic failover (Epic 9)
 - [x] Memory storage and retrieval (agentic-memories)
 - [x] User profile extraction and caching
-- [x] Portfolio management tools (CRUD + price enrichment)
-- [x] Stock market analysis tools
+- [x] Portfolio management and stock analysis tools
 - [x] Langfuse observability integration
-- [x] Telegram bot with SSE streaming
-- [ ] Architecture simplification (in planning - see below)
+- [x] Telegram bot with SSE streaming and file sharing (Epic 18)
+- [x] Web search, web crawl, and Reddit search tools (Epic 15)
+- [x] Home Assistant integration — query, control, voice messages (Epic 16)
+- [x] Proactive outreach system with smart gating (Epic 6)
+- [ ] Dashboard UI (Epic 8 — backlog)
+- [ ] V2 autonomous chat brain (Epic 10 — backlog)
 
 ## Documentation
 
@@ -52,20 +77,21 @@ See [`docs/`](./docs/) for comprehensive documentation:
 ## Quick Start
 
 **Prerequisites**:
+- Python 3.12+ (for setup wizard)
 - Docker 20.10+ and Docker Compose 2.0+
-- Python 3.12+ (for local development)
-- API Keys: XAI (Grok-4), Telegram Bot Token, Brave Search API, Stock API
-- agentic-memories service running (for memory features)
+- Telegram Bot Token (from [@BotFather](https://t.me/BotFather))
+- At least one LLM API key (xAI, Google AI, or OpenAI)
 
-**Setup** (once implementation is complete):
+**Setup**:
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/annie.git
+git clone https://github.com/ankitaa186/annie.git
 cd annie
 
-# Run setup script (creates .env interactively and starts services)
-./run_docker.sh
+# Recommended: Run the interactive setup wizard
+# Checks prerequisites, creates .env, validates API keys, and starts services
+make setup
 
 # Or manually:
 # 1. Copy env.example to .env
@@ -86,150 +112,115 @@ make stop
 make clean
 ```
 
-**Note**: The `run_docker.sh` script and `Makefile` will be created in Story 1.5. For now, setup instructions are documented here.
+## MCP Tools (28 registered)
 
-## V1 Scope
-
-**Core Features**:
-1. **MCP Server** - Tool hosting and execution
-2. **Backend API** - Chat logic and LLM integration
-3. **Telegram Bot** - User interface via Telegram
-4. **Internet Access Tool** - Web search via Brave Search
-5. **Memories Tool** - agentic-memories integration
-
-**Out of Scope for V1**:
-- Web interface (V1.1)
-- iOS app (V1.2)
-- 3D animation (V2.0+)
-- Voice interaction (V2.0+)
-- A2A protocol (V2.1+)
+| Category | Tools |
+|----------|-------|
+| **Memory** | `store_memory`, `retrieve_memories`, `delete_memory` |
+| **Profile** | `get_user_profile`, `update_user_profile` |
+| **Portfolio** | `get_portfolio`, `add_holding`, `update_holding`, `remove_holding`, `clear_portfolio` |
+| **Stock Data** | `get_stock_data`, `get_stock_history` |
+| **Web** | `web_search`, `web_crawl`, `reddit_search` |
+| **Smart Home** | `home_assistant_query`, `home_assistant_control`, `send_voice_message_to_smart_home` |
+| **System** | `health_check`, `execute_command` (admin-only) |
 
 ## Architecture
 
-### Current Architecture (4 Containers)
+### Architecture (6 Containers)
 
 ```
-┌─────────────────┐
-│  Telegram Bot   │ Container 3
-└────────┬────────┘
-         │ HTTP
-         ▼
 ┌─────────────────┐     ┌─────────────┐
-│  Backend API    │────▶│    Redis    │ Container 4
-│   (Port 8001)   │     │ (Port 6380) │
-└────────┬────────┘     └─────────────┘
-         │ HTTP (JSON-RPC 2.0)
-         ▼
-┌─────────────────┐
-│   MCP Server    │ Container 2
-│   (Port 8002)   │
-└────────┬────────┘
-         │ HTTP
-         ▼
-┌─────────────────────────────────┐
-│       External Services         │
-│  - agentic-memories (6+ containers)
-│  - Grok-4 / Gemini / ChatGPT-5 APIs
-│  - Yahoo Finance (yfinance)
-│  - Langfuse (observability)
-└─────────────────────────────────┘
+│  Telegram Bot   │     │   Web UI    │
+└────────┬────────┘     └──────┬──────┘
+         │ HTTP                │ HTTP (Cloudflare Access)
+         ▼                     ▼
+┌──────────────────────────────────────┐     ┌─────────────┐
+│            Backend API               │────▶│    Redis    │
+│           (Port 8001)                │     └─────────────┘
+└──────┬───────────────────┬───────────┘
+       │ HTTP              │ HTTP
+       ▼                   ▼
+┌─────────────┐   ┌──────────────────────────────┐
+│ MCP Server  │   │      External Services        │
+│ (Port 8002) │   │  - agentic-memories           │
+│  28 tools   │   │  - Grok-4 / Gemini / ChatGPT  │
+└──────┬──────┘   │  - Home Assistant              │
+       │ HTTP     │  - Yahoo Finance / Tavily      │
+       ▼          │  - Langfuse                    │
+  Home Assistant  └──────────────────────────────────┘
+  Tavily / DDG
+  agentic-memories
 ```
 
-**Container Summary:**
 | Container | Purpose | Port |
 |-----------|---------|------|
-| Backend | FastAPI - chat logic, LLM integration, streaming | 8001 |
-| MCP Server | FastAPI - tool hosting (11 tools) | 8002 |
-| Telegram Bot | User interface, message forwarding | - |
-| Redis | Session state, price caching | 6380 |
-
-### Planned Simplification
-
-**Problem**: Running Annie requires 4 containers + agentic-memories (6+ containers) = 10+ containers for a personal app. This is resource-heavy for single-user deployment.
-
-**Solution**: Merge MCP Server into Backend (in-process tool calls instead of HTTP).
-
-```
-Target Architecture (3 Containers):
-┌─────────────────┐
-│  Telegram Bot   │
-└────────┬────────┘
-         │ HTTP
-         ▼
-┌─────────────────┐     ┌─────────────┐
-│  Backend API    │────▶│    Redis    │
-│  + MCP Tools    │     └─────────────┘
-│  (in-process)   │
-└────────┬────────┘
-         │ HTTP
-         ▼
-    External Services
-```
-
-**Benefits**: -1 container, -1 network hop, simpler deployment, lower memory footprint.
+| Backend | FastAPI — chat logic, LLM integration, streaming, proactive worker | 8001 |
+| MCP Server | FastAPI — 28 MCP tools via JSON-RPC 2.0 | 8002 |
+| Telegram Bot | User interface, file handling, message forwarding | - |
+| Proactive Worker | Background trigger polling, intent processing, Telegram delivery | - |
+| Web UI | Nginx — static frontend (Cloudflare Access protected) | 3001 |
+| Redis | Session state, caching, queues, circuit breakers | 6380 |
 
 ## Technology Stack
 
 **Backend**:
-- FastAPI (Python 3.12+)
-- Redis (state management, price caching)
-- Docker / Docker Compose
+- FastAPI (Python 3.12+), Redis, Docker Compose
+- SSE streaming, background workers (SAQ)
 
-**LLM Integration**:
-- Grok-4 (primary) with Live Search
-- Gemini 3 Pro (alternative)
-- ChatGPT-5 (fallback)
-- Streaming via SSE
+**LLM Providers** (automatic failover):
+- Grok-4 / Grok-4 Fast (xAI) — with Live Search
+- Gemini 3.1 Pro Preview (Google) — multimodal, context caching
+- GPT-5.4 (OpenAI) — large output capacity
 
-**MCP Server** (11 tools):
-- FastAPI with JSON-RPC 2.0
-- HTTP transport between containers
-- Tools: health_check, store_memory, retrieve_memories, get_user_profile, get_portfolio, add_holding, update_holding, remove_holding, clear_portfolio, get_stock_data, get_stock_history
+**MCP Server** (28 tools):
+- FastAPI with JSON-RPC 2.0, HTTP transport
+- Memory, profile, portfolio, stock, web search, web crawl, Reddit, Home Assistant, voice, terminal
 
-**Observability**:
-- Langfuse for LLM tracing
-- Automatic cost tracking
-- Session-linked traces
+**Observability**: Langfuse (tracing, cost tracking, session-linked spans)
 
 **External Services**:
-- agentic-memories (memory management, user profiles, portfolios)
-- Telegram Bot API
-- Yahoo Finance (stock data via yfinance)
+- agentic-memories (memory, profiles, portfolios, intents)
+- Home Assistant (smart home control + Alexa voice)
+- Tavily / DuckDuckGo (web search), crawl4ai / Jina Reader (web crawl)
+- Yahoo Finance (stock data), Telegram Bot API
 
 ## Project Structure
 
 ```
 annie/
-├── backend/              # FastAPI backend service
-│   ├── api/              # API routes, LLM client, memory manager
-│   │   ├── routes/       # chat.py, stream.py, health.py
-│   │   ├── llm_client.py # Grok/Gemini/ChatGPT integration
-│   │   ├── mcp_client.py # HTTP client for MCP server
-│   │   ├── memory.py     # MemoryManager orchestration
-│   │   └── profile.py    # User profile caching
-│   ├── Dockerfile
-│   └── requirements.txt
-├── mcp_server/           # MCP tool server (11 tools)
-│   ├── server.py         # FastAPI + JSON-RPC 2.0
-│   ├── tools.py          # Tool implementations (~2400 lines)
-│   ├── config.py
-│   ├── Dockerfile
-│   └── requirements.txt
-├── telegram_bot/         # Telegram interface
-│   ├── bot.py            # Message handling, SSE streaming
-│   ├── Dockerfile
-│   └── requirements.txt
-├── scripts/              # Operational scripts
-│   └── run_docker.sh     # Main startup script
-├── docs/                 # Documentation
-├── docker-compose.yml    # 4-service orchestration
-├── Makefile              # Development commands
-├── CLAUDE.md             # AI assistant context
-└── env.example           # Environment template
+├── backend/                # FastAPI backend service
+│   ├── api/
+│   │   ├── routes/         # chat.py, stream.py, conversations.py, health.py
+│   │   ├── providers/      # grok, gemini, chatgpt providers + registry
+│   │   ├── middleware/      # cloudflare_auth.py, rate_limiter.py
+│   │   ├── proactive/      # worker.py, agent.py, gate.py, telegram_delivery.py
+│   │   ├── llm_client.py   # Multi-provider LLM client with failover
+│   │   ├── mcp_client.py   # HTTP client for MCP server
+│   │   ├── memory.py       # MemoryManager with retry + circuit breaker
+│   │   ├── profile.py      # User profile caching
+│   │   └── prompts.py      # System prompt builder
+│   └── Dockerfile
+├── mcp_server/             # MCP tool server (28 tools)
+│   ├── server.py           # FastAPI + JSON-RPC 2.0
+│   ├── tools/              # Tool modules (memory, profile, web, HA, etc.)
+│   ├── config.py           # ADMIN_USER_IDS, HA config, API keys
+│   └── Dockerfile
+├── telegram_bot/           # Telegram interface
+│   ├── handlers/           # Message, voice, photo, document handlers
+│   ├── file_handler.py     # File download, validation, base64 encoding
+│   ├── backend_client.py   # HTTP client for backend API
+│   └── Dockerfile
+├── scripts/
+│   ├── setup_wizard.py     # Interactive first-boot setup
+│   └── run_docker.sh       # Startup script
+├── docker-compose.yml      # 6-service orchestration
+├── Makefile                # make setup, start, stop, logs, test, etc.
+└── env.example             # Environment template
 ```
 
 **Development Commands**:
 ```bash
+make setup              # Interactive first-boot setup wizard
 make start              # Start all services
 make stop               # Stop all services
 make restart            # Restart services
@@ -245,6 +236,16 @@ make clean              # Clean up Docker resources
 
 ### Quick Start
 
+The easiest way to set up Annie is with the interactive setup wizard:
+
+```bash
+make setup
+```
+
+This checks prerequisites (Docker, Python, etc.), walks you through creating `.env` with your API keys, validates connectivity, and optionally starts services.
+
+**Manual setup** (if you prefer):
+
 1. **Copy environment template**:
    ```bash
    cp env.example .env
@@ -259,12 +260,7 @@ make clean              # Clean up Docker resources
 
 3. **Start services**:
    ```bash
-   ./scripts/run_docker.sh
-   ```
-   
-   Or use Docker Compose directly:
-   ```bash
-   docker-compose up --build
+   make start
    ```
 
 ### Environment Variables
@@ -320,15 +316,15 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for contribution guidelines.
 
 ## License
 
-[MIT License](./LICENSE)
+[Apache License 2.0](./LICENSE)
 
 ## References
 
 - [xAI Grok](https://grok.x.ai/) - Inspiration
-- [agentic-memories](https://github.com/yourusername/agentic-memories) - Memory system
+- [agentic-memories](https://github.com/ankitaa186/agentic-memories) - Memory system
 - [Model Context Protocol](https://modelcontextprotocol.io) - MCP specification
 - [Langfuse](https://langfuse.com) - LLM observability
 
 ---
 
-**Status**: V1.0 MVP Feature Complete - Architecture simplification in planning
+**Status**: V1.0 Complete — 28 tools, 3 LLM providers, proactive outreach, smart home, file understanding

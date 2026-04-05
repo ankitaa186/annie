@@ -1,7 +1,7 @@
 # Annie Makefile
 # Development commands for managing Annie services
 
-.PHONY: help install venv test test-unit test-integration test-backend test-mcp test-telegram coverage start stop logs clean clean-venv clean-all rebuild restart health shell check-loki lint format format-check gh gh-read gh-diff gh-write gh-update terminal-start terminal-stop terminal-logs
+.PHONY: help setup install venv test test-unit test-integration test-backend test-mcp test-telegram coverage start stop logs clean clean-venv clean-all rebuild restart health shell check-loki lint format format-check gh gh-read gh-diff gh-write gh-update terminal-start terminal-stop terminal-logs
 
 # Detect Docker Compose command (v2 or v1)
 COMPOSE_CMD := $(shell if docker compose version >/dev/null 2>&1; then echo "docker compose"; else echo "docker-compose"; fi)
@@ -29,7 +29,7 @@ help: ## Show this help message
 	@echo "  Environment: Use ENV=prod for production mode (e.g., make start ENV=prod)"
 	@echo ""
 	@echo "  Setup:"
-	@grep -E '^(install|start|stop|clean|clean-venv|clean-all):.*## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "    \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^(setup|install|start|stop|clean|clean-venv|clean-all):.*## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "    \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "  Code Quality:"
 	@grep -E '^(lint|format|format-check):.*## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "    \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -49,6 +49,9 @@ help: ## Show this help message
 # ============================================================
 # SETUP
 # ============================================================
+
+setup: ## Interactive first-boot setup wizard (creates .env, checks services)
+	@bash ./scripts/setup.sh
 
 # Ensure venv exists and dependencies are installed
 .venv/bin/activate: backend/requirements.txt mcp_server/requirements.txt telegram_bot/requirements.txt

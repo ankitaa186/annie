@@ -5,7 +5,7 @@
 
 // ---- Model identifiers ----
 export const MODEL_GROK_4 = 'grok-4-fast';
-export const MODEL_GPT_5 = 'gpt-5.2';
+export const MODEL_GPT_5 = 'gpt-5.4';
 export const MODEL_GEMINI_PRO = 'gemini-3.1-pro-preview';
 export const MODEL_GEMINI_FLASH = 'gemini-3-flash-preview';
 export const MODEL_GEMINI_LEGACY = 'gemini-2.5-pro';

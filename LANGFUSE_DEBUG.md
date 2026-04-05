@@ -4,8 +4,8 @@
 
 **Environment Variables** (from `.env`):
 ```
-LANGFUSE_PUBLIC_KEY=pk-lf-REDACTED
-LANGFUSE_SECRET_KEY=sk-lf-REDACTED
+LANGFUSE_PUBLIC_KEY=pk-lf-your-public-key
+LANGFUSE_SECRET_KEY=sk-lf-your-secret-key
 LANGFUSE_HOST=https://us.cloud.langfuse.com
 LANGFUSE_PROJECT_NAME=annie
 ENVIRONMENT=dev
@@ -26,7 +26,7 @@ ENVIRONMENT=dev
 - Your API keys link to your organization and project automatically
 
 ### 2. Select Project
-- Look for project matching your PUBLIC_KEY (pk-lf-5fac8afd...)
+- Look for project matching your PUBLIC_KEY
 - Project name should be visible in the Langfuse dashboard
 
 ### 3. View Traces
@@ -80,7 +80,7 @@ The following log markers help track Langfuse activity:
   - release: annie-dev
   - batch_size: 10
   - flush_interval: 1.0
-  - public_key_prefix: pk-lf-5fac...
+  - public_key_prefix: pk-lf-xxxx...
 ```
 
 ### Trace Events
@@ -186,7 +186,7 @@ Click on the `stream_request` trace to see the LLM generation:
 
 3. **Wrong Project Selected**
    - Each PUBLIC_KEY is tied to a specific project in Langfuse
-   - Navigate to the project that matches your pk-lf-5fac8afd... key
+   - Navigate to the project that matches your public key
 
 4. **Traces Filtered Out**
    - Remove all filters in Langfuse UI
@@ -264,8 +264,8 @@ If traces are still not visible after following this guide:
    from langfuse import Langfuse
 
    client = Langfuse(
-       public_key="pk-lf-REDACTED",
-       secret_key="sk-lf-REDACTED",
+       public_key="pk-lf-your-public-key",
+       secret_key="sk-lf-your-secret-key",
        host="https://us.cloud.langfuse.com"
    )
 

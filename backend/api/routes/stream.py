@@ -1510,6 +1510,19 @@ async def stream_response(conversation_id: str, request: Request):
         # Get user_id for this conversation (needed for memory tool calls)
         user_id = await state_manager.get_user_id_for_conversation(conversation_id)
 
+        # Verify conversation ownership if request has authenticated user
+        auth_user_id = getattr(request.state, "user_id", None)
+        if auth_user_id and user_id and auth_user_id != user_id:
+            logger.error(
+                "Stream access denied: authenticated user does not own conversation",
+                extra={
+                    "conversation_id": conversation_id,
+                    "auth_user_id": auth_user_id,
+                    "conversation_owner": user_id,
+                }
+            )
+            raise HTTPException(status_code=403, detail="Access denied")
+
         # Update trace with actual user_id (decorator handles trace management)
         if LANGFUSE_AVAILABLE and user_id:
             try:
