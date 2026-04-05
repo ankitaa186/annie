@@ -11,27 +11,19 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  # Lint job - enable after running `ruff format` on the codebase (118 files need reformatting)
-  # lint:
-  #   name: Lint
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - name: Checkout repository
-  #       uses: actions/checkout@v4
-  #
-  #     - name: Set up Python
-  #       uses: actions/setup-python@v5
-  #       with:
-  #         python-version: "3.12"
-  #
-  #     - name: Install ruff
-  #       run: pip install ruff==0.15.8
-  #
-  #     - name: Run linter
-  #       run: ruff check backend/ mcp_server/ telegram_bot/ autonomous/
-  #
-  #     - name: Check formatting
-  #       run: ruff format --check backend/ mcp_server/ telegram_bot/ autonomous/
+  gitleaks:
+    name: Secret Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   test:
     name: Run Tests
