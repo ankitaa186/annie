@@ -232,6 +232,10 @@ make shell SERVICE=backend # Debug shell access
 make clean              # Clean up Docker resources
 ```
 
+## Prerequisites
+
+> **Highly Recommended:** Set up [agentic-memories](https://github.com/ankitaa186/agentic-memories) before running Annie. It provides persistent memory, user profiles, and portfolio management. Annie will run without it, but conversations won't be remembered across sessions and many features (proactive messaging, profile-aware responses, portfolio tracking) will be unavailable.
+
 ## Environment Setup
 
 ### Quick Start
