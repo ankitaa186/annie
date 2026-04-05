@@ -5,7 +5,7 @@
 python-telegram-bot==20.7
 
 # Async HTTP client for backend communication
-aiohttp==3.9.1
+aiohttp>=3.11.0
 
 # Environment configuration
 python-dotenv==1.0.0
