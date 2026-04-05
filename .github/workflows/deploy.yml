@@ -18,9 +18,8 @@ jobs:
     steps:
       - name: Deploy to Specific Directory
         run: |
-          # 1. Go to your specific folder
-          # REPLACE THIS with your actual folder path (e.g., /home/ubuntu/annie)
-          cd /home/ankit/dev/annie
+          # 1. Go to the project folder (set DEPLOY_PATH in repo secrets or runner env)
+          cd "${DEPLOY_PATH:-$HOME/annie}"
 
           # 2. Update the code safely
           echo "Fetching latest code for branch: ${{ inputs.branch }}..."
@@ -34,7 +33,7 @@ jobs:
 
       - name: Healthcheck and Validation
         run: |
-          cd /home/ankit/dev/annie
+          cd "${DEPLOY_PATH:-$HOME/annie}"
 
           echo "Waiting for services to be ready..."
           sleep 10

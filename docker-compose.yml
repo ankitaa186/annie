@@ -7,7 +7,7 @@ services:
     container_name: annie-backend
     ports:
       - "${BACKEND_PORT:-8001}:8000"
-      - "${BACKEND_DEBUG_PORT:-5678}:5678"  # Debug port (dev only)
+      - "127.0.0.1:${BACKEND_DEBUG_PORT:-5678}:5678"  # Debug port (localhost only)
     environment:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - ENVIRONMENT=${ENVIRONMENT:-dev}
@@ -75,7 +75,7 @@ services:
     container_name: annie-mcp-server
     ports:
       - "${MCP_SERVER_PORT:-8002}:8002"
-      - "${MCP_SERVER_DEBUG_PORT:-5679}:5679"  # Debug port (dev only)
+      - "127.0.0.1:${MCP_SERVER_DEBUG_PORT:-5679}:5679"  # Debug port (localhost only)
     environment:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - ENVIRONMENT=${ENVIRONMENT:-dev}
@@ -121,7 +121,7 @@ services:
       dockerfile: Dockerfile
     container_name: annie-telegram-bot
     ports:
-      - "${TELEGRAM_BOT_DEBUG_PORT:-5680}:5680"  # Debug port (dev only)
+      - "127.0.0.1:${TELEGRAM_BOT_DEBUG_PORT:-5680}:5680"  # Debug port (localhost only)
     environment:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - ENVIRONMENT=${ENVIRONMENT:-dev}

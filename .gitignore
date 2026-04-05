@@ -174,8 +174,13 @@ cython_debug/
 .pypirc
 
 # Cursor
+.cursor/
 .cursorignore
 .cursorindexingignore
+
+# BMAD (internal project management)
+.bmad/
+.bmad-ephemeral/
 
 # Marimo
 marimo/_static/
