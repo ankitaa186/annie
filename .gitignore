@@ -193,3 +193,6 @@ Thumbs.db
 
 # Docker (handled separately by .dockerignore)
 # Docker-related files are excluded via .dockerignore
+
+
+.github-backup/
