@@ -138,7 +138,13 @@ ALWAYS defer to the user's preferences over these defaults.
 - Telegram does NOT support: <p>, <br>, <div>, <span>, <h1>-<h6>, <ul>, <li>, <table>, <hr>
 - For line breaks: use literal newlines, NOT <br>
 - For lists: plain text bullets or numbers — there are no list tags
-- In body text, escape literal HTML chars: & → &amp;, < → &lt;, > → &gt;
+- Write characters like &, <, > as RAW characters in body text (e.g. "5 < 10",
+  "Tom & Jerry"). Do NOT pre-escape them to &amp;, &lt;, &gt; — the bot handles
+  escaping automatically. Pre-escaping breaks rendering.
+- To talk ABOUT an HTML tag (e.g. mention the italic tag in conversation), wrap
+  the tag name in <code>: write "the <code>i</code> tag" or "the <code>&lt;i&gt;</code> tag"
+  using actual <code>...</code> formatting — do NOT write a bare <i> in the
+  middle of prose, or it will be interpreted as a real italic tag.
 - Do NOT escape punctuation like $, ., !, -, (, ) — write them normally
 - Do NOT use backslash escapes (\\$, \\., \\!) — those are MarkdownV2, not HTML
 - Optimize for mobile reading: short paragraphs, generous whitespace

@@ -194,6 +194,13 @@ def sanitize_telegram_html(text: str) -> str:
     if not text:
         return text
 
+    # Step 0: normalize escaping. Decode any HTML entities (named or numeric)
+    # so that pre-escaped LLM output (e.g. "&lt;i&gt;" or "&#60;i&#62;") and
+    # raw output ("<i>") are handled uniformly. This also makes the function
+    # idempotent — sanitize(sanitize(x)) == sanitize(x) — because re-running it
+    # decodes back to the same starting point before escaping again.
+    text = html.unescape(text)
+
     # Step 1: escape everything
     escaped = html.escape(text, quote=False)
 
@@ -339,6 +346,18 @@ def split_html_safely(text: str, max_length: int) -> tuple[str, str]:
     if last_lt > last_gt:
         # We're inside a tag. Walk back to before the <.
         split_point = last_lt
+
+    # Don't split inside an HTML entity (e.g. &amp; &lt; &gt; &#x27; &#60;).
+    # If split_point lands inside an unclosed entity, walk back to before the &.
+    last_amp = text.rfind("&", 0, split_point)
+    if last_amp != -1:
+        # Check if there's a ; after & but before split_point — if not, we're
+        # inside the entity. Entities are typically <= 8 chars (e.g. &nbsp; &#x27;)
+        # so we limit the search window.
+        entity_end = text.find(";", last_amp, min(last_amp + 10, split_point))
+        if entity_end == -1 and split_point - last_amp < 10:
+            # Inside an entity — walk back to before the &
+            split_point = last_amp
 
     first_part = text[:split_point]
     remainder = text[split_point:]

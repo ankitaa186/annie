@@ -582,6 +582,95 @@ class TestSplitHtmlSafely:
 
 
 # ============================================================================
+# Pre-escaped Tag Decoding (regression for production bug)
+# ============================================================================
+
+class TestPreEscapedTagDecoding:
+    """Production bug: LLM emitted &lt;i&gt; instead of <i>, sanitizer
+    double-escaped it, Telegram showed literal "<i>" to user."""
+
+    def test_predecoder_handles_escaped_italic(self):
+        """The exact production bug: &lt;i&gt; should be decoded to real <i>."""
+        result = sanitize_telegram_html("This is &lt;i&gt;italic&lt;/i&gt; text")
+        assert "<i>italic</i>" in result
+        # Most importantly: NO literal "<i>" or "&lt;" in the output
+        assert "&lt;i&gt;" not in result
+        assert "&amp;lt;" not in result
+
+    def test_predecoder_handles_escaped_bold(self):
+        result = sanitize_telegram_html("&lt;b&gt;bold text&lt;/b&gt;")
+        assert result == "<b>bold text</b>"
+
+    def test_predecoder_handles_escaped_link(self):
+        inp = '&lt;a href="https://example.com"&gt;click&lt;/a&gt;'
+        result = sanitize_telegram_html(inp)
+        assert '<a href="https://example.com">click</a>' == result
+
+    def test_predecoder_handles_escaped_code(self):
+        result = sanitize_telegram_html("Use &lt;code&gt;AAPL&lt;/code&gt; for tickers")
+        assert "<code>AAPL</code>" in result
+
+    def test_predecoder_leaves_disallowed_tags_escaped(self):
+        """Disallowed tags should stay escaped, not become real."""
+        result = sanitize_telegram_html("&lt;script&gt;alert(1)&lt;/script&gt;")
+        assert "<script>" not in result
+        assert "&lt;script&gt;" in result or "&amp;lt;script&amp;gt;" in result
+
+    def test_predecoder_handles_mixed_raw_and_escaped(self):
+        """LLM may mix both styles in the same response."""
+        result = sanitize_telegram_html("<b>raw</b> and &lt;i&gt;escaped&lt;/i&gt;")
+        assert "<b>raw</b>" in result
+        assert "<i>escaped</i>" in result
+
+    def test_predecoder_handles_nested_escaped_tags(self):
+        result = sanitize_telegram_html("&lt;b&gt;&lt;i&gt;both&lt;/i&gt;&lt;/b&gt;")
+        assert result == "<b><i>both</i></b>"
+
+    def test_predecoder_handles_pre_escaped_with_attribute_quotes(self):
+        """Attributes with quotes should be preserved through decoding."""
+        inp = '&lt;a href="https://example.com/path"&gt;link&lt;/a&gt;'
+        result = sanitize_telegram_html(inp)
+        assert 'href="https://example.com/path"' in result
+        assert '<a' in result
+        assert '</a>' in result
+
+    def test_predecoder_handles_blockquote(self):
+        result = sanitize_telegram_html("&lt;blockquote&gt;quoted&lt;/blockquote&gt;")
+        assert result == "<blockquote>quoted</blockquote>"
+
+    def test_predecoder_handles_spoiler(self):
+        result = sanitize_telegram_html("&lt;tg-spoiler&gt;hidden&lt;/tg-spoiler&gt;")
+        assert result == "<tg-spoiler>hidden</tg-spoiler>"
+
+    def test_predecoder_does_not_affect_naked_lt(self):
+        """A bare '5 < 10' should not be decoded as a tag."""
+        result = sanitize_telegram_html("5 < 10")
+        assert "&lt;" in result
+        # Should not produce any real tags
+        assert "<5" not in result and "<10" not in result
+
+    def test_sanitize_idempotent_on_escaped_tag(self):
+        """sanitize(sanitize(x)) should equal sanitize(x) for pre-escaped input."""
+        text = "&lt;b&gt;already escaped&lt;/b&gt;"
+        once = sanitize_telegram_html(text)
+        twice = sanitize_telegram_html(once)
+        assert once == twice
+        assert once == "<b>already escaped</b>"
+
+    def test_sanitize_idempotent_on_raw_lt(self):
+        """sanitize is idempotent for raw < character (regression for property test)."""
+        once = sanitize_telegram_html("5 < 10")
+        twice = sanitize_telegram_html(once)
+        assert once == twice
+
+    def test_sanitize_handles_numeric_entity(self):
+        """Numeric HTML entities should also be decoded properly."""
+        result = sanitize_telegram_html("&#60;b&#62;numeric&#60;/b&#62;")
+        # html.unescape decodes numeric entities, then sanitizer recognizes the tag
+        assert "<b>numeric</b>" == result
+
+
+# ============================================================================
 # Security
 # ============================================================================
 
