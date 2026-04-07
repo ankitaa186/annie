@@ -158,8 +158,87 @@ def clear_conversation_state(user_id: int):
         }
 
 
+# Telegram-supported HTML tags (https://core.telegram.org/bots/api#html-style)
+# Used by sanitize_telegram_html() to allow valid tags through escaping.
+_TELEGRAM_ALLOWED_TAGS = {
+    "b", "strong",
+    "i", "em",
+    "u", "ins",
+    "s", "strike", "del",
+    "code",
+    "pre",
+    "a",
+    "blockquote",
+    "tg-spoiler",
+}
+
+
+def sanitize_telegram_html(text: str) -> str:
+    """
+    Sanitize LLM-generated Telegram HTML to make it safe to send.
+
+    The LLM is instructed to emit Telegram-flavored HTML directly. This function:
+    1. Escapes all <, >, & characters in the input
+    2. Un-escapes only valid Telegram tags from the allowlist
+    3. Strips disallowed tags (their content is preserved as text)
+
+    This handles cases where the LLM forgets to escape literal <, >, & in body text,
+    or emits tags that Telegram doesn't support.
+
+    Args:
+        text: HTML text from LLM (may contain unescaped special chars or invalid tags)
+
+    Returns:
+        Sanitized HTML safe for Telegram parse_mode=HTML
+    """
+    if not text:
+        return text
+
+    # Step 1: escape everything
+    escaped = html.escape(text, quote=False)
+
+    # Step 2: un-escape valid Telegram tags
+    # Match escaped opening tags: &lt;tag&gt; or &lt;tag attr="..."&gt;
+    def unescape_open(match: re.Match) -> str:
+        tag = match.group(1).lower()
+        if tag not in _TELEGRAM_ALLOWED_TAGS:
+            return match.group(0)
+        attrs = match.group(2) or ""
+        # Un-escape attributes (need quotes back for href, class, etc.)
+        attrs = attrs.replace("&quot;", '"').replace("&#x27;", "'").replace("&amp;", "&")
+        return f"<{tag}{attrs}>"
+
+    def unescape_close(match: re.Match) -> str:
+        tag = match.group(1).lower()
+        if tag not in _TELEGRAM_ALLOWED_TAGS:
+            return match.group(0)
+        return f"</{tag}>"
+
+    # Opening tags with optional attributes
+    # Attribute pattern allows escaped entities (&amp;, &quot;, etc.) inside attribute
+    # values. Uses negative lookahead to avoid matching across other tag boundaries.
+    escaped = re.sub(
+        r'&lt;([a-zA-Z][a-zA-Z0-9-]*)((?:\s+(?:(?!&gt;|&lt;).)*?)?)&gt;',
+        unescape_open,
+        escaped,
+    )
+    # Closing tags
+    escaped = re.sub(
+        r'&lt;/([a-zA-Z][a-zA-Z0-9-]*)&gt;',
+        unescape_close,
+        escaped,
+    )
+
+    return escaped
+
+
 def markdown_to_telegram_html(text: str) -> str:
     """
+    DEPRECATED: Use sanitize_telegram_html() instead.
+
+    Legacy converter for markdown → Telegram HTML. Kept for backwards compatibility
+    in case any LLM still emits markdown despite the HTML-only system prompt.
+
     Convert markdown from LLM output to Telegram-safe HTML.
 
     Handles common markdown patterns:
@@ -233,6 +312,14 @@ def markdown_to_telegram_html(text: str) -> str:
     text = text.replace(r'\]', ']')
     text = text.replace(r'\(', '(')
     text = text.replace(r'\)', ')')
+    text = text.replace(r'\$', '$')
+    text = text.replace(r'\+', '+')
+    text = text.replace(r'\=', '=')
+    text = text.replace(r'\|', '|')
+    text = text.replace(r'\{', '{')
+    text = text.replace(r'\}', '}')
+    text = text.replace(r'\>', '>')
+    text = text.replace(r'\~', '~')
 
     return text
 
@@ -554,7 +641,7 @@ async def stream_response_to_telegram(
 
                     # Edit status message with first token (seamless transition)
                     try:
-                        html_text = markdown_to_telegram_html(current_text)
+                        html_text = sanitize_telegram_html(current_text)
                         await context.bot.edit_message_text(
                             chat_id=chat_id,
                             message_id=status_message_id,
@@ -581,7 +668,7 @@ async def stream_response_to_telegram(
                             extra={"user_id": user_id, "error": str(e)}
                         )
                         # Fallback: send new message if edit fails
-                        html_text = markdown_to_telegram_html(current_text)
+                        html_text = sanitize_telegram_html(current_text)
                         sent_messages.append(await message.reply_text(html_text, parse_mode=ParseMode.HTML))
                         last_update_time = current_time_ms
                     continue
@@ -599,7 +686,7 @@ async def stream_response_to_telegram(
                     # Send current message part as final edit
                     current_part = current_text[:split_point]
                     try:
-                        html_part = markdown_to_telegram_html(current_part)
+                        html_part = sanitize_telegram_html(current_part)
                         # Edit using message_id from sent_messages
                         await context.bot.edit_message_text(
                             chat_id=chat_id,
@@ -612,7 +699,7 @@ async def stream_response_to_telegram(
 
                     # Start new message with remainder
                     remaining_text = current_text[split_point:]
-                    html_remaining = markdown_to_telegram_html(remaining_text)
+                    html_remaining = sanitize_telegram_html(remaining_text)
                     new_message = await message.reply_text(html_remaining, parse_mode=ParseMode.HTML)
                     sent_messages.append(new_message.message_id)
 
@@ -654,7 +741,7 @@ async def stream_response_to_telegram(
                 if should_update and not is_rate_limited:
                     # Edit last message (time-throttled) with HTML formatting
                     try:
-                        html_text = markdown_to_telegram_html(current_text)
+                        html_text = sanitize_telegram_html(current_text)
                         msg_id = sent_messages[-1] if isinstance(sent_messages[-1], int) else sent_messages[-1].message_id
                         await context.bot.edit_message_text(
                             chat_id=chat_id,
@@ -1005,7 +1092,7 @@ async def stream_response_to_telegram(
                     f"Attempting final edit (attempt {attempt + 1}, length {len(final_text)})",
                     extra={"user_id": user_id, "final_length": len(final_text)}
                 )
-                final_html = markdown_to_telegram_html(final_text)
+                final_html = sanitize_telegram_html(final_text)
                 msg_id = sent_messages[-1] if isinstance(sent_messages[-1], int) else sent_messages[-1].message_id
                 await asyncio.wait_for(
                     context.bot.edit_message_text(

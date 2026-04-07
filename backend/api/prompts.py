@@ -82,14 +82,46 @@ Remember: You're not just an assistant—you're the hyper-intelligent, witty, sl
 
 # Platform-specific formatting instructions
 TELEGRAM_FORMAT_INSTRUCTIONS = """
-Format your responses using Telegram MarkdownV2 syntax:
-- Use *bold* for emphasis
-- Use _italic_ for secondary emphasis
-- Use `code` for inline code
-- Use ```language\\ncode\\n``` for code blocks
-- Escape special characters (\\_ \\* \\[ \\] \\( \\) \\~ \\` \\> \\# \\+ \\- \\= \\| \\{ \\} \\. \\!) outside formatting tags
+Format your responses using Telegram-flavored HTML (NOT Markdown, NOT MarkdownV2).
+Use the full breadth of formatting available to make responses visually scannable
+and beautiful. The tags below are tools — reach for them whenever they help the
+reader; never use them for their own sake.
 
-Keep responses clear, well-structured, and easy to read on mobile.
+═══════════════════════════════════════════════════════════
+ALLOWED TAGS (these are the ONLY tags Telegram supports)
+═══════════════════════════════════════════════════════════
+- <b>bold</b>          → key facts, names, totals, the most important phrase
+- <i>italic</i>        → asides, nuance, soft emphasis
+- <u>underline</u>     → callouts that aren't quite bold-worthy
+- <s>strikethrough</s> → corrections, crossed-out thoughts
+- <code>inline</code>  → tickers, file paths, commands, literal values (e.g. <code>AAPL</code>, <code>/start</code>)
+- <pre>code block</pre> or <pre><code class="language-python">typed code</code></pre>
+- <a href="https://...">link text</a>
+- <blockquote>quoted text</blockquote>     → user's words, sources, pulled-out lines
+- <tg-spoiler>hidden</tg-spoiler>          → hidden content the reader can tap to reveal
+
+Nesting works: <b><i>bold italic</i></b>, <a href="..."><b>bold link</b></a>
+
+═══════════════════════════════════════════════════════════
+LAYOUT TOOLS (no HTML — just text conventions Telegram renders)
+═══════════════════════════════════════════════════════════
+- Headers: <b>Header</b> on its own line, blank line after
+- Bullets: "• item" or "◦ sub-item" or "▸ item"
+- Numbered lists: "1. item" / "2. item"
+- Horizontal separators: "━━━━━━━━━━━━" or "···" on their own line
+- Whitespace: blank lines between distinct sections — let responses breathe
+- Emoji: useful as visual anchors for sections (one per section is plenty)
+
+═══════════════════════════════════════════════════════════
+HARD RULES — non-negotiable
+═══════════════════════════════════════════════════════════
+- Telegram does NOT support: <p>, <br>, <div>, <span>, <h1>-<h6>, <ul>, <li>, <table>, <hr>
+- For line breaks: use literal newlines, NOT <br>
+- For lists: plain text bullets or numbers — there are no list tags
+- In body text, escape literal HTML chars: & → &amp;, < → &lt;, > → &gt;
+- Do NOT escape punctuation like $, ., !, -, (, ) — write them normally
+- Do NOT use backslash escapes (\\$, \\., \\!) — those are MarkdownV2, not HTML
+- Optimize for mobile reading: short paragraphs, generous whitespace
 """
 
 WEB_FORMAT_INSTRUCTIONS = """

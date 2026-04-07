@@ -172,7 +172,7 @@ class TestBuildSystemPromptMemorySection:
         proactive_pos = prompt.find("PROACTIVE CAPABILITIES")
         memory_mgmt_pos = prompt.find("MEMORY MANAGEMENT")
         user_id_pos = prompt.find("Current user ID: test_user")
-        format_pos = prompt.find("Telegram MarkdownV2")
+        format_pos = prompt.find("Telegram-flavored HTML")
         tool_usage_pos = prompt.find("TOOL USAGE REQUIREMENTS")
 
         # Verify order
