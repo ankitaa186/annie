@@ -75,6 +75,7 @@ async def store_memory_tool_handler(
     layer: str = "semantic",
     persona_tags: list = None,
     metadata: dict = None,
+    ttl_seconds: int = None,
     # Episodic fields
     event_timestamp: str = None,
     location: str = None,
@@ -101,6 +102,10 @@ async def store_memory_tool_handler(
         layer: Memory layer - "short-term", "semantic", "long-term" (default: "semantic")
         persona_tags: Tags for memory categorization (max 10)
         metadata: Optional metadata (source, conversation_id, trigger)
+        ttl_seconds: Optional custom expiration in seconds. ONLY meaningful when
+            layer="short-term"; ignored otherwise. If omitted, short-term records
+            use the server-side default (~60 days). Use this when you want a
+            shorter window than the default (e.g. 86400 = 1 day, 604800 = 1 week).
         event_timestamp: When the event occurred (ISO 8601) - for episodic memories
         location: Where it happened - for episodic memories
         participants: Who was involved - for episodic memories
@@ -145,6 +150,11 @@ async def store_memory_tool_handler(
         "persona_tags": persona_tags,
         "metadata": merged_metadata
     }
+
+    # Per-request TTL override (only meaningful for short-term records).
+    # The agentic-memories backend ignores this field for non-short-term layers.
+    if ttl_seconds is not None and layer == "short-term":
+        payload["ttl_seconds"] = ttl_seconds
 
     # Add optional episodic fields if provided
     if event_timestamp is not None:
@@ -350,10 +360,23 @@ IMPORTANT: Only use this tool for CRITICAL information that:
 
 DO NOT use for routine information - background extraction handles that automatically.
 
+LAYER SELECTION (controls how long the memory lives):
+- "semantic"   → DEFAULT. Persists forever. Facts, preferences, permanent traits.
+- "long-term"  → Persists forever. Rare, deeply important life facts.
+- "short-term" → Auto-expires (default ~60 days, override via ttl_seconds).
+                 Use for transient context the user may still want to recall
+                 within weeks but not forever: recent stock quotes, daily reports,
+                 a current project's working state, this-week's schedule notes.
+                 Pass ttl_seconds for finer control:
+                   86400   = 1 day    (a single quote / OTP context)
+                   604800  = 1 week   (this week's plan, recent argument)
+                   2592000 = 30 days  (recent project status)
+
 Examples of good uses:
-- "User is severely allergic to shellfish - carries EpiPen"
-- "User's risk tolerance is conservative - never recommend high-risk investments"
-- "User's mother passed away in March 2024 - sensitive topic"
+- "User is severely allergic to shellfish - carries EpiPen"            (semantic)
+- "User's risk tolerance is conservative - never recommend high-risk"  (semantic)
+- "User's mother passed away in March 2024 - sensitive topic"          (long-term)
+- "INTU last close was $381.42 on 2026-04-07"                           (short-term, ttl_seconds=604800)
 
 Examples of bad uses (handled by background extraction):
 - Daily activities or routine conversations
@@ -381,9 +404,14 @@ Examples of bad uses (handled by background extraction):
             },
             "layer": {
                 "type": "string",
-                "description": "Memory layer for storage. Default: 'semantic' (persistent).",
+                "description": "Memory layer. 'semantic' and 'long-term' persist forever. 'short-term' auto-expires (default ~60 days, override via ttl_seconds). Default: 'semantic'.",
                 "enum": ["short-term", "semantic", "long-term"],
                 "default": "semantic"
+            },
+            "ttl_seconds": {
+                "type": "integer",
+                "description": "Custom expiration in seconds. ONLY meaningful when layer='short-term'; ignored otherwise. Omit to use the server default (~60 days). Common values: 86400 (1 day), 604800 (1 week), 2592000 (30 days).",
+                "minimum": 1
             },
             "persona_tags": {
                 "type": "array",
