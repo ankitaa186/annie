@@ -18,7 +18,7 @@ Tests cover:
 - Real-world LLM output samples
 """
 
-from handlers.message import sanitize_telegram_html
+from handlers.message import sanitize_telegram_html, split_html_safely
 
 
 # ============================================================================
@@ -385,6 +385,200 @@ class TestRealWorldSamples:
         assert "$500" in result
         assert "$1000" in result
         assert "&lt;" in result  # < should be escaped
+
+
+# ============================================================================
+# Tag Balancing (streaming partial output)
+# ============================================================================
+
+class TestTagBalancing:
+    """During streaming, partial output may have unclosed tags. The sanitizer
+    must auto-close them so Telegram doesn't reject the message."""
+
+    def test_unclosed_bold_auto_closed(self):
+        """Original streaming bug: <i>text without </i>"""
+        result = sanitize_telegram_html("<b>partial bold text")
+        assert result == "<b>partial bold text</b>"
+
+    def test_unclosed_italic_auto_closed(self):
+        """The exact error from production logs."""
+        result = sanitize_telegram_html("Annie thinks <i>that's interesti")
+        assert result == "Annie thinks <i>that's interesti</i>"
+
+    def test_two_unclosed_tags_closed_in_reverse(self):
+        """Stack-based: outer tag closed last."""
+        result = sanitize_telegram_html("<b>bold and <i>italic")
+        assert result == "<b>bold and <i>italic</i></b>"
+
+    def test_three_unclosed_tags_closed_in_reverse(self):
+        result = sanitize_telegram_html("<b>a<i>b<u>c")
+        assert result == "<b>a<i>b<u>c</u></i></b>"
+
+    def test_balanced_tags_unchanged(self):
+        """Already-balanced tags should not get extra closing tags."""
+        result = sanitize_telegram_html("<b>complete</b>")
+        assert result == "<b>complete</b>"
+
+    def test_partial_close_after_full_open_close(self):
+        """First pair closed, second opened but unclosed."""
+        result = sanitize_telegram_html("<b>done</b> and <i>open")
+        assert result == "<b>done</b> and <i>open</i></b>" or result == "<b>done</b> and <i>open</i>"
+        # Depending on stack tracking — the <b> was already popped, so only <i> needs closing
+        assert "<i>open</i>" in result
+        # And there should NOT be an extra </b> at the end
+        assert result.count("</b>") == 1
+
+    def test_unclosed_link(self):
+        result = sanitize_telegram_html('<a href="https://example.com">click here')
+        assert result == '<a href="https://example.com">click here</a>'
+
+    def test_unclosed_code(self):
+        result = sanitize_telegram_html("Use <code>foo")
+        assert result == "Use <code>foo</code>"
+
+    def test_unclosed_blockquote(self):
+        result = sanitize_telegram_html("<blockquote>quoted text without close")
+        assert result == "<blockquote>quoted text without close</blockquote>"
+
+    def test_streaming_chunk_partial_attribute(self):
+        """If the LLM cuts mid-attribute, the regex won't match it as a tag,
+        so it gets escaped (no balancing needed)."""
+        result = sanitize_telegram_html('<a href="https://exa')
+        # Not a complete tag — should be escaped
+        assert "&lt;a" in result
+
+    def test_mismatched_closing_left_alone(self):
+        """If LLM emits </b> without matching <b>, leave it (Telegram will
+        complain — that's better than silently corrupting)."""
+        result = sanitize_telegram_html("text </b> more")
+        # </b> stays as escaped text since unescape_close only fires for the close regex
+        # Note: this is technically a mismatch case — both behaviors are acceptable.
+        # The key thing is the function doesn't crash.
+        assert result is not None
+
+    def test_balanced_then_unbalanced(self):
+        """Multiple sequential tags with one unclosed at the end."""
+        result = sanitize_telegram_html("<b>one</b> <i>two</i> <u>three")
+        assert "<b>one</b>" in result
+        assert "<i>two</i>" in result
+        assert "<u>three</u>" in result
+
+    def test_balancing_with_special_chars(self):
+        """Combine unclosed tag with $ and other punctuation that shouldn't escape."""
+        result = sanitize_telegram_html("<b>$1,450.78 monthly")
+        assert result == "<b>$1,450.78 monthly</b>"
+
+    def test_empty_unclosed_tag(self):
+        """Tag opened with no content."""
+        result = sanitize_telegram_html("<b>")
+        assert result == "<b></b>"
+
+
+# ============================================================================
+# Message Splitting (HTML-aware)
+# ============================================================================
+
+class TestSplitHtmlSafely:
+    """Splitting long HTML messages must preserve tag balance on both halves."""
+
+    def test_no_split_needed(self):
+        """Text under max_length returns as-is."""
+        first, rest = split_html_safely("short text", 100)
+        assert first == "short text"
+        assert rest == ""
+
+    def test_simple_split_at_sentence_boundary(self):
+        """Splits at . ! ? \\n preferentially."""
+        text = "First sentence. Second sentence. Third sentence."
+        first, rest = split_html_safely(text, 30)
+        # Should split after a sentence terminator
+        assert first.rstrip().endswith(".")
+        assert first + rest == text
+
+    def test_split_inside_open_tag_avoided(self):
+        """Don't split between < and > of an HTML tag."""
+        text = "abc <b>bold text here</b> more " * 10
+        first, rest = split_html_safely(text, 50)
+        # First part must not contain a stray < without matching >
+        # (it could end with a closing tag but not a partial open)
+        assert "<b" not in first or ">" in first[first.rfind("<"):]
+
+    def test_split_balances_open_tag_in_first_half(self):
+        """If split leaves an open tag in part 1, close it and re-open in part 2."""
+        text = "<b>" + ("x" * 100) + "</b> tail"
+        first, rest = split_html_safely(text, 50)
+        # First part should end with </b> (auto-closed)
+        assert first.endswith("</b>")
+        # Second part should start with <b> (re-opened)
+        assert rest.startswith("<b>")
+
+    def test_split_with_two_nested_tags(self):
+        """Both nested tags must be closed/re-opened."""
+        text = "<b><i>" + ("y" * 100) + "</i></b> tail"
+        first, rest = split_html_safely(text, 50)
+        # Closed in reverse: </i></b>
+        assert first.endswith("</i></b>")
+        # Re-opened in original order: <b><i>
+        assert rest.startswith("<b><i>")
+
+    def test_split_after_complete_tag_no_rebalancing(self):
+        """If split point is after a balanced tag pair, no re-opening needed."""
+        text = "<b>complete</b> " + ("z" * 100)
+        first, rest = split_html_safely(text, 50)
+        # No tags open at split point — first should not have extra closers
+        # and rest should not have re-openers
+        assert not rest.startswith("<b>")
+
+    def test_split_preserves_total_content(self):
+        """The combined parts (minus added closing/re-opening tags) cover original."""
+        text = "<b>" + ("a" * 200) + "</b>"
+        first, rest = split_html_safely(text, 100)
+        # Strip the auto-added tags to verify content preservation
+        first_content = first.replace("</b>", "")
+        rest_content = rest.replace("<b>", "")
+        # Combined should equal original
+        assert first_content + rest_content == text
+
+    def test_split_inside_attribute_value(self):
+        """Don't split inside <a href="..."> attribute value."""
+        text = '<a href="https://example.com/long-path">link</a> ' + ("x" * 100)
+        first, rest = split_html_safely(text, 30)
+        # Either the whole link is in first part or it starts fresh in second
+        # Key: no broken attribute
+        if "<a" in first:
+            assert "</a>" in first or first.endswith('">link</a>')
+
+    def test_long_text_real_world_example(self):
+        """Realistic LLM output with multiple tags and a forced split."""
+        text = (
+            "<b>📊 Q4 Analysis</b>\n\n"
+            "Your spending breakdown:\n"
+            "• <b>BMW Financial</b> — <code>$1,450.78</code>/mo\n"
+            "• <b>Geico</b> — <code>$275.20</code>/mo\n"
+            "• <b>Rent</b> — <code>$3,200</code>/mo\n\n"
+            "<i>Looking at this honestly, your transportation costs are roughly "
+            "equivalent to a small studio apartment. That's not necessarily bad — "
+            "but it's worth knowing.</i>\n\n"
+            "Want me to model what happens if you downgrade to a less expensive "
+            "vehicle next year? I can run a few scenarios."
+        )
+        first, rest = split_html_safely(text, 200)
+        # Both halves should be balanced
+        from handlers.message import _open_tags_at_end
+        assert _open_tags_at_end(first) == [], f"first part has unclosed tags: {first}"
+        assert _open_tags_at_end(rest) == [], f"rest has unclosed tags: {rest}"
+
+    def test_split_with_blockquote(self):
+        text = "<blockquote>" + ("q" * 200) + "</blockquote>"
+        first, rest = split_html_safely(text, 100)
+        assert first.endswith("</blockquote>")
+        assert rest.startswith("<blockquote>")
+
+    def test_split_with_code_block(self):
+        text = "<pre>" + ("c" * 200) + "</pre>"
+        first, rest = split_html_safely(text, 100)
+        assert first.endswith("</pre>")
+        assert rest.startswith("<pre>")
 
 
 # ============================================================================

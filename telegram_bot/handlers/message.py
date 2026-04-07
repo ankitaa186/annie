@@ -229,7 +229,131 @@ def sanitize_telegram_html(text: str) -> str:
         escaped,
     )
 
-    return escaped
+    # Step 3: balance any unclosed tags. During streaming, partial output may
+    # contain an open tag whose closing tag hasn't streamed in yet (e.g. "<i>text").
+    # Telegram rejects unbalanced HTML with "can't find end tag" errors. Append
+    # the missing closing tags so each intermediate edit is valid; the next
+    # streamed chunk will replace the whole message anyway.
+    return _balance_telegram_tags(escaped)
+
+
+def _balance_telegram_tags(text: str) -> str:
+    """
+    Append closing tags for any unclosed Telegram tags in the input.
+
+    Walks the text and tracks open tags in a stack. At the end, appends
+    closing tags in reverse order for any tags that are still open. This
+    ensures the output is always balanced HTML, which Telegram requires.
+
+    Used to handle the streaming case where the LLM's output may be cut
+    mid-tag (e.g. "<b>partial<i>text" would be balanced to
+    "<b>partial<i>text</i></b>").
+
+    Mismatched closing tags (e.g. "<b><i>x</b>") are left as-is rather than
+    silently corrected — Telegram will report the parse error so we can debug.
+
+    Args:
+        text: Text containing real HTML tags (after sanitization)
+
+    Returns:
+        Text with closing tags appended for any unclosed open tags
+    """
+    if not text:
+        return text
+
+    stack = _open_tags_at_end(text)
+
+    # Append closing tags for any still-open tags, in reverse (LIFO) order
+    if stack:
+        text = text + "".join(f"</{t}>" for t in reversed(stack))
+
+    return text
+
+
+# Match real (unescaped) tags: <tag>, </tag>, <tag attr="...">
+_TAG_PATTERN = re.compile(r'<(/?)([a-zA-Z][a-zA-Z0-9-]*)((?:\s[^>]*)?)>')
+
+
+def _open_tags_at_end(text: str) -> list[str]:
+    """
+    Walk text and return the stack of Telegram tags still open at the end.
+
+    Used by:
+    - _balance_telegram_tags() to know what to close
+    - split_html_safely() to know what to re-open in the next chunk
+
+    Returns the LIFO stack of open tag names (with attributes stripped),
+    e.g. ["b", "i"] means <b><i> is still open and needs </i></b> to balance.
+    """
+    stack: list[str] = []
+    for match in _TAG_PATTERN.finditer(text):
+        is_close = bool(match.group(1))
+        tag = match.group(2).lower()
+        if tag not in _TELEGRAM_ALLOWED_TAGS:
+            continue
+        if is_close:
+            if stack and stack[-1] == tag:
+                stack.pop()
+        else:
+            stack.append(tag)
+    return stack
+
+
+def split_html_safely(text: str, max_length: int) -> tuple[str, str]:
+    """
+    Split HTML text into two parts at a safe boundary, preserving tag balance.
+
+    Telegram has a 4096-char per-message limit. When responses exceed this,
+    we must split — but a naive split can:
+      1. Cut inside a tag (e.g. between "<b" and ">"), or
+      2. Cut between an open tag and its close (e.g. "<b>foo" | "bar</b>"),
+         leaving both halves unbalanced.
+
+    This function:
+      1. Picks a split point at a sentence boundary (.!?\\n) near the limit
+      2. Avoids splitting inside an HTML tag
+      3. Closes any open tags at the end of part 1
+      4. Re-opens those same tags at the start of part 2
+
+    Args:
+        text: HTML text to split
+        max_length: Maximum length for the first part
+
+    Returns:
+        (first_part, remainder) — both safe to send as standalone HTML messages
+    """
+    if len(text) <= max_length:
+        return text, ""
+
+    # Find a sentence boundary near max_length
+    split_point = max_length
+    search_start = max(0, max_length - 200)
+    for i in range(search_start, min(max_length, len(text))):
+        if text[i] in ".!?\n":
+            split_point = i + 1
+
+    # Don't split inside a tag: if split_point lands between < and >, walk back
+    # to before the < (or forward past the > if it's closer).
+    last_lt = text.rfind("<", 0, split_point)
+    last_gt = text.rfind(">", 0, split_point)
+    if last_lt > last_gt:
+        # We're inside a tag. Walk back to before the <.
+        split_point = last_lt
+
+    first_part = text[:split_point]
+    remainder = text[split_point:]
+
+    # Find tags still open at the end of first_part — these need closing
+    # in part 1 and re-opening at the start of part 2.
+    open_stack = _open_tags_at_end(first_part)
+
+    if open_stack:
+        # Close in reverse order at end of part 1
+        first_part = first_part + "".join(f"</{t}>" for t in reversed(open_stack))
+        # Re-open in original order at start of part 2
+        remainder = "".join(f"<{t}>" for t in open_stack) + remainder
+
+    return first_part, remainder
 
 
 def markdown_to_telegram_html(text: str) -> str:
@@ -675,32 +799,27 @@ async def stream_response_to_telegram(
 
                 # Check if we need to split into a new message
                 if len(current_text) > MAX_MESSAGE_LENGTH and len(sent_messages) > 0:
-                    # Current message is getting too long, split it
-                    # Find a good break point (end of sentence near the limit)
-                    split_point = MAX_MESSAGE_LENGTH
-                    for i in range(MAX_MESSAGE_LENGTH - 200, min(MAX_MESSAGE_LENGTH, len(current_text))):
-                        if current_text[i] in '.!?\n':
-                            split_point = i + 1
-                            break
+                    # First sanitize the full text, THEN split. This way the
+                    # splitter sees real (un-escaped) tags and can balance them.
+                    sanitized_full = sanitize_telegram_html(current_text)
+                    current_part, remaining_text = split_html_safely(
+                        sanitized_full, MAX_MESSAGE_LENGTH
+                    )
 
                     # Send current message part as final edit
-                    current_part = current_text[:split_point]
                     try:
-                        html_part = sanitize_telegram_html(current_part)
                         # Edit using message_id from sent_messages
                         await context.bot.edit_message_text(
                             chat_id=chat_id,
                             message_id=sent_messages[-1] if isinstance(sent_messages[-1], int) else sent_messages[-1].message_id,
-                            text=html_part,
+                            text=current_part,
                             parse_mode=ParseMode.HTML
                         )
                     except Exception:
                         pass  # Ignore edit failures on split
 
-                    # Start new message with remainder
-                    remaining_text = current_text[split_point:]
-                    html_remaining = sanitize_telegram_html(remaining_text)
-                    new_message = await message.reply_text(html_remaining, parse_mode=ParseMode.HTML)
+                    # Start new message with remainder (already sanitized + balanced)
+                    new_message = await message.reply_text(remaining_text, parse_mode=ParseMode.HTML)
                     sent_messages.append(new_message.message_id)
 
                     # Reset buffer to only contain the new message's text
@@ -714,7 +833,7 @@ async def stream_response_to_telegram(
                         extra={
                             "user_id": user_id,
                             "message_number": len(sent_messages),
-                            "split_at": split_point,
+                            "split_length": len(current_part),
                             "event": "message_split"
                         }
                     )
