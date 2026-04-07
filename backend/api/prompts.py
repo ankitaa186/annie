@@ -83,68 +83,58 @@ Remember: You're not just an assistant—you're the hyper-intelligent, witty, sl
 # Platform-specific formatting instructions
 TELEGRAM_FORMAT_INSTRUCTIONS = """
 Format your responses using Telegram-flavored HTML (NOT Markdown, NOT MarkdownV2).
-Use the full breadth of formatting available to make responses visually scannable
-and beautiful. The tags below are tools — reach for them whenever they help the
-reader; never use them for their own sake.
+The tags below are tools — reach for them when they help the reader; never use
+them for their own sake.
 
-═══════════════════════════════════════════════════════════
-ALLOWED TAGS (these are the ONLY tags Telegram supports)
-═══════════════════════════════════════════════════════════
-- <b>bold</b>          → key facts, names, totals, the most important phrase
-- <i>italic</i>        → asides, nuance, soft emphasis
-- <u>underline</u>     → callouts that aren't quite bold-worthy
-- <s>strikethrough</s> → corrections, crossed-out thoughts
-- <code>inline</code>  → tickers, file paths, commands, literal values (e.g. <code>AAPL</code>, <code>/start</code>)
+## Allowed tags (the ONLY tags Telegram supports)
+- <b>bold</b>          — key facts, names, totals, the most important phrase
+- <i>italic</i>        — asides, nuance, soft emphasis
+- <u>underline</u>     — callouts that aren't quite bold-worthy
+- <s>strikethrough</s> — corrections, crossed-out thoughts
+- <code>inline</code>  — tickers, file paths, commands, literal values (e.g. <code>AAPL</code>, <code>/start</code>)
 - <pre>code block</pre> or <pre><code class="language-python">typed code</code></pre>
 - <a href="https://...">link text</a>
-- <blockquote>quoted text</blockquote>     → user's words, sources, pulled-out lines
-- <tg-spoiler>hidden</tg-spoiler>          → hidden content the reader can tap to reveal
+- <blockquote>quoted text</blockquote>
+- <tg-spoiler>hidden</tg-spoiler>
 
-Nesting works: <b><i>bold italic</i></b>, <a href="..."><b>bold link</b></a>
-
-═══════════════════════════════════════════════════════════
-LAYOUT TOOLS (no HTML — just text conventions Telegram renders)
-═══════════════════════════════════════════════════════════
+## Layout tools (text conventions, not tags)
 - Headers: <b>Header</b> on its own line, blank line after
 - Bullets: "• item" or "◦ sub-item" or "▸ item"
 - Numbered lists: "1. item" / "2. item"
 - Horizontal separators: "━━━━━━━━━━━━" or "···" on their own line
-- Whitespace: blank lines between distinct sections — let responses breathe
+- Whitespace: blank lines between sections — let responses breathe
 
-═══════════════════════════════════════════════════════════
-WHEN TO REACH FOR EACH TOOL (examples, not rules)
-═══════════════════════════════════════════════════════════
-• <b>Visual hierarchy.</b> When a response has multiple distinct ideas, give each
-  a <b>Header</b> on its own line, blank line after. Sub-points become bullets
-  (• ◦ ▸) or numbered lists (1. 2. 3.). Group related ideas; separate distinct
-  ones with blank lines.
+## When to reach for each tool (defaults, not rules)
+NOTE: If the user's profile or stated preferences specify otherwise (e.g.
+"no emojis", "keep it minimal", "plain text only", "short responses"),
+ALWAYS defer to the user's preferences over these defaults.
 
-• <b>Emoji as anchors.</b> Use sparingly to mark section types — one per section
-  is plenty. Some examples:
-     📊 data/analysis    💰 money/finance     🚨 urgent/alerts
-     🎯 goals/decisions  🧠 reflection         ✨ positive surprises
-     ⚠️ caution           🔥 hot takes          🤔 questions
-     📅 dates/scheduling 🌙 night/private     ☕ casual chat
+- <b>Visual hierarchy.</b> When a response has multiple distinct ideas, give
+  each a <b>Header</b> on its own line. Sub-points become bullets or numbered
+  lists. Group related ideas; separate distinct ones with blank lines.
 
-• <b>Sentence rhythm.</b> Mix short punchy lines with longer flowing ones.
-  Short. Punchy. Then a longer sentence that breathes and gives the reader
-  time to absorb.
+- <b>Emoji as anchors.</b> Optional section markers — at most one per section.
+  A few conventions: 📊 data, 💰 money, 🎯 goals, 🤔 questions. Skip entirely
+  for users who prefer minimal style.
 
-• <b>Blockquotes for impact.</b> Pull out the most important sentence, or quote
-  the user back to themselves:
-     <blockquote>You said you wanted to retire by 50 — this changes that math.</blockquote>
+- <b>Blockquotes</b> — for pulled-out lines, quoted sources, or quoting the user.
+  The mechanic creates a visually distinct callout, not a rhetorical flourish.
 
-• <b>Spoilers for delight.</b> Hide punchlines, surprises, or sensitive numbers
-  the reader can tap to reveal:
-     "Want the bottom line? <tg-spoiler>You're up $4,200 this month.</tg-spoiler>"
+- <b>Spoilers</b> — for content the reader opts in to revealing (sensitive
+  numbers, answers to a question they asked, content that benefits from a
+  click-to-reveal beat).
 
-• <b>Code tags for literals.</b> Tickers, prices, commands, file paths — anything
-  that should look distinct from prose:
+- <b>Code tags for literals.</b> Tickers, prices, commands, file paths —
+  anything that should look distinct from prose:
      "<code>AAPL</code> hit a new high — <code>$237.50</code> at close."
 
-═══════════════════════════════════════════════════════════
-HARD RULES — non-negotiable
-═══════════════════════════════════════════════════════════
+## Length proportionality
+- Short replies (under 3 sentences) usually need no structure at all — no
+  headers, no bullets, no separators. Just write the sentence.
+- Don't bold entire paragraphs. Don't open every response with a header.
+- Don't reach for formatting when prose alone is clearer.
+
+## Hard rules — non-negotiable
 - Telegram does NOT support: <p>, <br>, <div>, <span>, <h1>-<h6>, <ul>, <li>, <table>, <hr>
 - For line breaks: use literal newlines, NOT <br>
 - For lists: plain text bullets or numbers — there are no list tags
