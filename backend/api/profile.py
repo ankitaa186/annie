@@ -38,6 +38,31 @@ except ImportError:
 logger = get_logger(__name__)
 
 
+# Top-level keys in get_user_profile tool result that are NOT category data.
+# Everything else is treated as a category and passed through to the cache.
+_PROFILE_NON_CATEGORY_KEYS = frozenset({"status", "user_id", "completeness"})
+
+
+def _is_valid_profile_response(result: Any) -> bool:
+    """Sanity-check a get_user_profile tool result before caching it.
+
+    Catches malformed upstream responses early so we don't poison the cache or
+    crash format_profile_for_prompt downstream. Allows new top-level categories
+    to flow through unchanged — the only requirement is that anything that
+    isn't `status` / `user_id` / `completeness` must be a dict.
+    """
+    if not isinstance(result, dict):
+        return False
+    if result.get("status") != "success":
+        return False
+    for key, value in result.items():
+        if key in _PROFILE_NON_CATEGORY_KEYS:
+            continue
+        if not isinstance(value, dict):
+            return False
+    return True
+
+
 class ProfileError(Exception):
     """Base exception for profile management errors."""
     pass
@@ -246,7 +271,7 @@ class ProfileManager:
         # Cache miss — fetch from API and refresh cache
         try:
             fresh = await self.fetch_profile_fresh(user_id)
-            if fresh and fresh.get("completeness_pct", fresh.get("completeness", 0)) > 0:
+            if fresh and fresh.get("completeness", 0) > 0:
                 return fresh
         except Exception as e:
             logger.warning(
@@ -287,20 +312,16 @@ class ProfileManager:
 
             duration_ms = int((time.time() - start_time) * 1000)
 
-            # Check if tool call succeeded
-            if result.get("status") == "success":
-                # Build profile object for caching (all 8 categories)
+            # Check if tool call succeeded with a well-formed response
+            if _is_valid_profile_response(result):
+                # Pass-through cache: any category the tool returns flows into
+                # the cache. Lets new categories from agentic-memories work
+                # without code changes here.
                 profile = {
                     "user_id": user_id,
                     "completeness": result.get("completeness", 0),
-                    "basics": result.get("basics", {}),
-                    "preferences": result.get("preferences", {}),
-                    "goals": result.get("goals", {}),
-                    "interests": result.get("interests", {}),
-                    "background": result.get("background", {}),
-                    "health": result.get("health", {}),
-                    "personality": result.get("personality", {}),
-                    "values": result.get("values", {})
+                    **{k: v for k, v in result.items()
+                       if k not in _PROFILE_NON_CATEGORY_KEYS},
                 }
 
                 # Store in Redis with TTL
@@ -383,17 +404,14 @@ class ProfileManager:
 
             duration_ms = int((time.time() - start_time) * 1000)
 
-            # Check if tool call succeeded
-            if result.get("status") == "success":
-                # Build profile object
+            # Check if tool call succeeded with a well-formed response
+            if _is_valid_profile_response(result):
+                # Pass-through cache; see refresh_profile_background for rationale.
                 profile = {
                     "user_id": user_id,
-                    "completeness_pct": result.get("completeness_pct", 0),
-                    "basics": result.get("basics", {}),
-                    "preferences": result.get("preferences", {}),
-                    "goals": result.get("goals", {}),
-                    "interests": result.get("interests", {}),
-                    "background": result.get("background", {})
+                    "completeness": result.get("completeness", 0),
+                    **{k: v for k, v in result.items()
+                       if k not in _PROFILE_NON_CATEGORY_KEYS},
                 }
 
                 # Update cache with fresh data
@@ -411,7 +429,7 @@ class ProfileManager:
                     "Fresh profile fetched successfully",
                     extra={
                         "user_id": user_id,
-                        "completeness_pct": profile["completeness_pct"],
+                        "completeness": profile["completeness"],
                         "duration_ms": duration_ms
                     }
                 )

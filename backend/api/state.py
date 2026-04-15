@@ -1171,6 +1171,12 @@ class StateManager:
     # Summary staleness threshold: regenerate if this many new messages arrived
     SUMMARY_STALENESS_THRESHOLD = 5
 
+    # Force a summary refresh every N messages even when context fits in MAX_TOKENS.
+    # Without this, summaries only fire on token overflow; with aggressive tool-result
+    # pruning that rarely happens, leaving long-term memory stuck on the first few
+    # messages of every conversation.
+    SUMMARY_REFRESH_INTERVAL = 10
+
     @staticmethod
     def _format_messages_for_summary(messages: List[Dict[str, Any]]) -> str:
         """
@@ -1696,6 +1702,50 @@ class StateManager:
                 "content": system_message
             })
             total_tokens += estimate_tokens(system_message)
+
+        # Count-based summary refresh: keep long-term memory current even when
+        # context fits in MAX_TOKENS. get_or_create_summary's staleness check
+        # (5 msgs) will regenerate and echo to agentic-memories when triggered.
+        try:
+            summary_key = f"conversation:{conversation_id}:summary"
+            should_refresh = False
+            cached_count = 0
+            if self._is_healthy:
+                cached = await self.redis_client.get(summary_key)
+                if cached:
+                    try:
+                        cached_count = json.loads(cached).get("message_count_at_generation", 0)
+                    except (json.JSONDecodeError, TypeError):
+                        cached_count = 0
+                if (len(messages) - cached_count) >= self.SUMMARY_REFRESH_INTERVAL:
+                    should_refresh = True
+
+            if should_refresh and len(messages) > 0:
+                # Summarize all messages (long-term view); reuse existing infra
+                # which handles cache write + agentic-memories echo on regen.
+                logger.info(
+                    "Triggering count-based summary refresh",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "current_message_count": len(messages),
+                        "cached_message_count": cached_count,
+                        "interval": self.SUMMARY_REFRESH_INTERVAL,
+                    }
+                )
+                await self.get_or_create_summary(
+                    conversation_id,
+                    messages,
+                    len(messages)
+                )
+        except Exception as e:
+            logger.warning(
+                "Count-based summary refresh failed (non-blocking)",
+                extra={
+                    "conversation_id": conversation_id,
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                }
+            )
 
         # Truncate from beginning if exceeds token limit
         if total_tokens > self.MAX_TOKENS:

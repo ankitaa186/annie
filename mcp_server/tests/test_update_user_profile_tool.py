@@ -437,7 +437,10 @@ class TestUpdateUserProfileToolHandler:
                 value="formal"
             )
 
-            mock_client_class.assert_called_once_with(timeout=10.0)
+            # Phase 2 makes 2 httpx clients: one for the GET field-universe probe
+            # and one for the PUT itself. Both must use the 10s timeout.
+            for call in mock_client_class.call_args_list:
+                assert call.kwargs == {"timeout": 10.0}
 
     @pytest.mark.asyncio
     async def test_uses_config_url(self, mock_profile_response, mock_httpx_response):
@@ -644,6 +647,76 @@ class TestAllowedProfileCategories:
         assert isinstance(ALLOWED_PROFILE_CATEGORIES, set)
 
 
+class TestDynamicFieldDiscovery:
+    """Phase 2: validate against canonical ∪ user's existing extractor-written fields."""
+
+    @pytest.mark.asyncio
+    async def test_user_extractor_field_accepted_even_when_not_canonical(
+        self, mock_profile_response, mock_httpx_response
+    ):
+        """A field the extractor wrote for this user passes validation even
+        though it isn't in the static CANONICAL_FIELDS whitelist."""
+        # Pretend the extractor invented `weird_invented_field` for this user.
+        with patch('mcp_server.tools.profile._fetch_user_profile_fields',
+                   AsyncMock(return_value={"basics": {"weird_invented_field"}})):
+            with patch('mcp_server.tools.profile.httpx.AsyncClient') as cls:
+                mock_client = AsyncMock()
+                mock_client.__aenter__.return_value = mock_client
+                mock_client.__aexit__.return_value = None
+                mock_client.put = AsyncMock(return_value=mock_httpx_response(200, mock_profile_response))
+                cls.return_value = mock_client
+
+                result = await update_user_profile_tool_handler(
+                    user_id="user123",
+                    category="basics",
+                    field_name="weird_invented_field",
+                    value="anything",
+                )
+
+            assert result["status"] == "success"
+
+    @pytest.mark.asyncio
+    async def test_unknown_field_returns_store_memory_redirect(self):
+        """Net-new field invention → UNKNOWN_FIELD with suggestion=store_memory."""
+        with patch('mcp_server.tools.profile._fetch_user_profile_fields',
+                   AsyncMock(return_value={"basics": {"name"}})):
+            result = await update_user_profile_tool_handler(
+                user_id="user123",
+                category="basics",
+                field_name="totally_made_up_field",
+                value="x",
+            )
+
+        assert result["status"] == "error"
+        assert result["error_code"] == "UNKNOWN_FIELD"
+        assert result["suggestion"] == "store_memory"
+        assert "store_memory" in result["error_message"]
+
+    @pytest.mark.asyncio
+    async def test_canonical_field_accepted_when_user_universe_fetch_fails(
+        self, mock_profile_response, mock_httpx_response
+    ):
+        """If the field-universe probe fails, fall back to the static whitelist
+        floor — canonical fields must still work for new users."""
+        with patch('mcp_server.tools.profile._fetch_user_profile_fields',
+                   AsyncMock(return_value={})):  # degraded
+            with patch('mcp_server.tools.profile.httpx.AsyncClient') as cls:
+                mock_client = AsyncMock()
+                mock_client.__aenter__.return_value = mock_client
+                mock_client.__aexit__.return_value = None
+                mock_client.put = AsyncMock(return_value=mock_httpx_response(200, mock_profile_response))
+                cls.return_value = mock_client
+
+                result = await update_user_profile_tool_handler(
+                    user_id="user123",
+                    category="basics",
+                    field_name="name",  # in CANONICAL_FIELDS
+                    value="Ankit",
+                )
+
+            assert result["status"] == "success"
+
+
 class TestCanonicalFieldsValidation:
     """Test CANONICAL_FIELDS validation and FIELD_NAME_ALIASES normalization."""
 
@@ -660,19 +733,23 @@ class TestCanonicalFieldsValidation:
 
     @pytest.mark.asyncio
     async def test_non_canonical_field_rejected(self):
-        """Non-canonical field names are rejected with helpful error."""
-        result = await update_user_profile_tool_handler(
-            user_id="user123",
-            category="basics",
-            field_name="invalid_field_xyz",
-            value="test"
-        )
+        """Field not in canonical set AND not in user's existing fields is rejected
+        with UNKNOWN_FIELD and a redirect to store_memory."""
+        # Mock the user-field-universe fetch to return empty (degraded path) so
+        # validation falls back to the static CANONICAL_FIELDS only.
+        with patch('mcp_server.tools.profile._fetch_user_profile_fields',
+                   AsyncMock(return_value={})):
+            result = await update_user_profile_tool_handler(
+                user_id="user123",
+                category="basics",
+                field_name="invalid_field_xyz",
+                value="test"
+            )
 
         assert result["status"] == "error"
-        assert result["error_code"] == "VALIDATION_ERROR"
-        assert "Invalid field" in result["error_message"]
-        # Should list valid fields
-        assert "name" in result["error_message"]
+        assert result["error_code"] == "UNKNOWN_FIELD"
+        assert result["suggestion"] == "store_memory"
+        assert "invalid_field_xyz" in result["error_message"]
 
     @pytest.mark.asyncio
     async def test_alias_normalized_to_canonical(self, mock_profile_response, mock_httpx_response):

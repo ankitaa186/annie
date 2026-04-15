@@ -171,16 +171,18 @@ class TestBuildSystemPromptMemorySection:
         base_pos = prompt.find("Annie")
         proactive_pos = prompt.find("PROACTIVE CAPABILITIES")
         memory_mgmt_pos = prompt.find("MEMORY MANAGEMENT")
-        user_id_pos = prompt.find("Current user ID: test_user")
+        # user_id moved to top of prompt so it's salient at tool-call time;
+        # the explicit per-tool reminder still appears later inside TOOL_USAGE.
+        user_id_pos = prompt.find("Current user ID for ALL tool calls: test_user")
         format_pos = prompt.find("Telegram MarkdownV2")
         tool_usage_pos = prompt.find("TOOL USAGE REQUIREMENTS")
 
-        # Verify order
+        # Verify order: user_id authoritative line is first, then standard sections.
         assert base_pos >= 0
-        assert proactive_pos > base_pos
+        assert user_id_pos > base_pos
+        assert proactive_pos > user_id_pos
         assert memory_mgmt_pos > proactive_pos
-        assert user_id_pos > memory_mgmt_pos
-        assert format_pos > user_id_pos
+        assert format_pos > memory_mgmt_pos
         assert tool_usage_pos > format_pos
 
 

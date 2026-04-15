@@ -310,3 +310,65 @@ async def test_profile_manager_close_owned_redis():
 
         # Should close owned Redis client
         redis_instance.close.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# _is_valid_profile_response — shape check used by both refresh paths
+# ---------------------------------------------------------------------------
+
+class TestIsValidProfileResponse:
+    def test_canonical_8_categories_passes(self):
+        from api.profile import _is_valid_profile_response
+        assert _is_valid_profile_response({
+            "status": "success",
+            "user_id": "u1",
+            "completeness": 50,
+            "basics": {"name": "Ankit"},
+            "preferences": {},
+            "goals": {},
+            "interests": {},
+            "background": {},
+            "health": {},
+            "personality": {},
+            "values": {},
+        })
+
+    def test_extra_category_passes(self):
+        """Forward-compat: a future category from agentic-memories flows through."""
+        from api.profile import _is_valid_profile_response
+        assert _is_valid_profile_response({
+            "status": "success",
+            "user_id": "u1",
+            "completeness": 10,
+            "basics": {"name": "Ankit"},
+            "relationships": {"close_friends": ["A", "B"]},  # new category
+        })
+
+    def test_missing_status_rejected(self):
+        from api.profile import _is_valid_profile_response
+        assert not _is_valid_profile_response({
+            "user_id": "u1", "basics": {"name": "Ankit"},
+        })
+
+    def test_error_status_rejected(self):
+        """Error envelopes must NOT poison the cache."""
+        from api.profile import _is_valid_profile_response
+        assert not _is_valid_profile_response({
+            "status": "error", "error": "timeout",
+        })
+
+    def test_non_dict_category_rejected(self):
+        """A category arriving as a string/list/None means upstream is broken."""
+        from api.profile import _is_valid_profile_response
+        assert not _is_valid_profile_response({
+            "status": "success",
+            "user_id": "u1",
+            "completeness": 10,
+            "basics": "not a dict",
+        })
+
+    def test_non_dict_input_rejected(self):
+        from api.profile import _is_valid_profile_response
+        assert not _is_valid_profile_response(None)
+        assert not _is_valid_profile_response("nope")
+        assert not _is_valid_profile_response(["list"])
