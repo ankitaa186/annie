@@ -412,6 +412,60 @@ async def get_and_clear_pending(redis_client: redis.Redis, user_id: str) -> Opti
         return None
 
 
+async def drop_pending_on_error(
+    redis_client: redis.Redis,
+    user_id: int,
+    user_id_str: str,
+    message,
+) -> None:
+    """Drain pending queued messages on the error path and notify the user.
+
+    Called from the `except` block of message/voice/file handlers when the
+    current request failed before it could consume its own pending queue.
+    Without this, stale messages would be auto-picked-up by the next
+    successful turn and replayed out of context (confusing the LLM and the
+    user). Best-effort — never raises.
+    """
+    try:
+        dropped = await get_and_clear_pending(redis_client, user_id_str)
+        if not dropped:
+            return
+        pending_count = dropped.count("\n") + 1
+        logger.info(
+            "Dropped pending messages on error path",
+            extra={
+                "user_id": user_id,
+                "pending_count": pending_count,
+                "event": "pending_dropped_on_error",
+            },
+        )
+        try:
+            await message.reply_text(
+                f"⚠️ Previous request failed. I dropped {pending_count} queued "
+                "message(s) so they aren't replayed out of context. "
+                "Please resend anything you still need."
+            )
+        except Exception as notify_error:
+            logger.warning(
+                "Failed to notify user about dropped pending messages",
+                extra={
+                    "user_id": user_id,
+                    "error": str(notify_error)[:120],
+                    "event": "pending_drop_notify_failed",
+                },
+            )
+    except Exception as e:
+        logger.error(
+            "Error dropping pending on error path (swallowed)",
+            extra={
+                "user_id": user_id,
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "event": "pending_drop_failed",
+            },
+        )
+
+
 async def keep_typing_indicator(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
     """
     Keep sending typing indicator every 4 seconds until cancelled.
@@ -469,6 +523,11 @@ async def stream_response_to_telegram(
     last_update_time = 0  # Track time of last message update (milliseconds)
     rate_limit_until = 0  # Timestamp (ms) when Telegram rate limit expires
     is_first_token = True
+    # Tracks whether any photo/video was sent during this turn. If True, the
+    # status message has been scrolled above the media in Telegram and
+    # editing it with the final response would hide the reply from the user.
+    # In that case we post the final text as a NEW message below the media.
+    turn_emitted_media = False
 
     # Get status_message_id from state (AC #1)
     status_message_id = state.get("status_message_id")
@@ -768,6 +827,7 @@ async def stream_response_to_telegram(
                     )
 
                     if result.success:
+                        turn_emitted_media = True
                         logger.info(
                             "Media sent successfully",
                             extra={
@@ -860,6 +920,7 @@ async def stream_response_to_telegram(
                     )
 
                     if result.success:
+                        turn_emitted_media = True
                         logger.info(
                             "Media group sent successfully",
                             extra={
@@ -980,7 +1041,66 @@ async def stream_response_to_telegram(
 
     # Final update with complete response (with rate limit retry)
     final_text = "".join(response_buffer)
-    if len(sent_messages) > 0 and final_text:
+
+    # If any media was emitted during this turn, the original status message
+    # (sent_messages[-1] when no split occurred) is now scrolled ABOVE the
+    # photos in the chat. Editing it with the final response would hide the
+    # reply from the user. Post the final text as a new message instead so
+    # it appears BELOW the media.
+    # TODO: add unit tests for this branch — no existing test harness covers
+    # stream_response_handler's media interleaving. Verified manually via logs
+    # (event="final_message_as_new_due_to_media").
+    posted_as_new_due_to_media = False
+    if turn_emitted_media and final_text:
+        try:
+            final_html = markdown_to_telegram_html(final_text)
+            new_msg = await asyncio.wait_for(
+                message.reply_text(final_html, parse_mode=ParseMode.HTML),
+                timeout=30.0,
+            )
+            sent_messages.append(
+                new_msg.message_id if hasattr(new_msg, "message_id") else new_msg
+            )
+            posted_as_new_due_to_media = True
+            logger.info(
+                "Final message posted as new message (media was emitted this turn)",
+                extra={
+                    "user_id": user_id,
+                    "final_length": len(final_text),
+                    "event": "final_message_as_new_due_to_media",
+                },
+            )
+
+            # Delete the orphaned status message now that the real reply is
+            # posted below the media. Best-effort: a delete failure is harmless.
+            if status_message_id:
+                try:
+                    await context.bot.delete_message(
+                        chat_id=chat_id, message_id=status_message_id
+                    )
+                except Exception as delete_error:
+                    logger.debug(
+                        "Failed to delete orphan status message (non-fatal)",
+                        extra={
+                            "user_id": user_id,
+                            "status_message_id": status_message_id,
+                            "error": str(delete_error)[:120],
+                            "event": "orphan_status_delete_failed",
+                        },
+                    )
+        except Exception as new_msg_error:
+            logger.warning(
+                "Failed to post final response as new message; falling back to edit path",
+                extra={
+                    "user_id": user_id,
+                    "error": str(new_msg_error)[:120],
+                    "error_type": type(new_msg_error).__name__,
+                    "event": "final_message_as_new_failed",
+                },
+            )
+            # Fall through to the existing edit-message-text path below.
+
+    if len(sent_messages) > 0 and final_text and not posted_as_new_due_to_media:
         max_retries = 3
         for attempt in range(max_retries):
             try:
@@ -1726,6 +1846,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass  # Ignore errors during cleanup
 
+        # Drop queued pending messages so they aren't auto-replayed out of context
+        await drop_pending_on_error(redis, user_id, user_id_str, message)
+
         # Backend error - send user-friendly error message
         logger.error(
             "Failed to process message via backend",
@@ -2103,6 +2226,9 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
             )
         except Exception:
             pass  # Ignore errors during cleanup
+
+        # Drop queued pending messages so they aren't auto-replayed out of context
+        await drop_pending_on_error(redis, user_id, user_id_str, message)
 
         # Backend error - send user-friendly error message
         logger.error(
@@ -2826,6 +2952,9 @@ async def handle_file_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
         except Exception:
             pass  # Ignore errors during cleanup
+
+        # Drop queued pending messages so they aren't auto-replayed out of context
+        await drop_pending_on_error(redis, user_id, user_id_str, message)
 
         # Backend error - send user-friendly error message
         logger.error(
