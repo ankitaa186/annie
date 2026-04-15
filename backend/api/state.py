@@ -1631,7 +1631,7 @@ class StateManager:
                 extra={
                     "conversation_id": conversation_id,
                     "user_id": user_id,
-                    "memory_id": result.get("id"),
+                    "memory_id": result.get("memory_id") or result.get("id"),
                     "content_length": len(content),
                     "full_summary_length": len(summary_text),
                     "layer": "episodic",

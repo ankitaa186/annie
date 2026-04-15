@@ -529,7 +529,7 @@ class MemoryClient:
                 "Direct memory stored successfully",
                 extra={
                     "user_id": user_id,
-                    "memory_id": response_data.get("id"),
+                    "memory_id": response_data.get("memory_id") or response_data.get("id"),
                     "layer": layer,
                     "content_length": len(content),
                     "duration_ms": duration_ms

@@ -836,12 +836,36 @@ async def retrieve_memories_tool_handler(
                     }
                     formatted_memories.append(formatted_memory)
 
+                # Strict score-threshold filter: drop low-relevance noise.
+                # Empirical data (7 queries × 100 results): scores cluster in a
+                # long noise tail (mean ~0.04) with a clear inflection near 0.30.
+                # Above 0.30 = relevant, below = embedding noise. Returning an
+                # empty set on thin queries is intentional — better than padding
+                # the prompt with 100 weakly-related memories.
+                try:
+                    threshold = float(config.get("MEMORY_RELEVANCE_THRESHOLD", 0.30))
+                except (TypeError, ValueError):
+                    threshold = 0.30
+                pre_filter_count = len(formatted_memories)
+                formatted_memories = [m for m in formatted_memories if m["relevance_score"] >= threshold]
+                if len(formatted_memories) < pre_filter_count:
+                    logger.info(
+                        "Filtered low-relevance memories below threshold",
+                        extra={
+                            "user_id": user_id,
+                            "threshold": threshold,
+                            "pre_filter_count": pre_filter_count,
+                            "post_filter_count": len(formatted_memories),
+                            "dropped": pre_filter_count - len(formatted_memories)
+                        }
+                    )
+
                 return {
                     "status": "success",
-                    "memory_count": len(memories),
+                    "memory_count": len(formatted_memories),
                     "persona": selected_persona,
                     "memories": formatted_memories,
-                    "message": f"Retrieved {len(memories)} relevant memories using '{selected_persona}' persona."
+                    "message": f"Retrieved {len(formatted_memories)} relevant memories using '{selected_persona}' persona."
                 }
 
             else:
