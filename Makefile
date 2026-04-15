@@ -88,9 +88,8 @@ start: ## Start all Docker services
 stop: ## Stop all Docker services (use ENV=prod for production)
 	@echo "Stopping Annie services..."
 	@$(COMPOSE_CMD) $(COMPOSE_FILES) down
-	@echo "Stopping host-terminal-mcp..."
-	@pkill -f "host-terminal-mcp" 2>/dev/null || true
 	@echo "Services stopped."
+	@echo "Note: host-terminal-mcp is a separate host tool — manage with 'make terminal-stop' if needed."
 
 clean: ## Clean up Docker resources and caches
 	@echo "Cleaning up Docker resources..."
@@ -250,7 +249,7 @@ gh-write: ## Write all .env values to GitHub (creates & overwrites)
 
 terminal-start: ## Start host-terminal-mcp server
 	@echo "Starting host-terminal-mcp..."
-	@pkill -f "host-terminal-mcp" 2>/dev/null || true
+	@pkill -f "host-terminal-mcp --http" 2>/dev/null || true
 	@sleep 1
 	@if command -v uv >/dev/null 2>&1; then \
 		uv tool install --force 'host-terminal-mcp[http]' >/dev/null 2>&1; \
@@ -269,7 +268,7 @@ terminal-start: ## Start host-terminal-mcp server
 
 terminal-stop: ## Stop host-terminal-mcp server
 	@echo "Stopping host-terminal-mcp..."
-	@pkill -f "host-terminal-mcp" 2>/dev/null && echo "✓ Stopped" || echo "Not running"
+	@pkill -f "host-terminal-mcp --http" 2>/dev/null && echo "✓ Stopped" || echo "Not running"
 
 terminal-logs: ## View host-terminal-mcp logs
 	@if [ -f /tmp/host-terminal-mcp.log ]; then \
