@@ -6,6 +6,7 @@ for the MCP Server service.
 """
 
 import os
+from functools import lru_cache
 from typing import List, Optional
 
 
@@ -132,9 +133,13 @@ def is_ha_configured() -> bool:
     return bool(HA_URL and HA_ACCESS_TOKEN)
 
 
+@lru_cache(maxsize=1)
 def validate_environment() -> dict:
     """
     Validate and load all environment variables for MCP Server service.
+
+    Cached: warnings about unset optional keys (BRAVE_SEARCH_API_KEY etc.)
+    fire exactly once per process, not on every get_config() call.
     
     Returns:
         Dictionary of validated environment variables

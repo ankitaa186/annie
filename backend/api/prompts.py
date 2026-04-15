@@ -165,6 +165,12 @@ TOOL_USAGE_INSTRUCTIONS = """
 - delete_memory: First retrieve the memory to get its ID, then confirm with user, then delete
 - retrieve_memories: Use liberally for context and personalization
 
+### Trigger Tools (list_triggers, create_trigger, update_trigger, delete_trigger)
+- BEFORE calling create_trigger: ALWAYS call list_triggers first to check for existing triggers on the same topic or cadence.
+- If an existing trigger covers the same intent or overlaps in timing/topic: prefer update_trigger over create_trigger. Never create a second trigger that duplicates the purpose of an existing one.
+- If overlap is ambiguous (e.g., user's new ask extends or modifies an existing trigger): ask the user to confirm whether to update the existing one or add a new distinct one — do NOT silently create a duplicate.
+- When creating a brand-new trigger for a topic with no existing coverage, proceed without asking.
+
 ### User ID
 Current user ID for all tool calls: {user_id}
 """
