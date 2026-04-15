@@ -692,7 +692,7 @@ home_assistant_query_tool = {
         "properties": {
             "user_id": {
                 "type": "string",
-                "description": "User ID of the requester (for authorization)"
+                "description": "Must be the exact user ID from the system message (a numeric Telegram user ID). NEVER use placeholders like 'default', 'user', 'anonymous', or 'me'."
             },
             "entity_ids": {
                 "type": "array",
@@ -906,7 +906,7 @@ home_assistant_control_tool = {
         "properties": {
             "user_id": {
                 "type": "string",
-                "description": "User ID of the requester (for authorization)"
+                "description": "Must be the exact user ID from the system message (a numeric Telegram user ID). NEVER use placeholders like 'default', 'user', 'anonymous', or 'me'."
             },
             "entity_id": {
                 "type": "string",
@@ -1460,7 +1460,7 @@ send_voice_message_to_smart_home_tool = {
         "properties": {
             "user_id": {
                 "type": "string",
-                "description": "User ID of the requester (for authorization)"
+                "description": "Must be the exact user ID from the system message (a numeric Telegram user ID). NEVER use placeholders like 'default', 'user', 'anonymous', or 'me'."
             },
             "message": {
                 "type": "string",

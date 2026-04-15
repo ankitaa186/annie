@@ -449,7 +449,7 @@ browser_action_tool = {
             },
             "user_id": {
                 "type": "string",
-                "description": "User ID for per-user profile isolation (auto-injected by system)",
+                "description": "Must be the exact user ID from the system message (a numeric Telegram user ID). NEVER use placeholders like 'default', 'user', 'anonymous', or 'me'.",
             },
             "keep_session": {
                 "type": "boolean",

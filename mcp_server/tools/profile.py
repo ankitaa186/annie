@@ -193,7 +193,7 @@ get_user_profile_tool = {
         "properties": {
             "user_id": {
                 "type": "string",
-                "description": "User identifier"
+                "description": "Must be the exact user ID from the system message (a numeric Telegram user ID). NEVER use placeholders like 'default', 'user', 'anonymous', or 'me'."
             }
         },
         "required": ["user_id"]
@@ -606,7 +606,7 @@ update_user_profile_tool = {
         "properties": {
             "user_id": {
                 "type": "string",
-                "description": "User identifier"
+                "description": "Must be the exact user ID from the system message (a numeric Telegram user ID). NEVER use placeholders like 'default', 'user', 'anonymous', or 'me'."
             },
             "category": {
                 "type": "string",

@@ -394,7 +394,7 @@ CRITICAL RULES:
         "properties": {
             "user_id": {
                 "type": "string",
-                "description": "User identifier"
+                "description": "Must be the exact user ID from the system message (a numeric Telegram user ID). NEVER use placeholders like 'default', 'user', 'anonymous', or 'me'."
             },
             "intent_name": {
                 "type": "string",
@@ -654,7 +654,7 @@ Use this before updating or deleting triggers to show user what exists.
         "properties": {
             "user_id": {
                 "type": "string",
-                "description": "User identifier"
+                "description": "Must be the exact user ID from the system message (a numeric Telegram user ID). NEVER use placeholders like 'default', 'user', 'anonymous', or 'me'."
             },
             "trigger_type": {
                 "type": "string",
@@ -900,7 +900,7 @@ Only include fields you want to change. Omitted fields keep current values.
         "properties": {
             "user_id": {
                 "type": "string",
-                "description": "User identifier"
+                "description": "Must be the exact user ID from the system message (a numeric Telegram user ID). NEVER use placeholders like 'default', 'user', 'anonymous', or 'me'."
             },
             "trigger_id": {
                 "type": "string",
@@ -1179,7 +1179,7 @@ You: [Call delete_trigger with confirm=true]
         "properties": {
             "user_id": {
                 "type": "string",
-                "description": "User identifier"
+                "description": "Must be the exact user ID from the system message (a numeric Telegram user ID). NEVER use placeholders like 'default', 'user', 'anonymous', or 'me'."
             },
             "trigger_id": {
                 "type": "string",

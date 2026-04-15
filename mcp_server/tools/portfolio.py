@@ -486,7 +486,7 @@ get_portfolio_tool = {
         "properties": {
             "user_id": {
                 "type": "string",
-                "description": "User identifier"
+                "description": "Must be the exact user ID from the system message (a numeric Telegram user ID). NEVER use placeholders like 'default', 'user', 'anonymous', or 'me'."
             },
             "include_prices": {
                 "type": "boolean",
@@ -708,7 +708,7 @@ add_holding_tool = {
         "properties": {
             "user_id": {
                 "type": "string",
-                "description": "User identifier"
+                "description": "Must be the exact user ID from the system message (a numeric Telegram user ID). NEVER use placeholders like 'default', 'user', 'anonymous', or 'me'."
             },
             "ticker": {
                 "type": "string",
@@ -902,7 +902,7 @@ update_holding_tool = {
         "properties": {
             "user_id": {
                 "type": "string",
-                "description": "User identifier"
+                "description": "Must be the exact user ID from the system message (a numeric Telegram user ID). NEVER use placeholders like 'default', 'user', 'anonymous', or 'me'."
             },
             "ticker": {
                 "type": "string",
@@ -1081,7 +1081,7 @@ remove_holding_tool = {
         "properties": {
             "user_id": {
                 "type": "string",
-                "description": "User identifier"
+                "description": "Must be the exact user ID from the system message (a numeric Telegram user ID). NEVER use placeholders like 'default', 'user', 'anonymous', or 'me'."
             },
             "ticker": {
                 "type": "string",
@@ -1233,7 +1233,7 @@ clear_portfolio_tool = {
         "properties": {
             "user_id": {
                 "type": "string",
-                "description": "User identifier"
+                "description": "Must be the exact user ID from the system message (a numeric Telegram user ID). NEVER use placeholders like 'default', 'user', 'anonymous', or 'me'."
             },
             "confirmation": {
                 "type": "string",

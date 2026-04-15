@@ -121,7 +121,7 @@ execute_command_tool = {
             },
             "user_id": {
                 "type": "string",
-                "description": "The user ID of the requester (for audit/authorization)",
+                "description": "Must be the exact user ID from the system message (a numeric Telegram user ID). NEVER use placeholders like 'default', 'user', 'anonymous', or 'me'.",
             },
             "working_directory": {
                 "type": "string",

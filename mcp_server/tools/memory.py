@@ -388,7 +388,7 @@ Examples of bad uses (handled by background extraction):
         "properties": {
             "user_id": {
                 "type": "string",
-                "description": "User identifier for memory storage"
+                "description": "Must be the exact user ID from the system message (a numeric Telegram user ID). NEVER use placeholders like 'default', 'user', 'anonymous', or 'me'."
             },
             "content": {
                 "type": "string",
@@ -676,7 +676,7 @@ User: "Forget what I said about being allergic to shellfish, that was wrong"
         "properties": {
             "user_id": {
                 "type": "string",
-                "description": "User identifier"
+                "description": "Must be the exact user ID from the system message (a numeric Telegram user ID). NEVER use placeholders like 'default', 'user', 'anonymous', or 'me'."
             },
             "memory_id": {
                 "type": "string",
@@ -945,7 +945,7 @@ LEGACY PERSONAS (still available):
         "properties": {
             "user_id": {
                 "type": "string",
-                "description": "User identifier"
+                "description": "Must be the exact user ID from the system message (a numeric Telegram user ID). NEVER use placeholders like 'default', 'user', 'anonymous', or 'me'."
             },
             "query": {
                 "type": "string",
@@ -1114,7 +1114,7 @@ Note: This operation may take 1-2 minutes to complete.
         "properties": {
             "user_id": {
                 "type": "string",
-                "description": "User identifier"
+                "description": "Must be the exact user ID from the system message (a numeric Telegram user ID). NEVER use placeholders like 'default', 'user', 'anonymous', or 'me'."
             },
             "skip_reextract": {
                 "type": "boolean",

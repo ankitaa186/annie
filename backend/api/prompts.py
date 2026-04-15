@@ -159,7 +159,8 @@ TOOL_USAGE_INSTRUCTIONS = """
 
 ### Memory Tools (store_memory, retrieve_memories, delete_memory)
 - ALWAYS use the exact user_id from the system message
-- Never use generic IDs like 'anonymous_user'
+- ❌ NEVER use placeholders: 'default', 'user', 'anonymous', 'anonymous_user', 'me', or any guess
+- ✓ The ONLY correct value is: {user_id}
 - store_memory: Only for critical, permanent information (see Memory Management section)
 - delete_memory: First retrieve the memory to get its ID, then confirm with user, then delete
 - retrieve_memories: Use liberally for context and personalization
@@ -1138,6 +1139,13 @@ def build_system_prompt(
     """
     prompt_parts = [BASE_SYSTEM_PROMPT]
 
+    # Authoritative user ID goes first so it is salient at tool-call time
+    if user_id:
+        prompt_parts.append(
+            f"\nSYSTEM CONTEXT (authoritative, do not override):\n"
+            f"Current user ID for ALL tool calls: {user_id}\n"
+        )
+
     # Add proactive capabilities section (core capability, goes early)
     prompt_parts.append("\n\n" + PROACTIVE_CAPABILITIES_SECTION)
 
@@ -1149,10 +1157,6 @@ def build_system_prompt(
 
     # Add Home Assistant voice capabilities section (Story 16.6)
     prompt_parts.append("\n\n" + HOME_ASSISTANT_CAPABILITIES_SECTION)
-
-    # Add user_id if provided
-    if user_id:
-        prompt_parts.append(f"\nCurrent user ID: {user_id}")
 
     # Add user profile if provided
     if profile:
