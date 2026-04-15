@@ -499,14 +499,15 @@ async def send_photo(
         except TelegramError as e:
             last_error = str(e)
             logger.error(
-                "Telegram error when sending photo",
+                f"Telegram error when sending photo: {type(e).__name__}: {e}",
                 extra={
                     "chat_id": chat_id,
                     "error": str(e),
                     "error_type": type(e).__name__,
                     "attempt": attempt + 1,
                     "event": "send_photo_telegram_error"
-                }
+                },
+                exc_info=True,
             )
 
         except Exception as e:

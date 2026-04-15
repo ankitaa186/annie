@@ -387,6 +387,11 @@ browser_action_tool = {
         "Use for anything the other web tools can't handle: interacting with pages, logging in, "
         "filling forms, sites that block scrapers, JavaScript-heavy apps, or when you're unsure which tool to use. "
         "Supports persistent login sessions via Chrome profiles so authenticated sites stay logged in. "
+        "POLICY: all logins, 2FA, and bot challenges (captcha, Turnstile, 'unusual activity' walls) "
+        "are handed off to the human via the attended-login/VNC flow described in your system prompt — "
+        "always. Do not attempt to type credentials yourself, even if the user pasted them into chat; "
+        "redirect the user to the VNC URL instead. You still handle cookie banners, GDPR consent, "
+        "dismissible overlays, and any non-auth navigation yourself. "
         "Prefer web_search to find URLs and web_crawl to read simple pages, but use this tool freely when in doubt."
     ),
     "inputSchema": {

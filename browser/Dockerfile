@@ -1,30 +1,51 @@
 # Browser Service Dockerfile
-# Headless Chromium browser automation via Playwright
-# Base image has Chromium pre-installed
+# Headful Chromium (via Xvfb) + patchright anti-detect + noVNC for attended logins.
+# Base image ships all Chromium system deps; we layer Xvfb/x11vnc/novnc on top.
 
 FROM mcr.microsoft.com/playwright/python:v1.50.0-noble
 
-# Set working directory
 WORKDIR /app
 
-# Copy requirements and install Python packages
+# --- System deps for display + VNC sidecar ----------------------------------
+# - xvfb:        virtual X display so Chromium can run headful in a container
+# - x11vnc:      VNC server bound to the Xvfb display
+# - novnc:       HTML5 VNC client (static files served by websockify)
+# - websockify:  WebSocket↔TCP bridge so a browser can speak to x11vnc
+# - x11-utils:   provides xdpyinfo for the entrypoint readiness probe
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        xvfb \
+        x11vnc \
+        novnc \
+        websockify \
+        x11-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+# novnc ships vnc.html but not index.html; symlink so / serves the client
+RUN ln -sf /usr/share/novnc/vnc.html /usr/share/novnc/index.html
+
+# --- Python deps ------------------------------------------------------------
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# --ignore-installed works around a debian-packaged typing_extensions that
+# ships without a RECORD file, which pip otherwise refuses to upgrade.
+RUN pip install --no-cache-dir --ignore-installed -r requirements.txt
 
-# Do NOT run `playwright install` - browsers are pre-installed in the base image
+# Patchright uses its own patched Chromium download path. Fetch it now so the
+# container starts instantly. --with-deps is already satisfied by the base
+# image but is a cheap no-op if something's missing.
+RUN patchright install chromium
 
-# Copy application code
+# --- App code ---------------------------------------------------------------
 COPY server.py .
+COPY entrypoint.sh .
+RUN chmod +x entrypoint.sh
 
-# Create data directory for browser profiles
+# Persistent user-data-dirs live here (one per profile)
 RUN mkdir -p /data/profiles
 
-# Expose port
-EXPOSE 8003
+# 8003 = FastAPI control API, 6080 = noVNC web client
+EXPOSE 8003 6080
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=45s --retries=3 \
     CMD python -c "import httpx; r = httpx.get('http://localhost:8003/health'); assert r.status_code == 200" || exit 1
 
-# Run the server
-CMD ["python", "-m", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8003"]
+CMD ["./entrypoint.sh"]

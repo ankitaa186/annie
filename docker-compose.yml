@@ -49,6 +49,10 @@ services:
       # Cloudflare Access auth (web UI)
       - CF_USER_MAPPING=${CF_USER_MAPPING:-}
       - DEV_MODE_USER_ID=${DEV_MODE_USER_ID:-}
+      # Attended-login handoff URL (noVNC) — surfaced in the system prompt
+      # so Annie knows where to send you when she hits a login wall. Leave
+      # blank to disable the handoff guidance entirely.
+      - BROWSER_VNC_URL=${BROWSER_VNC_URL:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -216,17 +220,29 @@ services:
       context: ./browser
       dockerfile: Dockerfile
     container_name: annie-browser
+    # noVNC on 6080 is for attended logins. Bound to 0.0.0.0 so you can reach
+    # it from your phone on the home LAN (http://<host-lan-ip>:6080/). Still
+    # password-protected by VNC — set a strong BROWSER_VNC_PASSWORD in .env.
+    # Do NOT expose this port through your router / to the public internet.
+    # For access from outside the LAN, use Tailscale/WireGuard.
+    ports:
+      - "6080:6080"
     volumes:
       - browser_profiles:/data/profiles
     environment:
       - ENVIRONMENT=${ENVIRONMENT:-dev}
       - BROWSER_ALLOWED_DOMAINS=${BROWSER_ALLOWED_DOMAINS:-}
+      - BROWSER_VNC_PASSWORD=${BROWSER_VNC_PASSWORD:-annie}
+      - BROWSER_DISPLAY_GEOMETRY=${BROWSER_DISPLAY_GEOMETRY:-1280x800x24}
+    # Headful Chromium on large pages benefits from more shared memory than
+    # the Docker default of 64MB, which otherwise triggers renderer crashes.
+    shm_size: "2gb"
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; r = httpx.get('http://localhost:8003/health'); assert r.status_code == 200"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 60s
     restart: unless-stopped
     networks:
       - annie-network
