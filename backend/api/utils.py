@@ -79,3 +79,73 @@ def inject_user_id(
             extra=log_extra
         )
     tool_args["user_id"] = user_id
+
+
+async def invalidate_profile_cache_if_needed(
+    tool_name: str,
+    tool_result: Any,
+    user_id: Optional[str],
+    redis_client: Any,
+    logger: logging.Logger,
+) -> None:
+    """
+    Invalidate the profile cache (``profile:{user_id}``) when the
+    ``update_user_profile`` MCP tool has completed successfully.
+
+    This ensures the LLM sees fresh profile data on the next
+    ``get_user_profile`` call within the same conversation, rather than
+    stale data from the 15-minute TTL cache.
+
+    Called from the backend tool-execution boundary. The MCP tool itself
+    remains generic and stateless; cache management is a backend concern.
+
+    The function is intentionally defensive — any Redis failure is caught
+    and logged so cache-invalidation issues never block conversation flow.
+
+    Args:
+        tool_name: The name of the MCP tool that was executed.
+        tool_result: The result dict returned by the MCP tool.
+        user_id: The user ID whose cache should be invalidated.
+        redis_client: Async Redis client (may be ``None``).
+        logger: Logger instance for structured logging.
+    """
+    if tool_name != "update_user_profile":
+        return
+
+    if not isinstance(tool_result, dict) or tool_result.get("status") != "success":
+        return
+
+    if not redis_client or not user_id:
+        logger.debug(
+            "Skipping profile cache invalidation (missing redis_client or user_id)",
+            extra={
+                "tool_name": tool_name,
+                "user_id": user_id,
+                "has_redis_client": bool(redis_client),
+            },
+        )
+        return
+
+    cache_key = f"profile:{user_id}"
+    try:
+        await redis_client.delete(cache_key)
+        logger.info(
+            "Profile cache invalidated after successful update_user_profile",
+            extra={
+                "tool_name": tool_name,
+                "user_id": user_id,
+                "cache_key": cache_key,
+                "event": "profile_cache_invalidated",
+            },
+        )
+    except Exception as e:  # noqa: BLE001 - defensive: never block conversation
+        logger.warning(
+            "Failed to invalidate profile cache (non-fatal)",
+            extra={
+                "tool_name": tool_name,
+                "user_id": user_id,
+                "cache_key": cache_key,
+                "error": str(e),
+                "error_type": type(e).__name__,
+            },
+        )

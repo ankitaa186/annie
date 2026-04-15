@@ -23,7 +23,11 @@ from api.models.file_attachment import FileAttachment, get_files_metadata
 from api.state import StateManager, StateError
 from api.status import StatusContext, emit_status
 from api.logging import get_logger
-from api.utils import inject_user_id, strip_base64_from_tool_result
+from api.utils import (
+    inject_user_id,
+    invalidate_profile_cache_if_needed,
+    strip_base64_from_tool_result,
+)
 
 try:
     from langfuse.decorators import observe, langfuse_context
@@ -720,6 +724,17 @@ async def stream_generator(
                         except (json.JSONDecodeError, TypeError):
                             tool_result = None
 
+                        # Invalidate profile cache after successful update_user_profile
+                        # (no-op for other tools; defensive against Redis failures)
+                        if state_manager and isinstance(tool_result, dict):
+                            await invalidate_profile_cache_if_needed(
+                                tool_name,
+                                tool_result,
+                                user_id,
+                                state_manager.redis_client,
+                                logger,
+                            )
+
                         if isinstance(tool_result, dict):
                             media_data = extract_media_from_tool_result(tool_result, tool_name)
                             if media_data:
@@ -1195,6 +1210,17 @@ async def stream_generator(
                         tool_success = True
                         if isinstance(tool_result, dict) and tool_result.get("status") == "error":
                             tool_success = False
+
+                        # Invalidate profile cache after successful update_user_profile
+                        # (no-op for other tools; defensive against Redis failures)
+                        if state_manager:
+                            await invalidate_profile_cache_if_needed(
+                                function_name,
+                                tool_result,
+                                user_id,
+                                state_manager.redis_client,
+                                logger,
+                            )
 
                         if tool_success:
                             logger.info(
