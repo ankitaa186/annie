@@ -335,9 +335,14 @@ clear_stale_redis_state() {
         return 0
     fi
 
-    # Delete stale keys that block message processing after crashes
+    # Delete stale keys that block message processing after crashes.
+    # processing:* is a 180s TTL flag the telegram-bot sets while handling a
+    # message; if Redis drops mid-completion the clear call can fail and the
+    # flag gets stuck, causing the user's next message to be queued as
+    # "pending" even though nothing is actually processing. Safe to wipe
+    # unconditionally here because the bot hasn't started yet.
     local cleared=0
-    for pattern in "pending_message:*" "active_request:*"; do
+    for pattern in "pending_message:*" "active_request:*" "processing:*"; do
         local keys
         keys=$($COMPOSE_CMD exec -T redis redis-cli KEYS "$pattern" 2>/dev/null | tr -d '\r')
         if [ -n "$keys" ]; then
