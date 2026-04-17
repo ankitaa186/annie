@@ -271,27 +271,102 @@ When the user shares new information about themselves, use the update_user_profi
 MEMORY_MANAGEMENT_SECTION = """
 ## MEMORY MANAGEMENT
 
-Annie automatically extracts and stores memories from conversations in the background.
-You do NOT need to call store_memory for routine information.
+You have three layers of memory. Pick the right one for each fact:
 
-### When to Use store_memory (Explicit Storage)
+1. **[CURRENT_DAY_CONTEXT] (day-scoped scratchpad — today-only in prompt)**
+   - Facts that matter TODAY but not permanently: anything whose relevance
+     fades after today or over the next few days.
+   - Write with `update_daily_context(key, value)`. YOU pick the key —
+     lowercase snake_case naming what the fact is ABOUT. Common examples
+     (not a fixed list): `meals`, `schedule`, `workout`, `mood`, `open_loops`,
+     `decisions_today`, `house_hunting`, `trip_plans`, `debugging`,
+     `pet_medication`. Whatever fits today.
+   - REUSE existing keys across the day. If `[CURRENT_DAY_CONTEXT]` already
+     shows `meals` from the morning, the afternoon write is `meals` with
+     the concatenated value — not a new `lunch` key. Don't proliferate
+     siblings. Up to 20 keys per day.
+   - To CLEAR a key for today, write an empty string `""`.
+   - TODAY's scratchpad is read back automatically at the top of every turn
+     — it's already in your system prompt when non-empty. TRUST IT.
+   - PAST DAYS (up to 30 days ago) are kept in storage but NOT in the
+     prompt. When the user asks about a past day ("what did I eat
+     yesterday?", "how did Monday's workout go?"), call
+     `get_daily_context(days_ago=N)` or `get_daily_context(date="YYYY-MM-DD")`.
+     If the tool returns `found: false`, TELL THE USER you don't have a
+     scratchpad for that day — do NOT hallucinate.
 
-ONLY use store_memory for CRITICAL information that:
-1. User explicitly asks you to remember ("Remember that I...", "Don't forget...")
-2. Is a permanent preference/constraint ("I'm allergic to...", "Never recommend...")
-3. Is a life-changing decision with lasting impact
-4. Would be dangerous to forget (medical conditions, safety constraints)
+2. **[Earlier conversation summary] (rolling session summary)**
+   - An auto-maintained summary of what you and the user have discussed so
+     far in this conversation. Also injected into your system prompt when
+     present. Use it as the second place to check before asking.
 
-**Good Examples:**
-- "User is severely allergic to shellfish - carries EpiPen"
-- "User's risk tolerance is conservative - never recommend high-risk investments"
-- "User's mother passed away in March 2024 - sensitive topic"
+3. **store_memory / retrieve_memories (permanent memory, agentic-memories)**
+   - Facts that should survive across sessions and across days: new
+     preferences, new goals, permanent constraints, life-changing decisions,
+     dangerous-to-forget info (allergies, medical, safety).
+   - Retrieval is fast (<2s) — use it proactively when the user asks about
+     past decisions or when recommendations should weigh history.
 
-**Bad Examples (background extraction handles these):**
-- Daily activities or routine conversations
-- Temporary preferences or moods
-- Information already in their profile
-- Topics just discussed (already being extracted)
+### Decision tree: day-scoped vs. permanent
+
+For any fact the user just stated, ask:
+
+    Is this true only today? -> update_daily_context (scratchpad)
+        Examples: "I had eggs for breakfast", "dentist at 3pm today",
+        "ran 5k this morning", "feeling a bit off today"
+
+    Is this true going forward (possibly forever)? -> store_memory
+        Examples: "I'm allergic to shellfish", "I prefer short responses",
+        "I'm training for a half marathon over the next 8 weeks",
+        "remember I'm a conservative investor"
+
+    Is this already handled somewhere? -> do nothing
+        Examples: facts already present in USER PROFILE, facts already
+        present in [CURRENT_DAY_CONTEXT] unchanged.
+
+Store it immediately the moment you recognize it — do NOT wait for a
+background pipeline, there is no pipeline fast enough to save you mid-turn.
+
+### Never say "I don't know" about something the user said earlier
+
+Before asking the user to repeat something they told you, check — in this
+order:
+
+1. `[CURRENT_DAY_CONTEXT]` in your system prompt (TODAY's scratchpad).
+2. `[Earlier conversation summary]` in your system prompt.
+3. If the user is asking about a PAST DAY (yesterday, last week, "on
+   Tuesday"), call `get_daily_context(days_ago=N)` or
+   `get_daily_context(date="YYYY-MM-DD")`. If it returns `found: false`,
+   say so honestly — do NOT guess.
+4. `retrieve_memories(query=...)` if the fact might be a permanent fact
+   from any prior session.
+
+Only after all of the above come up empty should you ask the user to
+remind you. Re-asking "what did you eat today?" when the user told you
+eggs an hour ago is the #1 failure mode this memory system exists to
+prevent.
+
+### Writing to the scratchpad: be proactive
+
+When the user shares a today-fact, call `update_daily_context` in the SAME
+turn — don't defer. Examples of facts that should trigger an immediate
+write (with a suggested key — but use whatever key fits the situation):
+- Any meal or food mentioned -> `meals`
+- Any workout, run, lift, walk counted as exercise -> `workout`
+- Any appointment or commitment for today -> `schedule`
+- Mood/energy self-report ("I'm tired", "feeling great") -> `mood`
+- Things the user flagged as open ("I still need to call the plumber") -> `open_loops`
+- Decisions reached in this conversation today -> `decisions_today`
+- Situations that don't fit any of the above: PICK A KEY. A list of
+  apartments being weighed -> `house_hunting`. A debugging investigation
+  in flight -> `debugging`. A trip being planned -> `trip_plans`. A pet's
+  medication schedule -> `pet_medication`. Any fact the user cares about
+  for today deserves a spot; don't force it into a nearby key just
+  because that key exists.
+
+Last-writer-wins per key: to ADD to an existing key, read the current
+value from `[CURRENT_DAY_CONTEXT]` and pass the concatenated result. To
+CLEAR a key, pass an empty string `""`.
 
 ### When to Use delete_memory
 
@@ -307,16 +382,6 @@ Use delete_memory when:
 3. Call delete_memory with the memory_id
 
 **Important:** Deletion cannot be undone. Always confirm with the user before deleting.
-
-### When to Use retrieve_memories
-
-Use retrieve_memories LIBERALLY when:
-1. User asks about past decisions or conversations
-2. Making recommendations that should consider history
-3. User references something from the past
-4. You need context about user preferences
-
-Retrieval is fast (<2s) and should be used proactively.
 """
 
 # Proactive capabilities section
@@ -1192,7 +1257,8 @@ def build_system_prompt(
     profile: Optional[Dict[str, Any]] = None,
     portfolio: Optional[Dict[str, Any]] = None,
     triggers: Optional[list] = None,
-    proactive_context: Optional[Dict[str, Any]] = None
+    proactive_context: Optional[Dict[str, Any]] = None,
+    daily_context_block: Optional[str] = None,
 ) -> str:
     """
     Build system prompt with optional user_id, profile, portfolio, triggers, proactive_context, and platform-specific formatting.
@@ -1205,6 +1271,10 @@ def build_system_prompt(
         portfolio: Optional user portfolio dictionary from PortfolioManager
         triggers: Optional list of active trigger dictionaries from IntentsClient
         proactive_context: Optional proactive feedback context (Story 13.10)
+        daily_context_block: Optional pre-rendered `[CURRENT_DAY_CONTEXT]`
+            block from `DailyContextManager.get_scratchpad_prompt_block`
+            (Epic 22 - Story 22.2). Empty string or None means no block is
+            rendered.
 
     Returns:
         Complete system prompt string
@@ -1266,6 +1336,13 @@ def build_system_prompt(
             prompt_parts.append("The user is responding to a proactive message you sent:")
             prompt_parts.append(proactive_str)
             prompt_parts.append("\n" + PROACTIVE_FEEDBACK_GUIDANCE)
+
+    # Current-day scratchpad (Epic 22 - Story 22.2).
+    # Render BEFORE the time/date stamp so the LLM reads "here is what we
+    # established today" and then "the current date/time is ...". Rendered
+    # only when DailyContextManager produced a non-empty block.
+    if daily_context_block:
+        prompt_parts.append("\n\n" + daily_context_block)
 
     # Get Pacific time with daylight saving adjustment
     pacific = pytz.timezone("US/Pacific")

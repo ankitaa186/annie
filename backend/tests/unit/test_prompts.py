@@ -27,8 +27,10 @@ class TestMemoryManagementSection:
         from api.prompts import MEMORY_MANAGEMENT_SECTION
 
         assert "store_memory" in MEMORY_MANAGEMENT_SECTION
-        assert "CRITICAL" in MEMORY_MANAGEMENT_SECTION
-        assert "explicit" in MEMORY_MANAGEMENT_SECTION.lower()
+        # Story 22.3: replaced "CRITICAL" framing with PERMANENT vs. session
+        # decision tree. Key signal: store_memory should be described as the
+        # permanent/cross-session path.
+        assert "permanent" in MEMORY_MANAGEMENT_SECTION.lower()
 
     def test_memory_management_section_contains_delete_memory_guidance(self):
         """Test that section explains when to use delete_memory."""
@@ -43,21 +45,88 @@ class TestMemoryManagementSection:
         from api.prompts import MEMORY_MANAGEMENT_SECTION
 
         assert "retrieve_memories" in MEMORY_MANAGEMENT_SECTION
-        assert "LIBERALLY" in MEMORY_MANAGEMENT_SECTION
 
-    def test_memory_management_section_contains_examples(self):
-        """Test that section contains good and bad usage examples."""
+    def test_memory_management_section_references_scratchpad(self):
+        """Story 22.3: section must point the LLM at the [CURRENT_DAY_CONTEXT]
+        scratchpad and the update_daily_context tool for day-scoped facts."""
         from api.prompts import MEMORY_MANAGEMENT_SECTION
 
-        assert "Good Examples" in MEMORY_MANAGEMENT_SECTION
-        assert "Bad Examples" in MEMORY_MANAGEMENT_SECTION
+        assert "[CURRENT_DAY_CONTEXT]" in MEMORY_MANAGEMENT_SECTION
+        assert "update_daily_context" in MEMORY_MANAGEMENT_SECTION
 
-    def test_memory_management_section_explains_background_extraction(self):
-        """Test that section explains background extraction."""
+    def test_memory_management_section_has_free_form_key_guidance(self):
+        """Story 22.2.2: keys are no longer a fixed enum. Prompt must teach
+        the LLM to pick a clear snake_case key and REUSE existing keys
+        across the day (rather than creating siblings like breakfast+lunch
+        when `meals` already exists)."""
         from api.prompts import MEMORY_MANAGEMENT_SECTION
 
-        assert "automatically" in MEMORY_MANAGEMENT_SECTION.lower()
-        assert "background" in MEMORY_MANAGEMENT_SECTION.lower()
+        text = MEMORY_MANAGEMENT_SECTION.lower()
+        # Common-examples phrasing should hint at free-form beyond the old 6.
+        assert "snake_case" in text or "snake case" in text
+        # Must hint that LLM picks the key, not a hardcoded set.
+        assert "pick" in text or "you pick" in text or "you choose" in text or "choose" in text
+        # Reuse guidance — the drift mitigation the user asked for.
+        assert "reuse" in text or "don't proliferate" in text or "do not proliferate" in text
+        # At least one non-enum example key should appear (house_hunting,
+        # trip_plans, debugging, pet_medication) to communicate flexibility.
+        non_enum_examples = [
+            "house_hunting", "trip_plans", "debugging", "pet_medication",
+        ]
+        assert any(ex in MEMORY_MANAGEMENT_SECTION for ex in non_enum_examples)
+
+    def test_memory_management_section_documents_clear_mechanism(self):
+        """Story 22.2.2: writing empty string is the documented way to
+        clear a key — must be mentioned so the LLM knows."""
+        from api.prompts import MEMORY_MANAGEMENT_SECTION
+
+        text = MEMORY_MANAGEMENT_SECTION.lower()
+        # Some phrasing around clearing via empty string.
+        assert ("empty string" in text) or ('""' in MEMORY_MANAGEMENT_SECTION)
+        assert "clear" in text
+
+    def test_memory_management_section_references_get_daily_context(self):
+        """Story 22.2.1: section must teach the LLM to call get_daily_context
+        for past-day questions, and to say "I don't have a scratchpad" on
+        miss rather than hallucinating."""
+        from api.prompts import MEMORY_MANAGEMENT_SECTION
+
+        assert "get_daily_context" in MEMORY_MANAGEMENT_SECTION
+        # Decision tree must acknowledge PAST DAYS explicitly.
+        text = MEMORY_MANAGEMENT_SECTION.lower()
+        assert "past day" in text or "past days" in text or "yesterday" in text
+        # Must warn against hallucinating on miss.
+        assert "hallucinate" in text or "found: false" in text or "do not guess" in text or "don't guess" in text
+
+    def test_memory_management_section_has_no_session_scoped_language(self):
+        """Story 22.2.1: "session-scoped" was always a misnomer and is now
+        actively wrong (storage is 30-day rolling, prompt is today-only).
+        Sweep it."""
+        from api.prompts import MEMORY_MANAGEMENT_SECTION
+
+        text = MEMORY_MANAGEMENT_SECTION.lower()
+        assert "session-scoped" not in text
+        assert "session scoped" not in text
+
+    def test_memory_management_section_never_says_i_dont_know_clause(self):
+        """Story 22.3: explicit "check session before saying I don't know" rule."""
+        from api.prompts import MEMORY_MANAGEMENT_SECTION
+
+        text = MEMORY_MANAGEMENT_SECTION.lower()
+        # Either phrasing should hit: the section MUST tell the LLM to check
+        # the scratchpad / summary before asking the user to repeat.
+        assert "i don't know" in text or "dont know" in text or "don't know" in text
+        assert "[earlier conversation summary]" in text.lower() or "earlier conversation summary" in text.lower()
+
+    def test_memory_management_section_no_background_extraction_framing(self):
+        """Story 22.3: "background extraction handles this" framing must be gone.
+        It lies about pipeline latency and causes amnesia — the whole point of
+        the rewrite."""
+        from api.prompts import MEMORY_MANAGEMENT_SECTION
+
+        text = MEMORY_MANAGEMENT_SECTION.lower()
+        assert "background extraction" not in text
+        assert "automatically extracts" not in text
 
 
 class TestToolUsageInstructions:
@@ -190,12 +259,21 @@ class TestPromptTokenImpact:
     """Test that prompt changes don't drastically increase token count."""
 
     def test_memory_section_reasonable_length(self):
-        """Test that MEMORY_MANAGEMENT_SECTION is reasonably sized (~300 tokens)."""
+        """Test that MEMORY_MANAGEMENT_SECTION is reasonably sized.
+
+        Story 22.3 rewrote this section with a decision tree and scratchpad
+        references. Story 22.2.1 added the past-days (30-day rolling) path
+        and the get_daily_context referral with an explicit anti-hallucination
+        clause. Story 22.2.2 added free-form-key guidance, non-enum examples
+        (house_hunting, trip_plans, debugging, pet_medication), the 20-key
+        cap explanation, and the "clear via empty string" note. Budget
+        raised to 1500 — still a small fraction of the tool-usage section
+        (~4-5k tokens).
+        """
         from api.prompts import MEMORY_MANAGEMENT_SECTION
 
         # Rough estimate: ~4 chars per token
         estimated_tokens = len(MEMORY_MANAGEMENT_SECTION) / 4
 
-        # Should be around 300 tokens as noted in story
-        assert estimated_tokens < 500, "Memory management section is too long"
+        assert estimated_tokens < 1500, "Memory management section is too long"
         assert estimated_tokens > 100, "Memory management section seems too short"

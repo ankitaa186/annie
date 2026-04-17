@@ -30,6 +30,23 @@ from .memory import (
     compact_memories_tool_handler,
 )
 
+# Daily Context Scratchpad Tools (Epic 22 - Story 22.2 + 22.2.1 + 22.2.2)
+# 22.2.2 dropped the slot enum; keys are free-form snake_case. MAX_SLOT_CHARS
+# is kept as a back-compat alias of MAX_VALUE_CHARS (same value) so any
+# external caller that imported the old name still resolves.
+from .daily_context import (
+    update_daily_context_tool,
+    update_daily_context_tool_handler,
+    get_daily_context_tool,
+    get_daily_context_tool_handler,
+    MAX_VALUE_CHARS as DAILY_CONTEXT_MAX_VALUE_CHARS,
+    MAX_KEYS_PER_DAY as DAILY_CONTEXT_MAX_KEYS_PER_DAY,
+    DAILY_CONTEXT_TTL_DAYS,
+    eviction_epoch_for_pacific_date,
+)
+# Back-compat alias for the renamed constant.
+DAILY_CONTEXT_MAX_SLOT_CHARS = DAILY_CONTEXT_MAX_VALUE_CHARS
+
 # Profile Tools (Epic 7, 15.4)
 from .profile import (
     get_user_profile_tool,
@@ -167,6 +184,17 @@ __all__ = [
     "retrieve_memories_tool_handler",
     "compact_memories_tool",
     "compact_memories_tool_handler",
+
+    # Daily Context Scratchpad (Epic 22 - Story 22.2 + 22.2.1 + 22.2.2)
+    "update_daily_context_tool",
+    "update_daily_context_tool_handler",
+    "get_daily_context_tool",
+    "get_daily_context_tool_handler",
+    "DAILY_CONTEXT_MAX_VALUE_CHARS",
+    "DAILY_CONTEXT_MAX_KEYS_PER_DAY",
+    "DAILY_CONTEXT_MAX_SLOT_CHARS",  # back-compat alias
+    "DAILY_CONTEXT_TTL_DAYS",
+    "eviction_epoch_for_pacific_date",
 
     # Profile
     "get_user_profile_tool",

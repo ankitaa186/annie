@@ -875,16 +875,23 @@ class TestStoreMemoryToolSchema:
         assert store_memory_tool["name"] == "store_memory"
 
     def test_tool_description_includes_guidance(self):
-        """Test tool description includes usage guidance for LLM."""
+        """Test tool description includes usage guidance for LLM.
+
+        Story 22.3 rewrote the description around the permanent-vs-day-scoped
+        decision tree. It now points at `update_daily_context` for
+        day-scoped facts instead of blaming "background extraction".
+        """
         desc = store_memory_tool["description"]
-        # Should mention critical information
-        assert "CRITICAL" in desc
+        # Should mention PERMANENT memory as the framing
+        assert "PERMANENT" in desc
         # Should list good uses
         assert "Examples of good uses" in desc
         # Should list bad uses
         assert "Examples of bad uses" in desc
-        # Should mention background extraction
-        assert "background extraction" in desc
+        # Should redirect day-scoped facts to update_daily_context
+        assert "update_daily_context" in desc
+        # The misleading "background extraction handles this" framing is gone
+        assert "background extraction" not in desc
 
     def test_tool_handler_is_callable(self):
         """Test that handler is callable."""

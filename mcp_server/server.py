@@ -25,6 +25,8 @@ from mcp_server.tools import (
     delete_memory_tool,
     retrieve_memories_tool,
     compact_memories_tool,
+    update_daily_context_tool,  # Epic 22 - Story 22.2
+    get_daily_context_tool,  # Epic 22 - Story 22.2.1 (history fetch)
     get_user_profile_tool,
     update_user_profile_tool,  # Story 15.4
     get_portfolio_tool,
@@ -92,6 +94,10 @@ class MCPServer:
         self.tool_registry.register(delete_memory_tool)
         self.tool_registry.register(retrieve_memories_tool)
         self.tool_registry.register(compact_memories_tool)
+        # Daily context scratchpad (Epic 22 - Story 22.2)
+        self.tool_registry.register(update_daily_context_tool)
+        # Daily context history fetch (Epic 22 - Story 22.2.1 follow-on)
+        self.tool_registry.register(get_daily_context_tool)
         self.tool_registry.register(get_user_profile_tool)
         # Profile update tool (Epic 15 - Story 15.4)
         self.tool_registry.register(update_user_profile_tool)

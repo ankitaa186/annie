@@ -1747,6 +1747,51 @@ class StateManager:
                 }
             )
 
+        # Story 22.1: Always-inject cached rolling summary.
+        # The `conversation:{id}:summary` cache is maintained by the refresh
+        # logic above and by the overflow path below, but before 22.1 it was
+        # ONLY rendered into the prompt on overflow — a rare path, because
+        # `_prune_tool_results` keeps total_tokens well under MAX_TOKENS most
+        # turns. That meant on normal turns the summary sat unused in Redis
+        # while the LLM kept re-asking about things from earlier in the
+        # session. Inject it eagerly as a 2nd system message whenever present
+        # and we're NOT going to take the overflow branch (which injects its
+        # own copy and would double-render).
+        summary_already_injected = False
+        if self._is_healthy and total_tokens <= self.MAX_TOKENS:
+            try:
+                summary_key = f"conversation:{conversation_id}:summary"
+                cached = await self.redis_client.get(summary_key)
+                if cached:
+                    try:
+                        summary_text = json.loads(cached).get("text")
+                    except (json.JSONDecodeError, TypeError):
+                        summary_text = None
+                    if summary_text:
+                        summary_msg = {
+                            "role": "system",
+                            "content": f"[Earlier conversation summary]\n{summary_text}",
+                        }
+                        context_messages.append(summary_msg)
+                        total_tokens += estimate_tokens(summary_msg["content"])
+                        summary_already_injected = True
+                        logger.debug(
+                            "Cached rolling summary injected (always-inject path)",
+                            extra={
+                                "conversation_id": conversation_id,
+                                "summary_chars": len(summary_text),
+                            },
+                        )
+            except Exception as e:
+                logger.warning(
+                    "Always-inject summary read failed (non-blocking)",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                    }
+                )
+
         # Truncate from beginning if exceeds token limit
         if total_tokens > self.MAX_TOKENS:
             logger.info(
@@ -1787,12 +1832,32 @@ class StateManager:
                     )
 
             if summary_text:
-                # Insert summary as system message after the main system message
+                # Insert summary as system message after the main system message.
+                # Story 22.1: the always-inject path above may have already
+                # appended a copy from the Redis cache. If so, replace it with
+                # this fresh one (which may be regenerated here) rather than
+                # stacking a second `[Earlier conversation summary]` block.
                 summary_msg = {
                     "role": "system",
                     "content": f"[Earlier conversation summary]\n{summary_text}"
                 }
-                context_messages.append(summary_msg)
+                if summary_already_injected:
+                    # Find the existing injected summary_msg (system message
+                    # whose content starts with the summary marker) and
+                    # overwrite it in place.
+                    for i in range(len(context_messages) - 1, -1, -1):
+                        m = context_messages[i]
+                        if (
+                            m.get("role") == "system"
+                            and isinstance(m.get("content"), str)
+                            and m["content"].startswith("[Earlier conversation summary]")
+                        ):
+                            context_messages[i] = summary_msg
+                            break
+                    else:
+                        context_messages.append(summary_msg)
+                else:
+                    context_messages.append(summary_msg)
                 total_tokens = (
                     estimate_tokens(system_message or "")
                     + estimate_tokens(summary_msg["content"])

@@ -1652,7 +1652,35 @@ async def stream_response(conversation_id: str, request: Request):
                     }
                 )
 
-        # Build system message with user_id, profile, portfolio, proactive_context, and platform-specific formatting
+        # Load today's scratchpad (Epic 22 - Story 22.2). Graceful: returns
+        # empty string if the scratchpad is unset or Redis is unhealthy. The
+        # DailyContextManager reuses the StateManager's Redis connection.
+        daily_context_block = ""
+        if user_id:
+            try:
+                from api.daily_context import DailyContextManager
+                dc_manager = DailyContextManager(state_manager.redis_client)
+                daily_context_block = await dc_manager.get_scratchpad_prompt_block(user_id)
+                if daily_context_block:
+                    logger.info(
+                        "Daily context scratchpad loaded for system prompt",
+                        extra={
+                            "conversation_id": conversation_id,
+                            "user_id": user_id,
+                            "block_chars": len(daily_context_block),
+                        }
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to load daily_context scratchpad, continuing without: {e}",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "user_id": user_id,
+                        "error_type": type(e).__name__,
+                    }
+                )
+
+        # Build system message with user_id, profile, portfolio, proactive_context, daily_context, and platform-specific formatting
         from api.prompts import build_system_prompt
 
         system_message = build_system_prompt(
@@ -1661,7 +1689,8 @@ async def stream_response(conversation_id: str, request: Request):
             include_tool_instructions=True,
             profile=profile,
             portfolio=portfolio,
-            proactive_context=proactive_context
+            proactive_context=proactive_context,
+            daily_context_block=daily_context_block,
         ) if user_id else None
 
         logger.debug(

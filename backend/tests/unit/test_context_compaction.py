@@ -1045,3 +1045,142 @@ User needed help with a work problem that's been bugging them.
             assert "advice" in tags
             assert "work" in tags
             assert "career" in tags
+
+
+# =========================================================================
+# Story 22.1: Always-inject cached rolling summary
+# =========================================================================
+
+class TestAlwaysInjectSummary:
+    """Story 22.1: the cached `conversation:{id}:summary` must be injected as
+    a system message on normal turns, not only on 20k-token overflow."""
+
+    @pytest.mark.asyncio
+    async def test_summary_injected_when_cached_and_under_limit(self):
+        """Cached summary + short context => summary appears as system msg once."""
+        messages = [
+            {"role": "user", "content": "Hi"},
+            {"role": "assistant", "content": "Hello!"},
+        ]
+
+        cached_summary = json.dumps({
+            "text": "Earlier: user asked about weekend plans.",
+            "ts": 123,
+            "message_count_at_generation": 2,
+        })
+
+        mock_redis = AsyncMock()
+        mock_redis.lrange = AsyncMock(return_value=[json.dumps(m) for m in messages])
+        mock_redis.ping = AsyncMock(return_value=True)
+
+        async def fake_get(key):
+            if key.endswith(":summary"):
+                return cached_summary
+            return None
+        mock_redis.get = fake_get
+
+        state = StateManager(redis_client=mock_redis)
+        state._is_healthy = True
+
+        result = await state.build_llm_context("conv_abc", "You are Annie")
+
+        system_msgs = [m for m in result if m["role"] == "system"]
+        summary_msgs = [
+            m for m in system_msgs
+            if "[Earlier conversation summary]" in m.get("content", "")
+        ]
+        assert len(summary_msgs) == 1, "Expected exactly one summary block"
+        assert "weekend plans" in summary_msgs[0]["content"]
+
+    @pytest.mark.asyncio
+    async def test_no_summary_injection_when_cache_empty(self):
+        """No cached summary => no [Earlier conversation summary] block."""
+        messages = [
+            {"role": "user", "content": "Hi"},
+            {"role": "assistant", "content": "Hello!"},
+        ]
+
+        mock_redis = AsyncMock()
+        mock_redis.lrange = AsyncMock(return_value=[json.dumps(m) for m in messages])
+        mock_redis.ping = AsyncMock(return_value=True)
+        mock_redis.get = AsyncMock(return_value=None)
+
+        state = StateManager(redis_client=mock_redis)
+        state._is_healthy = True
+
+        result = await state.build_llm_context("conv_abc", "You are Annie")
+
+        assert not any(
+            "[Earlier conversation summary]" in m.get("content", "")
+            for m in result
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_double_injection_on_overflow(self):
+        """When overflow branch fires with a cached summary present, the final
+        context should contain exactly one [Earlier conversation summary]
+        block — not two."""
+        # Build messages large enough to trigger overflow.
+        long_content = "x" * 10000  # 2500 tokens per msg
+        messages = [
+            {"role": "user", "content": long_content},
+            {"role": "assistant", "content": long_content},
+        ] * 5  # ~25k tokens
+
+        cached_summary = json.dumps({
+            "text": "Cached summary text.",
+            "ts": 123,
+            "message_count_at_generation": 10,
+        })
+
+        mock_redis = AsyncMock()
+        mock_redis.lrange = AsyncMock(return_value=[json.dumps(m) for m in messages])
+        mock_redis.ping = AsyncMock(return_value=True)
+
+        async def fake_get(key):
+            if key.endswith(":summary"):
+                return cached_summary
+            return None
+        mock_redis.get = fake_get
+
+        state = StateManager(redis_client=mock_redis)
+        state._is_healthy = True
+
+        with patch.object(state, "get_or_create_summary", new_callable=AsyncMock) as mock_summary:
+            mock_summary.return_value = "Fresh summary from overflow branch."
+            result = await state.build_llm_context("conv_abc", "You are Annie")
+
+        summary_msgs = [
+            m for m in result
+            if m.get("role") == "system"
+            and "[Earlier conversation summary]" in m.get("content", "")
+        ]
+        assert len(summary_msgs) == 1, (
+            f"Expected exactly one summary block, got {len(summary_msgs)}: "
+            f"{[m['content'][:80] for m in summary_msgs]}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_injection_when_summary_text_missing_in_payload(self):
+        """Cached payload without a `text` key should be treated as absent."""
+        messages = [
+            {"role": "user", "content": "Hi"},
+            {"role": "assistant", "content": "Hello!"},
+        ]
+
+        cached_summary = json.dumps({"ts": 123})  # no "text"
+
+        mock_redis = AsyncMock()
+        mock_redis.lrange = AsyncMock(return_value=[json.dumps(m) for m in messages])
+        mock_redis.ping = AsyncMock(return_value=True)
+        mock_redis.get = AsyncMock(return_value=cached_summary)
+
+        state = StateManager(redis_client=mock_redis)
+        state._is_healthy = True
+
+        result = await state.build_llm_context("conv_abc", "You are Annie")
+
+        assert not any(
+            "[Earlier conversation summary]" in m.get("content", "")
+            for m in result
+        )

@@ -350,15 +350,20 @@ async def store_memory_tool_handler(
 
 store_memory_tool = {
     "name": "store_memory",
-    "description": """Store a critical memory directly in agentic-memories service.
+    "description": """Store a PERMANENT memory in agentic-memories service.
 
-IMPORTANT: Only use this tool for CRITICAL information that:
+Use this tool for facts that should survive across sessions and across days:
 1. User explicitly asks you to remember ("Remember that I...", "Don't forget...")
-2. Is a permanent preference/constraint ("I'm allergic to...", "Never recommend...")
-3. Is a life-changing decision with lasting impact
-4. Would be dangerous to forget (medical conditions, safety constraints)
+2. A new permanent preference or constraint ("I'm allergic to...", "Never recommend...")
+3. A new goal or long-running project the user has committed to
+4. A life-changing decision with lasting impact
+5. Anything dangerous to forget (medical conditions, safety constraints)
 
-DO NOT use for routine information - background extraction handles that automatically.
+DO NOT use this tool for facts that are only true today — use
+`update_daily_context` instead (meals today, today's workout, today's
+schedule, current mood, open loops today, decisions made today). Those
+reset at midnight Pacific and live in [CURRENT_DAY_CONTEXT] in your system
+prompt.
 
 LAYER SELECTION (controls how long the memory lives):
 - "semantic"   → DEFAULT. Persists forever. Facts, preferences, permanent traits.
@@ -378,11 +383,13 @@ Examples of good uses:
 - "User's mother passed away in March 2024 - sensitive topic"          (long-term)
 - "INTU last close was $381.42 on 2026-04-07"                           (short-term, ttl_seconds=604800)
 
-Examples of bad uses (handled by background extraction):
-- Daily activities or routine conversations
-- Temporary preferences or moods
-- Information already in their profile
-- Topics just discussed""",
+Examples of bad uses (belong in update_daily_context or nowhere):
+- "User had eggs for breakfast"        -> update_daily_context(meals, ...)
+- "User has dentist at 3pm today"      -> update_daily_context(schedule, ...)
+- "User ran 5k this morning"           -> update_daily_context(workout, ...)
+- "User is feeling tired today"        -> update_daily_context(mood, ...)
+- Information already present in the USER PROFILE
+- Topics just discussed that carry no new permanent fact""",
     "inputSchema": {
         "type": "object",
         "properties": {

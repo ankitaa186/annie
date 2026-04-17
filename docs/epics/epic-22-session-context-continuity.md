@@ -60,7 +60,7 @@ This epic is explicitly scoped for a sole-user product with a specific user:
 - Eliminate in-session amnesia: facts stated earlier in the session are available for the rest of the session without requiring `retrieve_memories`.
 - Provide a structured "today" view the LLM can read and write cheaply, with a natural midnight reset.
 - Close the store_memory vs. background-extraction prompt contradiction that causes the LLM to trust a pipeline it shouldn't.
-- Cleanly separate session-scoped state (today's scratchpad) from cross-day state (daily log) from permanent memory (agentic-memories).
+- Cleanly separate day-scoped state (today's scratchpad, with 30-day rolling history) from structured cross-day state (daily log) from permanent memory (agentic-memories).
 
 ### 1.6 Non-Goals
 
@@ -76,7 +76,8 @@ This epic is explicitly scoped for a sole-user product with a specific user:
 | Re-ask incidents ("what did you eat?" / "what's your schedule?" after the answer was given earlier in session) | 0 in a 7-day Langfuse sample |
 | Langfuse trace of a 20+ message conversation shows `[Earlier conversation summary]` injected as a system block regardless of token count | 100% of traces |
 | Langfuse trace shows `[CURRENT_DAY_CONTEXT]` populated and present in the system prompt after the first intra-day fact is captured | 100% of traces post-capture |
-| Cross-day queries ("how many times did I hit the gym this week?") answerable from `get_daily_log` without agentic-memories round-trip | >80% |
+| Per-day recall ("what did I eat yesterday?") answerable from `get_daily_context` without agentic-memories round-trip | 100% within 30-day horizon |
+| Aggregation queries ("how many times did I hit the gym this week?") answerable from `get_daily_log` without agentic-memories round-trip (post-22.4) | >80% |
 | No increase in p95 turn latency beyond 1s over baseline | Hold the line |
 
 ---
@@ -96,19 +97,30 @@ Stories are listed in ROI order. **Sequencing is deliberate** — 22.1 is a same
 
 ---
 
-### Story 22.2 — Daily scratchpad `[CURRENT_DAY_CONTEXT]`
+### Story 22.2 — Daily scratchpad `[CURRENT_DAY_CONTEXT]` (+ 22.2.1 & 22.2.2 follow-ons)
 
 **Priority**: P0
-**Estimated Size**: M (~200 LOC)
+**Estimated Size**: M (~200 LOC) + S (~150 LOC for 22.2.1) + S (~80 LOC for 22.2.2)
 **Problem**: There is no "today's running state" anywhere in the prompt. The LLM has the user profile (lifetime), recent message history (last few turns), and sometimes a rolling summary — but nothing structured for "here is what we established today."
-**Scope**:
-- New Redis key `daily_context:{user_id}:{YYYY-MM-DD Pacific}` with TTL through next midnight Pacific.
-- Structured slots: `schedule`, `meals`, `workout`, `mood`, `open_loops`, `decisions_today`.
-- New MCP tool `update_daily_context(slot, value)` — LLM-callable, writes to the scratchpad.
-- Read-side injection: `build_system_prompt` renders the scratchpad as a `[CURRENT_DAY_CONTEXT]` section when non-empty.
-- Natural midnight reset (TTL handles this; no cron needed).
-**Acceptance signal**: After "I had eggs for breakfast" and "dentist at 3pm" in the morning, asking "what did I eat?" or "what's my schedule today?" 90 minutes later answers correctly without invoking `retrieve_memories`.
-**Why second**: This is the architectural backbone for "session-aware today." Every subsequent fix references it.
+**Scope (22.2 — shipped)**:
+- New Redis key `daily_context:{user_id}:{YYYY-MM-DD Pacific}` — one key per day.
+- Value shape: JSON dict of key -> string.
+- New MCP tool `update_daily_context(key, value)` — LLM-callable, writes to today's dict.
+- Read-side injection: `build_system_prompt` renders TODAY's scratchpad as a `[CURRENT_DAY_CONTEXT]` section when non-empty.
+**Scope (22.2.1 follow-on — shipped)**:
+- Extend TTL from "next Pacific midnight" to **30-day rolling, fixed horizon**: each day's key expires at (that day's Pacific midnight + 30 days), set deterministically on every write via `expireat(eviction_epoch_for_pacific_date(date))`. No rolling-on-write — backfill writes to older dates do not extend the horizon.
+- Add `get_daily_context(user_id, date?, days_ago?)` MCP tool for LLM-driven historical-day fetch. Exactly one of `date` (YYYY-MM-DD Pacific) or `days_ago` (0-30) required. On miss returns `{found: false}` — LLM is told to surface that honestly.
+- Prompt-injection stays today-only. 30 days in the prompt = token bloat; past days accessed via tool only.
+**Scope (22.2.2 follow-on — this wave)**:
+- **Drop the fixed slot enum.** Keys are now free-form — the LLM picks a semantic key name per fact. The old 6-slot set (`schedule` / `meals` / `workout` / `mood` / `open_loops` / `decisions_today`) was too narrow for daily realities that don't fit it (house-hunting options, a debugging investigation, a pet's medication schedule, a trip itinerary, etc.). Those previous names remain valid conventions — the prompt still suggests them as common examples — but nothing enforces them.
+- **Validator**: keys must match `^[a-z][a-z0-9_]{0,31}$` (lowercase snake_case, start with letter, ≤32 chars). Drift mitigation without silent normalization — the LLM sees the format rule and learns it.
+- **Per-day cap**: 20 keys max per day. Updates to an existing key are always allowed; only ADDITION of a 21st new key is blocked with `KEY_LIMIT_EXCEEDED`, which tells the LLM which keys exist and to reuse/consolidate. Keeps token bloat bounded (20 × 2 KB ≈ 40 KB ceiling).
+- **Rendering order**: insertion order (Python dict order is preserved through the `json.dumps`/`loads` Redis roundtrip). Feels like a journal — the thing the LLM captured first, renders first.
+- **Clear mechanism**: writing empty string `""` clears a key from the rendered block (`format_for_prompt` strips blanks). No dedicated delete tool.
+- **Language sweep**: parameter rename `slot` → `key` across the tool handler, schema, description, and tests. MCP tool schema now uses `pattern`/`maxLength` on `key` instead of `enum`.
+- **No migration**: existing Redis keys (if any) already pass the new validator — the old slot names were all valid snake_case.
+**Acceptance signal**: After "I had eggs for breakfast" and "dentist at 3pm" in the morning, asking "what did I eat?" or "what's my schedule today?" 90 minutes later answers correctly without invoking `retrieve_memories`. Asking "what did I eat yesterday?" triggers `get_daily_context(days_ago=1)`, and if the answer is missing the LLM says "I don't have a scratchpad for yesterday" rather than hallucinating. A daily reality OUTSIDE the old enum (e.g., "I'm weighing 3 apartments in Redmond") gets captured under a natural key like `house_hunting` without ceremony.
+**Why second**: This is the architectural backbone for "day-aware Annie." Every subsequent fix references it.
 
 ---
 
@@ -121,7 +133,7 @@ Stories are listed in ROI order. **Sequencing is deliberate** — 22.1 is a same
 - Audit the memory-guidance section of `prompts.py`.
 - Remove "background extraction handles this" framing.
 - Replace with a decision tree:
-  - **Session-scoped fact** (today's meals, today's workout, today's schedule, today's mood) → `update_daily_context`.
+  - **Day-scoped fact** (today's meals, today's workout, today's schedule, today's mood) → `update_daily_context`.
   - **Permanent fact** (new preference, new goal, new biographical info) → `store_memory`.
   - **Never say "I don't know"** for something the user said earlier this session without first consulting the scratchpad (`[CURRENT_DAY_CONTEXT]`) and, failing that, the rolling summary (`[Earlier conversation summary]`).
 **Acceptance signal**: Prompt no longer tells the LLM to defer to background extraction. In manual replay of the "what did you eat today?" regression, the LLM consults the scratchpad first.
@@ -129,19 +141,30 @@ Stories are listed in ROI order. **Sequencing is deliberate** — 22.1 is a same
 
 ---
 
-### Story 22.4 — `update_daily_log` tool
+### Story 22.4 — `update_daily_log` tool (RESHAPED, not subsumed)
 
 **Priority**: P1
-**Estimated Size**: M (~250 LOC)
-**Problem**: The scratchpad (22.2) resets at midnight. For an 8-week recomposition, Ankit needs cross-day queries: "how many times did I hit the gym this week?", "what's my average sleep this month?", "did I hit my protein target Monday through Thursday?" Today, Annie has to guess or round-trip through agentic-memories, where these facts are extracted prose and hard to aggregate.
-**Scope**:
-- Structured MCP tool `update_daily_log` for meal / workout / weight / sleep / mood entries.
-- Redis for 30-day hot storage (fast aggregation queries).
-- agentic-memories write for permanence (so >30-day history survives).
-- Companion tool `get_daily_log(date_range, category)` for the LLM to answer "this week I worked out 4 times" style questions directly.
-- Schema aligned with body-recomp use case (meals: timestamp + description + macros if given; workout: timestamp + type + duration; weight: timestamp + value; sleep: hours + quality; mood: scale + note).
-**Acceptance signal**: Ankit asks "how many gym sessions this week?" and Annie answers from `get_daily_log` without an agentic-memories retrieval. Entries logged today also appear in the scratchpad from 22.2.
-**Why fourth**: Complements 22.2 — scratchpad is "today-aware prompting," daily log is "cross-day trend analysis." Separable because 22.2 alone already solves the re-ask regression; 22.4 is what makes the recomp workflow tractable.
+**Estimated Size**: M (~200 LOC, down from ~250)
+**Status**: DRAFT — reshape confirmed by Parminder after 22.2.1 (scratchpad + history) landed.
+
+**Why it still exists after 22.2.1**: The scratchpad's slots (meals, workout, mood, etc.) store FREE-TEXT prose — last-writer-wins strings. That's perfect for "what the user told me today and what I need to echo back" but useless for aggregation. You cannot sum or average prose. The 8-week body recomposition workflow needs:
+- `sum(workouts between Mon and Sun)` — scratchpad can't do this.
+- `avg(sleep hours over last 14 days)` — scratchpad can't do this.
+- History beyond 30 days — scratchpad horizon is 30 days; an 8-week recomp is 56 days.
+
+**What 22.4 no longer needs to do** (absorbed by 22.2.1):
+- Free-text daily state (meals-as-prose, mood-as-text, schedule, open_loops, decisions) — the scratchpad owns these. No overlap, no duplication.
+- Re-ask prevention — 22.1 + 22.2 + 22.3 already solved it.
+
+**What 22.4 must still do** (narrowed):
+- Structured, schema'd MCP tool `update_daily_log(category, entry)` for: `workout` (type, duration_min, intensity), `weight` (value, units), `sleep` (hours, quality_1_5), `meal_macros` (protein_g, carbs_g, fat_g, note), `mood_score` (scale_1_10, note). Each entry timestamped.
+- Redis 90-day hot window + agentic-memories write for permanence past 90 days.
+- Companion `get_daily_log(date_range, category)` — this is the tool with the range parameter; scratchpad history stays single-day per call.
+- Optionally: entries written today also surface into the scratchpad's relevant slot (nice-to-have; not required).
+
+**Acceptance signal**: Ankit asks "how many gym sessions this week?" or "average sleep this month?" and Annie answers from `get_daily_log` with an aggregation, without an agentic-memories retrieval. Entries beyond 30 days are still reachable via agentic-memories.
+
+**Why deferred**: 22.2.1 fully solves the re-ask regression for daily conversation. 22.4's value now is strictly recomp analytics — important, but gated on Ankit starting the recomp workflow in earnest.
 
 ---
 
@@ -166,7 +189,7 @@ Stories are listed in ROI order. **Sequencing is deliberate** — 22.1 is a same
 - **22.1 ships today.** 40 LOC, no infrastructure, immediate symptom reduction. Independent of everything else. The risk of sitting on it is another week of "what did you eat today?" re-asks.
 - **22.2 is the backbone.** It introduces the scratchpad that 22.3, 22.4, and 22.5 all reference. Must land before 22.3 (prompt rewrite) can point the LLM at it.
 - **22.3 activates 22.2.** Without the prompt rewrite, the scratchpad exists but is underused. Sequenced right after 22.2 so the mechanism and the policy land together.
-- **22.4 is parallel-safe to 22.3** once 22.2 is in. Could be picked up in parallel if David has bandwidth. Separated because its value is cross-day analytics (8-week recomp), not re-ask prevention.
+- **22.4 is parallel-safe to 22.3** once 22.2 is in. Reshaped post-22.2.1 — now strictly structured-aggregation (workout counts, sleep averages, weight trend) for the recomp workflow. Free-text daily state is owned by the scratchpad, so 22.4 no longer competes with it.
 - **22.5 is gated on Parminder's prereq check.** If `stream_message` already handles prefetch, this collapses to a config story. If not, full build. Either way it's last because 22.1+22.2+22.3 already kill the primary symptom.
 
 ---
@@ -190,7 +213,7 @@ Does agentic-memories' `memory_client.stream_message` already return memory inje
 ## 5. Out of Scope
 
 - **Epic 19 (persona modulation).** Topic detection, persona switching, narrative fetching, retrieval-weight rewiring. These are Epic 19's responsibilities and remain Epic 19's responsibilities.
-- **Changes to the agentic-memories extraction pipeline itself.** Epic 22 works around extraction latency by providing a session-scoped scratchpad; it does not try to make extraction faster.
+- **Changes to the agentic-memories extraction pipeline itself.** Epic 22 works around extraction latency by providing a day-scoped scratchpad (30-day rolling storage, today-only in prompt); it does not try to make extraction faster.
 - **Rewriting `_prune_tool_results`.** The pruning function is doing what it was designed to do (keep context small). Epic 22 compensates for its information loss via summary injection (22.1) and scratchpad (22.2), rather than changing pruning behavior. A future story could revisit pruning if summary+scratchpad prove insufficient.
 - **Multi-user session isolation.** Not needed — Annie is sole-user.
 
