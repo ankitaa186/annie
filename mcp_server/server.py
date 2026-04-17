@@ -261,6 +261,37 @@ class MCPServer:
                 valid_params = set(sig.parameters.keys())
                 arguments = {k: v for k, v in arguments.items() if k in valid_params}
 
+            # Pre-validate required arguments against the tool's declared
+            # schema. Surfaces a clear, LLM-actionable error when a malformed
+            # tool call omits a required field, instead of letting Python raise
+            # a TypeError from **arguments that gets stringified into the
+            # response and confuses the LLM on retry.
+            required_fields = (
+                tool_info.get("inputSchema", {}).get("required", []) or []
+            )
+            missing = [f for f in required_fields if f not in arguments]
+            if missing:
+                missing_list = ", ".join(missing)
+                logger.warning(
+                    f"Tool call missing required arguments: {tool_name}",
+                    extra={
+                        "request_id": str(request_id),
+                        "tool_name": tool_name,
+                        "missing_arguments": missing,
+                        "provided_arguments": list(arguments.keys()),
+                        "error_code": "MISSING_REQUIRED_ARGUMENT",
+                    },
+                )
+                return self.create_error_response(
+                    request_id,
+                    -32602,
+                    (
+                        f"Invalid params for tool '{tool_name}': missing required "
+                        f"argument(s): {missing_list}. Retry the call with all "
+                        f"required fields populated."
+                    ),
+                )
+
             # Check if handler is async and await if needed
             if inspect.iscoroutinefunction(tool_handler):
                 result = await tool_handler(**arguments)
