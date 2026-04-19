@@ -341,25 +341,45 @@ Only when you have comprehensive, well-researched information:
 - Include key insights, not just facts
 - Cite your sources
 - Highlight any caveats or limitations
-- Output the final JSON response
+- Output the final response in the format below
 
-### Response Format
+### Response Format (STRICT)
 
-IMPORTANT: Your final response must be ONLY a JSON object. Do NOT output the report before the JSON.
-Put your COMPLETE research report inside the "message" field of the JSON.
+Your final response has TWO parts: a small JSON metadata block, then the full markdown
+report on its own, separated by the `---REPORT---` marker on its own line.
 
-```json
+DO NOT put the report inside the JSON. Long markdown strings inside JSON get mangled
+by escaping (newlines turn into literal `\\n`, quotes break the JSON). Keep the report
+as plain markdown AFTER the JSON.
+
+Use EXACTLY this shape, with no code fences around the whole thing:
+
 {
     "skip": false,
     "skip_reason": null,
-    "message": "YOUR FULL RESEARCH REPORT GOES HERE - include all findings, analysis, insights, and recommendations. Use markdown formatting (headers, bullets, bold) for readability. This should be the complete report you want the user to see.",
-    "tools_called": ["web_search", "web_crawl", "reddit_search", "get_financials", "get_sec_filings"],
-    "reasoning": "Brief summary of your research process"
+    "tools_called": ["web_search", "web_crawl", "reddit_search"],
+    "reasoning": "Brief 1-2 sentence summary of your research process"
 }
-```
+---REPORT---
+# Your Full Research Report Title
 
-The "message" field should contain your entire, well-formatted research report - NOT a summary.
-Any text outside the JSON will be ignored.
+Write your complete report here as normal markdown. Headers, bullets, bold, tables,
+links — all fine. No JSON escaping. No backslash-n sequences. Just regular text with
+real newlines.
+
+## Section 1
+- Point one
+- Point two
+
+## Section 2
+...and so on.
+
+### Rules
+- The JSON block must be valid JSON (no trailing commas, proper quotes).
+- `---REPORT---` goes on its OWN line, with nothing else on that line.
+- Everything after `---REPORT---` is treated as the literal message to the user.
+- If you decide to skip (skip=true), omit the `---REPORT---` section entirely.
+- Do NOT wrap the whole response in ```json``` fences.
 
 ### Important Guidelines
 - Take your time - deep research is expected to take 5-15 minutes
@@ -368,6 +388,37 @@ Any text outside the JSON will be ignored.
 - Synthesize information, don't just list search results
 - Provide actionable insights, not just data dumps
 """
+
+
+# Marker separating the JSON metadata block from the markdown report body.
+RESEARCH_REPORT_MARKER = "---REPORT---"
+
+
+def _unescape_stray_sequences(text: str) -> str:
+    """
+    Convert literal backslash-escape sequences to real characters.
+
+    When an LLM double-escapes a JSON string (emits `\\\\n` where it meant `\\n`),
+    `json.loads` produces the 2-character string `\\n` instead of a newline. This
+    best-effort cleanup rescues those cases so the user sees real line breaks
+    instead of literal `\\n` in their Telegram message.
+
+    Only runs when the text actually contains these literal sequences, so normal
+    messages are untouched.
+    """
+    if not text:
+        return text
+    # Cheap guard: only do work when literal backslash-escapes are present.
+    if "\\n" not in text and "\\t" not in text and '\\"' not in text and "\\r" not in text:
+        return text
+    # Order matters: handle \\r\\n pair before \\n alone.
+    return (
+        text.replace("\\r\\n", "\n")
+            .replace("\\n", "\n")
+            .replace("\\t", "\t")
+            .replace("\\r", "\r")
+            .replace('\\"', '"')
+    )
 
 
 def build_agent_prompt(
@@ -555,74 +606,97 @@ def parse_agent_response(response_content: str, tools_called: List[str]) -> Wake
     """
     Parse LLM response into WakeUpResult.
 
-    Handles both JSON and plain text responses gracefully.
-    Also handles cases where LLM includes preamble text before JSON.
+    Accepted shapes, tried in order:
+    1. Research protocol: JSON metadata + `---REPORT---` marker + plain markdown body.
+       The markdown body becomes the message. No JSON escaping of prose.
+    2. Plain JSON object with a `message` field (legacy non-research triggers).
+    3. Plain text (no JSON at all) — used as the message verbatim.
 
-    Args:
-        response_content: LLM response content
-        tools_called: List of tools called during execution
-
-    Returns:
-        WakeUpResult parsed from response
+    Any literal `\\n`/`\\t`/`\\"` sequences that survived JSON decoding are
+    un-escaped as a safety net, so users never see `foo\\n\\n## Bar` in Telegram.
     """
-    try:
-        # Strip markdown code blocks if present (Gemini often wraps JSON in ```json ... ```)
-        clean_content = response_content.strip()
-        if clean_content.startswith("```"):
-            # Remove opening ```json or ```
-            lines = clean_content.split("\n")
-            if lines[0].startswith("```"):
-                lines = lines[1:]  # Remove first line (```json)
-            if lines and lines[-1].strip() == "```":
-                lines = lines[:-1]  # Remove last line (```)
-            clean_content = "\n".join(lines).strip()
-            logger.debug(
-                "Stripped markdown code blocks from response",
-                extra={"original_length": len(response_content), "clean_length": len(clean_content)}
-            )
+    # Strip leading/trailing whitespace and outer code fences.
+    clean_content = response_content.strip()
+    if clean_content.startswith("```"):
+        lines = clean_content.split("\n")
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        clean_content = "\n".join(lines).strip()
+        logger.debug(
+            "Stripped markdown code blocks from response",
+            extra={"original_length": len(response_content), "clean_length": len(clean_content)}
+        )
 
-        # Try to parse as JSON directly first
-        try:
-            data = json.loads(clean_content)
-        except json.JSONDecodeError:
-            # LLM may have included text before JSON - try to extract JSON
-            json_start = clean_content.find('{')
-            json_end = clean_content.rfind('}')
+    # Shape 1: research protocol (JSON header + ---REPORT--- + markdown body).
+    marker_idx = clean_content.find(RESEARCH_REPORT_MARKER)
+    if marker_idx != -1:
+        header = clean_content[:marker_idx].strip()
+        body = clean_content[marker_idx + len(RESEARCH_REPORT_MARKER):].lstrip("\n").rstrip()
 
-            if json_start != -1 and json_end != -1 and json_end > json_start:
-                json_str = clean_content[json_start:json_end + 1]
-                preamble_length = json_start
-                logger.debug(
-                    "Extracted JSON from mixed content (preamble ignored)",
-                    extra={
-                        "preamble_length": preamble_length,
-                        "json_length": len(json_str)
-                    }
+        header_json = _extract_json_object(header)
+        data: Dict[str, Any] = {}
+        if header_json is not None:
+            try:
+                data = json.loads(header_json)
+            except json.JSONDecodeError:
+                logger.warning(
+                    "Research header JSON invalid; using body as message anyway",
+                    extra={"header_preview": header[:200]}
                 )
-                data = json.loads(json_str)
-            else:
-                # No JSON found - re-raise to trigger fallback
-                raise
+                data = {}
 
-        # Always use the message from JSON - preamble content is ignored
-        # (Research protocol instructs LLM to put full report in JSON message field)
+        logger.debug(
+            "Parsed research-protocol response",
+            extra={
+                "header_length": len(header),
+                "body_length": len(body),
+                "has_valid_json_header": bool(data)
+            }
+        )
+
         return WakeUpResult(
-            skip=data.get("skip", False),
+            skip=bool(data.get("skip", False)),
             skip_reason=data.get("skip_reason"),
-            message=data.get("message", ""),
+            message=_unescape_stray_sequences(body),
             tools_called=data.get("tools_called", tools_called),
             reasoning=data.get("reasoning", "No reasoning provided")
         )
-    except json.JSONDecodeError:
-        # Fallback: treat as plain message
-        logger.warning("Failed to parse agent response as JSON, treating as message")
-        return WakeUpResult(
-            skip=False,
-            skip_reason=None,
-            message=response_content,
-            tools_called=tools_called,
-            reasoning="Fallback: LLM did not return JSON"
-        )
+
+    # Shape 2: a JSON object somewhere in the response.
+    json_str = _extract_json_object(clean_content)
+    if json_str is not None:
+        try:
+            data = json.loads(json_str)
+            return WakeUpResult(
+                skip=bool(data.get("skip", False)),
+                skip_reason=data.get("skip_reason"),
+                message=_unescape_stray_sequences(data.get("message", "") or ""),
+                tools_called=data.get("tools_called", tools_called),
+                reasoning=data.get("reasoning", "No reasoning provided")
+            )
+        except json.JSONDecodeError:
+            pass  # fall through to plain-text fallback
+
+    # Shape 3: plain text fallback.
+    logger.warning("Failed to parse agent response as JSON, treating as message")
+    return WakeUpResult(
+        skip=False,
+        skip_reason=None,
+        message=_unescape_stray_sequences(response_content),
+        tools_called=tools_called,
+        reasoning="Fallback: LLM did not return JSON"
+    )
+
+
+def _extract_json_object(text: str) -> Optional[str]:
+    """Return the substring between the first `{` and last `}`, or None."""
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    return text[start:end + 1]
 
 
 # ============================================================================

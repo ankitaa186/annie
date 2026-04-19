@@ -148,6 +148,78 @@ def test_parse_agent_response_with_preamble_text():
     assert result.reasoning == "Found significant price movement"
 
 
+def test_parse_agent_response_research_protocol_format():
+    """Research protocol: JSON metadata + ---REPORT--- + markdown body."""
+    response = '''{
+    "skip": false,
+    "skip_reason": null,
+    "tools_called": ["web_search", "web_crawl", "reddit_search"],
+    "reasoning": "Ran 6 searches across vendor docs and Reddit"
+}
+---REPORT---
+# Lightguns for OLED TVs
+
+## Top picks
+- Gun4IR
+- Sinden
+- Retro Shooter
+
+## Caveats
+None are truly "open box, done in 90 seconds".
+'''
+    result = parse_agent_response(response, [])
+
+    assert result.skip is False
+    assert result.message.startswith("# Lightguns for OLED TVs")
+    # Body must contain REAL newlines, not literal backslash-n.
+    assert "\n## Top picks\n" in result.message
+    assert "\\n" not in result.message
+    assert "web_search" in result.tools_called
+    assert result.reasoning.startswith("Ran 6 searches")
+
+
+def test_parse_agent_response_unescapes_double_escaped_newlines():
+    """Legacy path: literal `\\n` sequences in the message are un-escaped."""
+    # Simulates an LLM that double-escaped inside the JSON message field.
+    response = (
+        '{"skip": false, '
+        '"message": "Intro paragraph\\\\n\\\\n## Header\\\\n- bullet", '
+        '"reasoning": "test"}'
+    )
+    result = parse_agent_response(response, [])
+
+    assert result.skip is False
+    assert "\\n" not in result.message
+    assert result.message == "Intro paragraph\n\n## Header\n- bullet"
+
+
+def test_parse_agent_response_research_protocol_missing_json_header():
+    """Body after ---REPORT--- still becomes message if JSON header is malformed."""
+    response = "garbage header no braces\n---REPORT---\n# Report Title\n\nBody text."
+    result = parse_agent_response(response, ["web_search"])
+
+    assert result.skip is False
+    assert result.message.startswith("# Report Title")
+    # Falls back to the caller-supplied tools_called list.
+    assert result.tools_called == ["web_search"]
+
+
+def test_parse_agent_response_research_protocol_wrapped_in_code_fence():
+    """Outer ```json fences should be stripped before looking for marker."""
+    response = (
+        "```json\n"
+        '{"skip": false, "tools_called": ["web_search"], "reasoning": "ok"}\n'
+        "---REPORT---\n"
+        "# Title\n\nBody.\n"
+        "```"
+    )
+    result = parse_agent_response(response, [])
+
+    assert result.skip is False
+    assert result.message.startswith("# Title")
+    assert "web_search" in result.tools_called
+
+
 # ============================================================================
 # Prompt Building Tests
 # ============================================================================
