@@ -131,11 +131,11 @@ def format_for_prompt(scratchpad: Optional[Dict[str, Any]]) -> str:
 
     header = (
         "[CURRENT_DAY_CONTEXT]\n"
-        "Running scratchpad of what you and the user have established earlier "
-        "today (Pacific). Trust these before asking again. Use "
-        "`update_daily_context(key, value)` to keep this current — pick a "
-        "clear snake_case key (e.g., `meals`, `schedule`, `house_hunting`) "
-        "and reuse existing keys when they fit rather than creating siblings."
+        "Today's scratchpad (Pacific) — what the user has told you in "
+        "conversation so far today. Use as recent context; still call tools "
+        "for anything external, fresh, or high-stakes. Update with "
+        "`update_daily_context(key, value)` — snake_case keys, reuse "
+        "existing keys across the day rather than creating siblings."
     )
     return header + "\n" + "\n".join(lines)
 

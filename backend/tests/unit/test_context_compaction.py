@@ -705,9 +705,7 @@ class TestBuildLLMContextSummarization:
 
             result = await state.build_llm_context("conv_123", "You are Annie")
 
-        # Should have called summarization at least once. Note: with 10+ messages,
-        # build_llm_context fires both the count-based refresh (Phase 2) and the
-        # token-overflow path, so it can be called up to twice — that's expected.
+        # Should have called summarization at least once (token-overflow path).
         assert mock_summary.call_count >= 1
 
         # Should include the summary system message

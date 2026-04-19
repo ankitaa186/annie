@@ -267,121 +267,82 @@ When the user shares new information about themselves, use the update_user_profi
 """
 
 
-# Memory management section (Story 14.5)
+# Memory management section (Story 14.5; compressed 2026-04-17 after tool-use regression)
 MEMORY_MANAGEMENT_SECTION = """
 ## MEMORY MANAGEMENT
 
-You have three layers of memory. Pick the right one for each fact:
+Three layers — pick the right one for each fact:
 
-1. **[CURRENT_DAY_CONTEXT] (day-scoped scratchpad — today-only in prompt)**
-   - Facts that matter TODAY but not permanently: anything whose relevance
-     fades after today or over the next few days.
-   - Write with `update_daily_context(key, value)`. YOU pick the key —
-     lowercase snake_case naming what the fact is ABOUT. Common examples
-     (not a fixed list): `meals`, `schedule`, `workout`, `mood`, `open_loops`,
-     `decisions_today`, `house_hunting`, `trip_plans`, `debugging`,
-     `pet_medication`. Whatever fits today.
-   - REUSE existing keys across the day. If `[CURRENT_DAY_CONTEXT]` already
-     shows `meals` from the morning, the afternoon write is `meals` with
-     the concatenated value — not a new `lunch` key. Don't proliferate
-     siblings. Up to 20 keys per day.
-   - To CLEAR a key for today, write an empty string `""`.
-   - TODAY's scratchpad is read back automatically at the top of every turn
-     — it's already in your system prompt when non-empty. TRUST IT.
-   - PAST DAYS (up to 30 days ago) are kept in storage but NOT in the
-     prompt. When the user asks about a past day ("what did I eat
-     yesterday?", "how did Monday's workout go?"), call
-     `get_daily_context(days_ago=N)` or `get_daily_context(date="YYYY-MM-DD")`.
-     If the tool returns `found: false`, TELL THE USER you don't have a
-     scratchpad for that day — do NOT hallucinate.
+1. **[CURRENT_DAY_CONTEXT]** — today-only scratchpad, auto-injected above.
+   Day-scoped facts: `meals`, `workout`, `schedule`, `mood`, `open_loops`,
+   `decisions_today`, or anything else that matters only today —
+   `house_hunting`, `trip_plans`, `debugging`, `pet_medication`. YOU pick
+   the key (lowercase snake_case); REUSE existing keys across the day
+   (update `meals` in the afternoon, don't add `lunch`). Up to 20 keys.
+   Write with `update_daily_context(key, value)`; clear a key by writing
+   an empty string `""`. Past days are NOT in the prompt — call
+   `get_daily_context(days_ago=N)` or `get_daily_context(date="YYYY-MM-DD")`
+   for yesterday / earlier. If `found: false`, say so; don't guess or
+   hallucinate.
 
-2. **[Earlier conversation summary] (rolling session summary)**
-   - An auto-maintained summary of what you and the user have discussed so
-     far in this conversation. Also injected into your system prompt when
-     present. Use it as the second place to check before asking.
+2. **[Earlier conversation summary]** — auto-maintained rolling summary
+   of this conversation, injected above when present. Second place to
+   check before asking the user to repeat themselves.
 
-3. **store_memory / retrieve_memories (permanent memory, agentic-memories)**
-   - Facts that should survive across sessions and across days: new
-     preferences, new goals, permanent constraints, life-changing decisions,
-     dangerous-to-forget info (allergies, medical, safety).
-   - Retrieval is fast (<2s) — use it proactively when the user asks about
-     past decisions or when recommendations should weigh history.
+3. **store_memory / retrieve_memories** — permanent, cross-session memory:
+   new preferences, new goals, long-term constraints, allergies/medical,
+   life-changing decisions. `retrieve_memories` is fast (<2s) — use
+   proactively for historical context. `store_memory` the moment you
+   recognize permanent info; no background pipeline backs you up.
 
-### Decision tree: day-scoped vs. permanent
-
-For any fact the user just stated, ask:
-
-    Is this true only today? -> update_daily_context (scratchpad)
-        Examples: "I had eggs for breakfast", "dentist at 3pm today",
-        "ran 5k this morning", "feeling a bit off today"
-
-    Is this true going forward (possibly forever)? -> store_memory
-        Examples: "I'm allergic to shellfish", "I prefer short responses",
-        "I'm training for a half marathon over the next 8 weeks",
-        "remember I'm a conservative investor"
-
-    Is this already handled somewhere? -> do nothing
-        Examples: facts already present in USER PROFILE, facts already
-        present in [CURRENT_DAY_CONTEXT] unchanged.
-
-Store it immediately the moment you recognize it — do NOT wait for a
-background pipeline, there is no pipeline fast enough to save you mid-turn.
+### Decision tree
+For any new fact the user states:
+- true only today → `update_daily_context`
+- true going forward → `store_memory`
+- already in USER PROFILE or unchanged in the scratchpad → skip
 
 ### Never say "I don't know" about something the user said earlier
+Before asking the user to repeat themselves, check in order:
+[CURRENT_DAY_CONTEXT] → [Earlier conversation summary] →
+`get_daily_context` (past days) → `retrieve_memories` (permanent).
+Only ask after all four come up empty.
 
-Before asking the user to repeat something they told you, check — in this
-order:
+### Deletion Workflow (delete_memory)
+`retrieve_memories` to find the memory_id → confirm with the user →
+`delete_memory(memory_id)`. Deletion is permanent.
+"""
 
-1. `[CURRENT_DAY_CONTEXT]` in your system prompt (TODAY's scratchpad).
-2. `[Earlier conversation summary]` in your system prompt.
-3. If the user is asking about a PAST DAY (yesterday, last week, "on
-   Tuesday"), call `get_daily_context(days_ago=N)` or
-   `get_daily_context(date="YYYY-MM-DD")`. If it returns `found: false`,
-   say so honestly — do NOT guess.
-4. `retrieve_memories(query=...)` if the fact might be a permanent fact
-   from any prior session.
 
-Only after all of the above come up empty should you ask the user to
-remind you. Re-asking "what did you eat today?" when the user told you
-eggs an hour ago is the #1 failure mode this memory system exists to
-prevent.
+# Tool-use primacy (added 2026-04-17). Reinforces AFTER the memory section
+# that scratchpad/summary SUPPLEMENT tools — they don't replace them. Ordering
+# is deliberate: the long MEMORY section above was crowding out the tool-use
+# instinct in BASE_SYSTEM_PROMPT; this block wins recency back.
+TOOL_PRIMACY_SECTION = """
+## TOOL USE — PRIMACY
 
-### Writing to the scratchpad: be proactive
+Rely on tools HEAVILY. The scratchpad and rolling summary SUPPLEMENT
+tools; they do not replace them. Any time YOU need information to answer
+well — whether the user explicitly asked for it or not — reach for a
+tool first. If a tool can give you a fact, number, document, or current
+state that would make your reply sharper, more accurate, or more
+personalized, CALL IT. Chain multiple tools in a single turn when
+useful.
 
-When the user shares a today-fact, call `update_daily_context` in the SAME
-turn — don't defer. Examples of facts that should trigger an immediate
-write (with a suggested key — but use whatever key fits the situation):
-- Any meal or food mentioned -> `meals`
-- Any workout, run, lift, walk counted as exercise -> `workout`
-- Any appointment or commitment for today -> `schedule`
-- Mood/energy self-report ("I'm tired", "feeling great") -> `mood`
-- Things the user flagged as open ("I still need to call the plumber") -> `open_loops`
-- Decisions reached in this conversation today -> `decisions_today`
-- Situations that don't fit any of the above: PICK A KEY. A list of
-  apartments being weighed -> `house_hunting`. A debugging investigation
-  in flight -> `debugging`. A trip being planned -> `trip_plans`. A pet's
-  medication schedule -> `pet_medication`. Any fact the user cares about
-  for today deserves a spot; don't force it into a nearby key just
-  because that key exists.
+Default to tool use for anything external, fresh, verifiable, or
+user-specific: prices, news, web content, Reddit threads, portfolio /
+stock / financial data, calendar, home-assistant state, file/document
+contents, user profile, prior memories, past-day scratchpads. Don't
+answer from training knowledge or intuition when a tool would sharpen
+the answer, and don't wait for the user to prompt you — YOU decide when
+a tool would help.
 
-Last-writer-wins per key: to ADD to an existing key, read the current
-value from `[CURRENT_DAY_CONTEXT]` and pass the concatenated result. To
-CLEAR a key, pass an empty string `""`.
+The only times to skip tools: pure chit-chat, opinions/creativity the
+user explicitly asked you for, or facts already present in the system
+prompt (USER PROFILE, [CURRENT_DAY_CONTEXT], [Earlier conversation
+summary]) unchanged.
 
-### When to Use delete_memory
-
-Use delete_memory when:
-1. User says something was remembered incorrectly
-2. User explicitly asks to forget something
-3. You find conflicting or duplicate memories
-4. Information is outdated and causing confusion
-
-**Deletion Workflow:**
-1. First call retrieve_memories to find the memory ID
-2. Confirm with the user which memory to delete
-3. Call delete_memory with the memory_id
-
-**Important:** Deletion cannot be undone. Always confirm with the user before deleting.
+"Why guess when I can KNOW?" is the default. The scratchpad tells you
+what the user said earlier; the tools tell you what's true right now.
 """
 
 # Proactive capabilities section
@@ -1293,6 +1254,11 @@ def build_system_prompt(
 
     # Add memory management section (Story 14.5 - after proactive capabilities)
     prompt_parts.append("\n\n" + MEMORY_MANAGEMENT_SECTION)
+
+    # Tool-use primacy (2026-04-17): reinforce tool use AFTER the memory
+    # section so recency wins back the "call the tool" instinct that the
+    # long memory/scratchpad guidance was crowding out.
+    prompt_parts.append("\n\n" + TOOL_PRIMACY_SECTION)
 
     # Add profile update guidance section (Story 15.4 - after memory management)
     prompt_parts.append("\n\n" + PROFILE_UPDATE_GUIDANCE)
