@@ -148,16 +148,9 @@ def test_parse_agent_response_with_preamble_text():
     assert result.reasoning == "Found significant price movement"
 
 
-def test_parse_agent_response_research_protocol_format():
-    """Research protocol: JSON metadata + ---REPORT--- + markdown body."""
-    response = '''{
-    "skip": false,
-    "skip_reason": null,
-    "tools_called": ["web_search", "web_crawl", "reddit_search"],
-    "reasoning": "Ran 6 searches across vendor docs and Reddit"
-}
----REPORT---
-# Lightguns for OLED TVs
+def test_parse_agent_response_research_plain_markdown():
+    """Research triggers return plain markdown; entire body becomes message."""
+    response = '''# Lightguns for OLED TVs
 
 ## Top picks
 - Gun4IR
@@ -167,57 +160,61 @@ def test_parse_agent_response_research_protocol_format():
 ## Caveats
 None are truly "open box, done in 90 seconds".
 '''
-    result = parse_agent_response(response, [])
+    result = parse_agent_response(response, ["web_search", "reddit_search"], is_research=True)
 
     assert result.skip is False
     assert result.message.startswith("# Lightguns for OLED TVs")
-    # Body must contain REAL newlines, not literal backslash-n.
     assert "\n## Top picks\n" in result.message
     assert "\\n" not in result.message
-    assert "web_search" in result.tools_called
-    assert result.reasoning.startswith("Ran 6 searches")
+    # tools_called comes from the streaming layer, not the LLM's claim.
+    assert result.tools_called == ["web_search", "reddit_search"]
 
 
-def test_parse_agent_response_unescapes_double_escaped_newlines():
-    """Legacy path: literal `\\n` sequences in the message are un-escaped."""
-    # Simulates an LLM that double-escaped inside the JSON message field.
+def test_parse_agent_response_research_strips_outer_code_fence():
+    """```markdown fences around the whole response get stripped."""
+    response = "```markdown\n# Title\n\nBody text.\n```"
+    result = parse_agent_response(response, [], is_research=True)
+
+    assert result.skip is False
+    assert result.message == "# Title\n\nBody text."
+
+
+def test_parse_agent_response_research_legacy_report_marker():
+    """Back-compat: old JSON-header + ---REPORT--- + markdown shape still parses."""
+    response = (
+        '{"skip": false, "tools_called": ["web_search"], "reasoning": "ok"}\n'
+        "---REPORT---\n"
+        "# Title\n\nBody."
+    )
+    result = parse_agent_response(response, ["web_search"], is_research=True)
+
+    assert result.skip is False
+    assert result.message.startswith("# Title")
+    # Streaming-layer tools win; LLM-claimed tools in the legacy header are ignored.
+    assert result.tools_called == ["web_search"]
+
+
+def test_parse_agent_response_research_legacy_json_envelope():
+    """Back-compat: research response still wrapped in a JSON envelope."""
+    response = '{"skip": false, "message": "# Title\\n\\nBody.", "reasoning": "ok"}'
+    result = parse_agent_response(response, ["web_search"], is_research=True)
+
+    assert result.skip is False
+    assert result.message == "# Title\n\nBody."
+
+
+def test_parse_agent_response_non_research_unescapes_double_escaped_newlines():
+    """Non-research JSON-envelope path: literal `\\n` sequences get un-escaped."""
     response = (
         '{"skip": false, '
-        '"message": "Intro paragraph\\\\n\\\\n## Header\\\\n- bullet", '
+        '"message": "Intro\\\\n\\\\n## Header\\\\n- bullet", '
         '"reasoning": "test"}'
     )
     result = parse_agent_response(response, [])
 
     assert result.skip is False
     assert "\\n" not in result.message
-    assert result.message == "Intro paragraph\n\n## Header\n- bullet"
-
-
-def test_parse_agent_response_research_protocol_missing_json_header():
-    """Body after ---REPORT--- still becomes message if JSON header is malformed."""
-    response = "garbage header no braces\n---REPORT---\n# Report Title\n\nBody text."
-    result = parse_agent_response(response, ["web_search"])
-
-    assert result.skip is False
-    assert result.message.startswith("# Report Title")
-    # Falls back to the caller-supplied tools_called list.
-    assert result.tools_called == ["web_search"]
-
-
-def test_parse_agent_response_research_protocol_wrapped_in_code_fence():
-    """Outer ```json fences should be stripped before looking for marker."""
-    response = (
-        "```json\n"
-        '{"skip": false, "tools_called": ["web_search"], "reasoning": "ok"}\n'
-        "---REPORT---\n"
-        "# Title\n\nBody.\n"
-        "```"
-    )
-    result = parse_agent_response(response, [])
-
-    assert result.skip is False
-    assert result.message.startswith("# Title")
-    assert "web_search" in result.tools_called
+    assert result.message == "Intro\n\n## Header\n- bullet"
 
 
 # ============================================================================

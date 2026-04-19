@@ -311,7 +311,7 @@ This is a DEEP RESEARCH trigger. You must perform exhaustive research before res
 Do NOT answer immediately. Follow this protocol:
 
 ### 1. PLAN
-Output a text plan of what you need to find. Break down the research question into
+Think through what you need to find. Break down the research question into
 specific search queries. Think about:
 - What are the key aspects to investigate?
 - What perspectives or sources would be valuable?
@@ -335,51 +335,22 @@ After each round of tool outputs, self-critique:
 
 If the answer to any of these is "no", LOOP back to EXECUTE with refined searches.
 
-### 4. FINALIZE
-Only when you have comprehensive, well-researched information:
-- Synthesize findings into a cohesive report
-- Include key insights, not just facts
-- Cite your sources
-- Highlight any caveats or limitations
-- Output the final response in the format below
+### 4. FINALIZE — Response Format (STRICT)
 
-### Response Format (STRICT)
+Reply with ONLY the final report as plain markdown. The entire response is delivered
+verbatim to the user over Telegram (which renders a small HTML subset), so:
 
-Your final response has TWO parts: a small JSON metadata block, then the full markdown
-report on its own, separated by the `---REPORT---` marker on its own line.
+- No JSON. No envelope. No ``` fences around the whole thing.
+- No preamble like "Here is your report:" — start directly with the title or content.
+- Use normal markdown: `#`/`##` headers, `-` bullets, `**bold**`, `*italic*`, links,
+  inline `code`, fenced code blocks for snippets. Tables are fine; they get converted
+  to a readable key/value form in Telegram.
+- Real newlines between paragraphs. Never write a literal `\\n` — press enter instead.
+- Cite sources inline with markdown links where it matters.
 
-DO NOT put the report inside the JSON. Long markdown strings inside JSON get mangled
-by escaping (newlines turn into literal `\\n`, quotes break the JSON). Keep the report
-as plain markdown AFTER the JSON.
-
-Use EXACTLY this shape, with no code fences around the whole thing:
-
-{
-    "skip": false,
-    "skip_reason": null,
-    "tools_called": ["web_search", "web_crawl", "reddit_search"],
-    "reasoning": "Brief 1-2 sentence summary of your research process"
-}
----REPORT---
-# Your Full Research Report Title
-
-Write your complete report here as normal markdown. Headers, bullets, bold, tables,
-links — all fine. No JSON escaping. No backslash-n sequences. Just regular text with
-real newlines.
-
-## Section 1
-- Point one
-- Point two
-
-## Section 2
-...and so on.
-
-### Rules
-- The JSON block must be valid JSON (no trailing commas, proper quotes).
-- `---REPORT---` goes on its OWN line, with nothing else on that line.
-- Everything after `---REPORT---` is treated as the literal message to the user.
-- If you decide to skip (skip=true), omit the `---REPORT---` section entirely.
-- Do NOT wrap the whole response in ```json``` fences.
+If (and only if) you genuinely cannot produce a useful report — e.g. every search
+failed, or the topic is out of scope — reply with a short markdown explanation of
+what went wrong. Don't invent a skip marker; just say it plainly.
 
 ### Important Guidelines
 - Take your time - deep research is expected to take 5-15 minutes
@@ -390,7 +361,8 @@ real newlines.
 """
 
 
-# Marker separating the JSON metadata block from the markdown report body.
+# Legacy marker kept for backward compatibility with mid-flight responses from the
+# previous protocol version that emitted JSON metadata + `---REPORT---` + markdown.
 RESEARCH_REPORT_MARKER = "---REPORT---"
 
 
@@ -419,6 +391,18 @@ def _unescape_stray_sequences(text: str) -> str:
             .replace("\\r", "\r")
             .replace('\\"', '"')
     )
+
+
+def _strip_outer_code_fence(text: str) -> str:
+    """Strip a leading ``` fence and matching trailing ```, if present."""
+    stripped = text.strip()
+    if not stripped.startswith("```"):
+        return stripped
+    lines = stripped.split("\n")
+    lines = lines[1:]  # drop opening ```foo
+    if lines and lines[-1].strip() == "```":
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
 
 
 def build_agent_prompt(
@@ -602,70 +586,103 @@ def build_agent_prompt(
 # Response Parsing
 # ============================================================================
 
-def parse_agent_response(response_content: str, tools_called: List[str]) -> WakeUpResult:
+def parse_agent_response(
+    response_content: str,
+    tools_called: List[str],
+    is_research: bool = False,
+) -> WakeUpResult:
     """
     Parse LLM response into WakeUpResult.
 
-    Accepted shapes, tried in order:
-    1. Research protocol: JSON metadata + `---REPORT---` marker + plain markdown body.
-       The markdown body becomes the message. No JSON escaping of prose.
-    2. Plain JSON object with a `message` field (legacy non-research triggers).
-    3. Plain text (no JSON at all) — used as the message verbatim.
+    Research triggers return plain markdown (no JSON envelope); non-research
+    triggers still use a JSON envelope because they legitimately need a
+    structured skip decision (quiet hours, gate conditions, etc.).
 
-    Any literal `\\n`/`\\t`/`\\"` sequences that survived JSON decoding are
-    un-escaped as a safety net, so users never see `foo\\n\\n## Bar` in Telegram.
+    Args:
+        response_content: Raw LLM output.
+        tools_called: Tools observed during streaming — used as the
+            authoritative list regardless of what the LLM claims.
+        is_research: True for research triggers; skips JSON parsing.
     """
-    # Strip leading/trailing whitespace and outer code fences.
-    clean_content = response_content.strip()
-    if clean_content.startswith("```"):
-        lines = clean_content.split("\n")
-        if lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        clean_content = "\n".join(lines).strip()
-        logger.debug(
-            "Stripped markdown code blocks from response",
-            extra={"original_length": len(response_content), "clean_length": len(clean_content)}
-        )
+    if is_research:
+        return _parse_research_response(response_content, tools_called)
+    return _parse_json_envelope_response(response_content, tools_called)
 
-    # Shape 1: research protocol (JSON header + ---REPORT--- + markdown body).
-    marker_idx = clean_content.find(RESEARCH_REPORT_MARKER)
+
+def _parse_research_response(
+    response_content: str,
+    tools_called: List[str],
+) -> WakeUpResult:
+    """
+    Parse a research-trigger response. The whole thing is the message.
+
+    Tolerates three shapes in case of stale prompts or model drift:
+    1. Plain markdown (current protocol).
+    2. Old `<json>---REPORT---<markdown>` shape: use only the markdown body.
+    3. Legacy JSON envelope with a `message` field: extract it.
+    """
+    cleaned = _strip_outer_code_fence(response_content)
+
+    # Back-compat: old protocol put metadata JSON before a ---REPORT--- marker.
+    marker_idx = cleaned.find(RESEARCH_REPORT_MARKER)
     if marker_idx != -1:
-        header = clean_content[:marker_idx].strip()
-        body = clean_content[marker_idx + len(RESEARCH_REPORT_MARKER):].lstrip("\n").rstrip()
-
-        header_json = _extract_json_object(header)
-        data: Dict[str, Any] = {}
-        if header_json is not None:
-            try:
-                data = json.loads(header_json)
-            except json.JSONDecodeError:
-                logger.warning(
-                    "Research header JSON invalid; using body as message anyway",
-                    extra={"header_preview": header[:200]}
-                )
-                data = {}
-
+        body = cleaned[marker_idx + len(RESEARCH_REPORT_MARKER):].lstrip("\n").rstrip()
         logger.debug(
-            "Parsed research-protocol response",
-            extra={
-                "header_length": len(header),
-                "body_length": len(body),
-                "has_valid_json_header": bool(data)
-            }
+            "Research response used legacy ---REPORT--- marker; extracting body",
+            extra={"body_length": len(body)}
         )
-
         return WakeUpResult(
-            skip=bool(data.get("skip", False)),
-            skip_reason=data.get("skip_reason"),
+            skip=False,
+            skip_reason=None,
             message=_unescape_stray_sequences(body),
-            tools_called=data.get("tools_called", tools_called),
-            reasoning=data.get("reasoning", "No reasoning provided")
+            tools_called=tools_called,
+            reasoning="Deep research report",
         )
 
-    # Shape 2: a JSON object somewhere in the response.
-    json_str = _extract_json_object(clean_content)
+    # Back-compat: some models may still emit a JSON envelope. Detect by cleaned
+    # starting with `{` and parsing successfully — not just "any JSON-looking
+    # substring", since a real markdown report can contain `{...}` snippets.
+    if cleaned.startswith("{"):
+        json_str = _extract_json_object(cleaned)
+        if json_str is not None:
+            try:
+                data = json.loads(json_str)
+                if isinstance(data, dict) and "message" in data:
+                    logger.debug("Research response used legacy JSON envelope; extracting message")
+                    return WakeUpResult(
+                        skip=bool(data.get("skip", False)),
+                        skip_reason=data.get("skip_reason"),
+                        message=_unescape_stray_sequences(data.get("message") or ""),
+                        tools_called=tools_called,
+                        reasoning=data.get("reasoning", "Deep research report"),
+                    )
+            except json.JSONDecodeError:
+                pass  # fall through to plain-markdown handling
+
+    # Happy path: whole response is the markdown report.
+    return WakeUpResult(
+        skip=False,
+        skip_reason=None,
+        message=_unescape_stray_sequences(cleaned),
+        tools_called=tools_called,
+        reasoning="Deep research report",
+    )
+
+
+def _parse_json_envelope_response(
+    response_content: str,
+    tools_called: List[str],
+) -> WakeUpResult:
+    """
+    Parse the JSON envelope used by non-research triggers.
+
+    Shape: `{"skip": ..., "skip_reason": ..., "message": ..., "reasoning": ...}`,
+    optionally with preamble text before the JSON. Falls back to treating the
+    whole response as a plain message if JSON parsing fails.
+    """
+    cleaned = _strip_outer_code_fence(response_content)
+
+    json_str = _extract_json_object(cleaned)
     if json_str is not None:
         try:
             data = json.loads(json_str)
@@ -674,19 +691,18 @@ def parse_agent_response(response_content: str, tools_called: List[str]) -> Wake
                 skip_reason=data.get("skip_reason"),
                 message=_unescape_stray_sequences(data.get("message", "") or ""),
                 tools_called=data.get("tools_called", tools_called),
-                reasoning=data.get("reasoning", "No reasoning provided")
+                reasoning=data.get("reasoning", "No reasoning provided"),
             )
         except json.JSONDecodeError:
-            pass  # fall through to plain-text fallback
+            pass
 
-    # Shape 3: plain text fallback.
     logger.warning("Failed to parse agent response as JSON, treating as message")
     return WakeUpResult(
         skip=False,
         skip_reason=None,
         message=_unescape_stray_sequences(response_content),
         tools_called=tools_called,
-        reasoning="Fallback: LLM did not return JSON"
+        reasoning="Fallback: LLM did not return JSON",
     )
 
 
@@ -940,7 +956,11 @@ async def execute_wake_up_agent(
                 return result
 
         # 5. Parse response
-        result = parse_agent_response(response_content, tools_called)
+        result = parse_agent_response(
+            response_content,
+            tools_called,
+            is_research=is_research_trigger(trigger_data),
+        )
 
         duration_ms = int((time.time() - start_time) * 1000)
 
