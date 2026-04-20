@@ -977,238 +977,114 @@ def _format_value(value: Any) -> str:
     return str(value)
 
 
+# Top-level profile keys that are metadata, not category data.
+_PROFILE_META_KEYS = frozenset({
+    "user_id", "completeness", "completeness_pct", "cached", "status",
+})
+
+# Stable rendering order for the canonical 8 categories. Unknown categories
+# are appended after these, preserving the order agentic-memories returns them.
+_CATEGORY_ORDER = (
+    "basics", "preferences", "goals", "interests",
+    "background", "health", "personality", "values",
+)
+
+# Display headers per category. Unknown categories get an auto-generated
+# `[SNAKE_CASE_UPPER]` header.
+_CATEGORY_HEADERS = {
+    "basics": "[IDENTITY]",
+    "preferences": "[PREFERENCES]",
+    "goals": "[GOALS]",
+    "interests": "[INTERESTS]",
+    "background": "[BACKGROUND]",
+    "health": "[HEALTH]",
+    "personality": "[PERSONALITY]",
+    "values": "[VALUES]",
+}
+
+
+def _humanize_field_name(name: str) -> str:
+    return name.replace("_", " ").title()
+
+
+def _is_populated(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, (str, list, dict, tuple, set)) and len(value) == 0:
+        return False
+    return True
+
+
+def _render_timezone(tz_value: Any) -> str:
+    try:
+        user_tz = pytz.timezone(tz_value)
+        user_time = datetime.now(user_tz).strftime("%I:%M %p")
+        return f"{tz_value} (current time: {user_time})"
+    except Exception:
+        return str(tz_value)
+
+
+def _format_category_lines(category: str, fields: Dict[str, Any]) -> list:
+    lines = []
+    for field_name, value in fields.items():
+        if not _is_populated(value):
+            continue
+        if category == "basics" and field_name == "timezone":
+            rendered = _render_timezone(value)
+        else:
+            rendered = _format_value(value)
+        lines.append(f"{_humanize_field_name(field_name)}: {rendered}")
+    return lines
+
+
 def format_profile_for_prompt(profile: Dict[str, Any]) -> Optional[str]:
     """
     Format user profile data for system prompt injection.
 
-    Extracts ALL 8 categories from agentic-memories profile for hyper-personalization:
-    - basics: identity information (name, birthday, location, occupation, family_status)
-    - preferences: likes, communication style, dietary, investing, etc.
-    - goals: targets, plans, aspirations
-    - interests: hobbies, topics, learning areas
-    - background: family, skills, work history, self-perception
-    - health: dietary needs, allergies
-    - personality: personality type, traits
-    - values: life values, philanthropy
+    Renders every populated field in every category returned by
+    agentic-memories — no allowlist, no hand-picked subset. New fields the
+    extractor invents (e.g. whiskey_preferences, advice_sources) flow through
+    automatically. Field labels are auto-humanized from snake_case.
+
+    Category order is stable for the canonical 8 categories; any unknown
+    top-level category is appended at the end with an auto-generated header.
 
     Args:
         profile: Profile dictionary from ProfileManager
 
     Returns:
-        Formatted profile string or None if profile is empty
+        Formatted profile string or None if no populated fields
     """
-    # Skip if profile is empty or not cached
     if not profile or profile.get("completeness", 0) == 0:
         return None
 
-    sections = []
+    sections = [f"Profile Completeness: {profile.get('completeness', 0)}%"]
 
-    # Add completeness indicator
-    completeness = profile.get("completeness", 0)
-    sections.append(f"Profile Completeness: {completeness}%")
+    ordered = list(_CATEGORY_ORDER) + [
+        k for k in profile
+        if k not in _PROFILE_META_KEYS and k not in _CATEGORY_ORDER
+    ]
+    seen = set()
 
-    # ==========================================================================
-    # BASICS - Core identity
-    # ==========================================================================
-    basics = profile.get("basics", {})
-    if basics:
-        basics_lines = ["[IDENTITY]"]
-        if basics.get("name"):
-            basics_lines.append(f"Name: {basics['name']}")
-        if basics.get("birthday"):
-            basics_lines.append(f"Birthday: {basics['birthday']}")
-        if basics.get("age"):
-            basics_lines.append(f"Age: {basics['age']}")
-        if basics.get("location"):
-            basics_lines.append(f"Location: {basics['location']}")
-        if basics.get("occupation"):
-            basics_lines.append(f"Occupation: {basics['occupation']}")
-        if basics.get("family_status"):
-            basics_lines.append(f"Family Status: {basics['family_status']}")
-        if basics.get("timezone"):
-            try:
-                user_tz = pytz.timezone(basics['timezone'])
-                user_time = datetime.now(user_tz).strftime("%I:%M %p")
-                basics_lines.append(f"Timezone: {basics['timezone']} (current time: {user_time})")
-            except Exception:
-                basics_lines.append(f"Timezone: {basics['timezone']}")
-        if basics.get("pronouns"):
-            basics_lines.append(f"Pronouns: {basics['pronouns']}")
+    for category in ordered:
+        if category in seen:
+            continue
+        seen.add(category)
+        fields = profile.get(category)
+        if not isinstance(fields, dict) or not fields:
+            continue
+        lines = _format_category_lines(category, fields)
+        if not lines:
+            continue
+        header = _CATEGORY_HEADERS.get(
+            category, f"[{category.replace('_', ' ').upper()}]"
+        )
+        sections.append(header + "\n" + "\n".join(lines))
 
-        if len(basics_lines) > 1:
-            sections.append("\n".join(basics_lines))
-
-    # ==========================================================================
-    # PREFERENCES - Communication, dietary, investing, lifestyle
-    # ==========================================================================
-    preferences = profile.get("preferences", {})
-    if preferences:
-        prefs_lines = ["[PREFERENCES]"]
-
-        # Communication
-        if preferences.get("communication_style"):
-            prefs_lines.append(f"Communication Style: {preferences['communication_style']}")
-        if preferences.get("language"):
-            prefs_lines.append(f"Language: {preferences['language']}")
-
-        # Dietary
-        if preferences.get("dietary_restrictions"):
-            prefs_lines.append(f"Dietary: {_format_value(preferences['dietary_restrictions'])}")
-        if preferences.get("food_preferences"):
-            prefs_lines.append(f"Food Preferences: {_format_value(preferences['food_preferences'])}")
-        if preferences.get("dining_preference"):
-            prefs_lines.append(f"Dining: {preferences['dining_preference']}")
-
-        # Investing (critical for finance persona)
-        if preferences.get("investing_strategy"):
-            prefs_lines.append(f"Investing Strategy: {preferences['investing_strategy']}")
-        if preferences.get("investing_principles"):
-            prefs_lines.append(f"Investing Principles: {preferences['investing_principles']}")
-        if preferences.get("investing_cash_strategy"):
-            prefs_lines.append(f"Cash Strategy: {preferences['investing_cash_strategy']}")
-        if preferences.get("high_conviction_stocks"):
-            prefs_lines.append(f"High Conviction Stocks: {_format_value(preferences['high_conviction_stocks'])}")
-        if preferences.get("influences"):
-            prefs_lines.append(f"Influences: {_format_value(preferences['influences'])}")
-
-        # Lifestyle
-        if preferences.get("vehicle"):
-            prefs_lines.append(f"Vehicle: {preferences['vehicle']}")
-        if preferences.get("color_preferences"):
-            prefs_lines.append(f"Color Preferences: {_format_value(preferences['color_preferences'])}")
-        if preferences.get("work_style"):
-            prefs_lines.append(f"Work Style: {preferences['work_style']}")
-        if preferences.get("likes"):
-            prefs_lines.append(f"Likes: {preferences['likes']}")
-        if preferences.get("topics_of_interest"):
-            prefs_lines.append(f"Topics of Interest: {_format_value(preferences['topics_of_interest'])}")
-
-        if len(prefs_lines) > 1:
-            sections.append("\n".join(prefs_lines))
-
-    # ==========================================================================
-    # GOALS - Targets and aspirations
-    # ==========================================================================
-    goals = profile.get("goals", {})
-    if goals:
-        goals_lines = ["[GOALS]"]
-        if goals.get("targets"):
-            goals_lines.append(f"Targets: {_format_value(goals['targets'])}")
-        if goals.get("plans"):
-            goals_lines.append(f"Plans: {goals['plans']}")
-        if goals.get("short_term_goals") or goals.get("short_term"):
-            val = goals.get("short_term_goals") or goals.get("short_term")
-            goals_lines.append(f"Short-term Goals: {_format_value(val)}")
-        if goals.get("long_term_goals") or goals.get("long_term"):
-            val = goals.get("long_term_goals") or goals.get("long_term")
-            goals_lines.append(f"Long-term Goals: {_format_value(val)}")
-        if goals.get("bucket_list"):
-            goals_lines.append(f"Bucket List: {_format_value(goals['bucket_list'])}")
-
-        if len(goals_lines) > 1:
-            sections.append("\n".join(goals_lines))
-
-    # ==========================================================================
-    # INTERESTS - Hobbies, learning, topics
-    # ==========================================================================
-    interests = profile.get("interests", {})
-    if interests:
-        interests_lines = ["[INTERESTS]"]
-        if interests.get("hobbies"):
-            interests_lines.append(f"Hobbies: {_format_value(interests['hobbies'])}")
-        if interests.get("favorite_topics"):
-            interests_lines.append(f"Favorite Topics: {_format_value(interests['favorite_topics'])}")
-        if interests.get("topics"):
-            interests_lines.append(f"Topics: {_format_value(interests['topics'])}")
-        if interests.get("learning_areas"):
-            interests_lines.append(f"Currently Learning: {_format_value(interests['learning_areas'])}")
-        if interests.get("expertise_areas"):
-            interests_lines.append(f"Expertise Areas: {_format_value(interests['expertise_areas'])}")
-
-        if len(interests_lines) > 1:
-            sections.append("\n".join(interests_lines))
-
-    # ==========================================================================
-    # BACKGROUND - Family, skills, work history
-    # ==========================================================================
-    background = profile.get("background", {})
-    if background:
-        bg_lines = ["[BACKGROUND]"]
-        if background.get("skills"):
-            bg_lines.append(f"Skills: {_format_value(background['skills'])}")
-        if background.get("education") or background.get("education_history"):
-            val = background.get("education") or background.get("education_history")
-            bg_lines.append(f"Education: {_format_value(val)}")
-        if background.get("work_history"):
-            bg_lines.append(f"Work History: {_format_value(background['work_history'])}")
-        if background.get("current_employer"):
-            bg_lines.append(f"Current Employer: {background['current_employer']}")
-
-        # Family context (helps with personalization)
-        if background.get("family_background"):
-            bg_lines.append(f"Family Background: {background['family_background']}")
-        if background.get("spouse_occupation"):
-            bg_lines.append(f"Spouse: {background['spouse_occupation']}")
-
-        # Self-perception (helps Annie match communication style)
-        if background.get("self_perception"):
-            bg_lines.append(f"Self-Perception: {background['self_perception']}")
-
-        if len(bg_lines) > 1:
-            sections.append("\n".join(bg_lines))
-
-    # ==========================================================================
-    # HEALTH - Dietary needs, allergies
-    # ==========================================================================
-    health = profile.get("health", {})
-    if health:
-        health_lines = ["[HEALTH]"]
-        if health.get("dietary_needs"):
-            health_lines.append(f"Dietary Needs: {_format_value(health['dietary_needs'])}")
-        if health.get("allergies"):
-            health_lines.append(f"Allergies: {_format_value(health['allergies'])}")
-
-        if len(health_lines) > 1:
-            sections.append("\n".join(health_lines))
-
-    # ==========================================================================
-    # PERSONALITY - Type, traits
-    # ==========================================================================
-    personality = profile.get("personality", {})
-    if personality:
-        personality_lines = ["[PERSONALITY]"]
-        if personality.get("personality_type"):
-            personality_lines.append(f"Personality Type: {personality['personality_type']}")
-        if personality.get("stress_response"):
-            personality_lines.append(f"Stress Response: {personality['stress_response']}")
-        if personality.get("social_battery"):
-            personality_lines.append(f"Social Battery: {personality['social_battery']}")
-
-        if len(personality_lines) > 1:
-            sections.append("\n".join(personality_lines))
-
-    # ==========================================================================
-    # VALUES - Life values, philanthropy
-    # ==========================================================================
-    values = profile.get("values", {})
-    if values:
-        values_lines = ["[VALUES]"]
-        if values.get("life_values"):
-            values_lines.append(f"Life Values: {_format_value(values['life_values'])}")
-        if values.get("philanthropy"):
-            values_lines.append(f"Philanthropy: {_format_value(values['philanthropy'])}")
-        if values.get("spiritual_alignment"):
-            values_lines.append(f"Spiritual Alignment: {values['spiritual_alignment']}")
-
-        if len(values_lines) > 1:
-            sections.append("\n".join(values_lines))
-
-    if len(sections) <= 1:  # Only completeness indicator
+    if len(sections) <= 1:  # only the completeness indicator rendered
         return None
 
-    # Build final profile string
-    profile_str = "\n\n".join(sections)
-    return profile_str
+    return "\n\n".join(sections)
 
 
 def build_system_prompt(

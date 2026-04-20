@@ -336,7 +336,7 @@ async def test_profile_injection_in_prompt():
     assert "Name: Diana" in formatted_profile
     assert "Occupation: Data Scientist" in formatted_profile
     assert "Communication Style: casual" in formatted_profile
-    assert "Short-term Goals: Master machine learning" in formatted_profile
+    assert "Short Term Goals: Master machine learning" in formatted_profile
 
     # Test system prompt with profile
     system_prompt = build_system_prompt(
