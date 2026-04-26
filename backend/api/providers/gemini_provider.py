@@ -353,13 +353,25 @@ class GeminiProvider(BaseProvider):
         Plumbed through `last_usage` into Langfuse `usage` payload so
         implicit-cache hit-rate is observable in traces.
 
+        Bug 25.2 (AC1, AC8): adds `non_cached_input_tokens` =
+        `max(0, prompt_tokens - cached_tokens)`. Google's
+        `prompt_token_count` ALREADY INCLUDES `cached_content_token_count`
+        as a subset, so emitting `usage["input"] = prompt_tokens` AND
+        `usage["cached_input"] = cached_tokens` to Langfuse double-counts the
+        cached portion (full rate + cached rate stacked = 5.5x overstatement
+        on cache-hit traces). Callers MUST emit `non_cached_input_tokens` as
+        Langfuse `usage["input"]`. The `max(0, ...)` guard handles the
+        anomalous (and contract-violating) `cached > prompt` case; we log a
+        WARNING here so the anomaly fires once per chunk rather than three
+        times across emission sites.
+
         Args:
             chunk: A Gemini stream chunk that may have `.usage_metadata`.
 
         Returns:
-            Dict with `prompt_tokens`, `completion_tokens`, `cached_tokens` if
-            both required fields are present and non-None on the chunk. None
-            otherwise.
+            Dict with `prompt_tokens`, `completion_tokens`, `cached_tokens`,
+            and `non_cached_input_tokens` if both required fields are present
+            and non-None on the chunk. None otherwise.
         """
         usage_md = getattr(chunk, "usage_metadata", None)
         if usage_md is None:
@@ -373,10 +385,26 @@ class GeminiProvider(BaseProvider):
         # zero in those cases, not "unknown".
         cached_raw = getattr(usage_md, "cached_content_token_count", None)
         cached = int(cached_raw) if cached_raw is not None else 0
+        prompt_int = int(prompt)
+        # Bug 25.2 (AC1, AC8): cached tokens are a SUBSET of prompt tokens per
+        # Google's contract. Subtract for the Langfuse `input` emission shape;
+        # clamp to 0 with a WARNING if the contract is violated.
+        non_cached_input = prompt_int - cached
+        if non_cached_input < 0:
+            logger.warning(
+                "cached_tokens exceeds prompt_tokens — clamping non_cached_input to 0",
+                extra={
+                    "event": "cached_token_count_anomaly",
+                    "prompt_tokens": prompt_int,
+                    "cached_tokens": cached,
+                },
+            )
+            non_cached_input = 0
         return {
-            "prompt_tokens": int(prompt),
+            "prompt_tokens": prompt_int,
             "completion_tokens": int(completion),
             "cached_tokens": cached,
+            "non_cached_input_tokens": non_cached_input,
         }
 
     @staticmethod
@@ -478,13 +506,22 @@ class GeminiProvider(BaseProvider):
             }
             if last_usage is not None:
                 cached_tokens = last_usage.get("cached_tokens", 0)
+                # Bug 25.2 (AC1): use helper-computed non-cached input for
+                # Langfuse emission; fall back to recomputation for safety
+                # if an older usage shape lacks the key.
+                non_cached_input_tokens = last_usage.get(
+                    "non_cached_input_tokens",
+                    max(0, last_usage["prompt_tokens"] - cached_tokens),
+                )
                 cost_info = self.calculate_cost({
                     "prompt_tokens": last_usage["prompt_tokens"],
                     "completion_tokens": last_usage["completion_tokens"],
                     "cached_tokens": cached_tokens,
                 })
+                # Bug 25.2 (AC1): emit non-cached input only — see
+                # `_extract_usage_metadata` docstring for the math.
                 end_kwargs["usage"] = {
-                    "input": last_usage["prompt_tokens"],
+                    "input": non_cached_input_tokens,
                     "output": last_usage["completion_tokens"],
                     "input_cached": cached_tokens,
                     "total": last_usage["prompt_tokens"] + last_usage["completion_tokens"],
@@ -982,18 +1019,25 @@ class GeminiProvider(BaseProvider):
                                         }
                                     )
 
-                                    # Story 23.1 (AC1, AC2) + 24.1 (AC15):
+                                    # Story 23.1 (AC1, AC2) + 24.1 (AC15) + Bug 25.2 (AC1):
                                     # token counts come from the SDK's `usage_metadata`,
-                                    # including `cached_tokens` for implicit-cache observability.
+                                    # including `cached_tokens` for implicit-cache observability
+                                    # and `non_cached_input_tokens` for the Langfuse emission
+                                    # shape (avoids double-counting the cached subset).
                                     if last_usage is not None:
                                         prompt_tokens = last_usage["prompt_tokens"]
                                         completion_tokens = last_usage["completion_tokens"]
                                         cached_tokens = last_usage.get("cached_tokens", 0)
+                                        non_cached_input_tokens = last_usage.get(
+                                            "non_cached_input_tokens",
+                                            max(0, prompt_tokens - cached_tokens),
+                                        )
                                     else:
                                         # AC3: SDK didn't deliver usage_metadata.
                                         prompt_tokens = 0
                                         completion_tokens = 0
                                         cached_tokens = 0
+                                        non_cached_input_tokens = 0
                                         logger.warning(
                                             "Gemini stream finished without usage_metadata",
                                             extra={
@@ -1041,8 +1085,13 @@ class GeminiProvider(BaseProvider):
                                                     "completion_tokens": completion_tokens,
                                                     "cached_tokens": cached_tokens,
                                                 })
+                                                # Bug 25.2 (AC1): emit non-cached input only.
+                                                # Google's prompt_token_count INCLUDES the cached
+                                                # subset, so emitting the full prompt_tokens here
+                                                # AND cached_tokens as cached_input would
+                                                # double-count the cached portion in Langfuse.
                                                 end_kwargs["usage"] = {
-                                                    "input": prompt_tokens,
+                                                    "input": non_cached_input_tokens,
                                                     "output": completion_tokens,
                                                     "input_cached": cached_tokens,
                                                     "total": prompt_tokens + completion_tokens,
@@ -1058,6 +1107,7 @@ class GeminiProvider(BaseProvider):
                                                         "prompt_tokens": prompt_tokens,
                                                         "completion_tokens": completion_tokens,
                                                         "cached_tokens": cached_tokens,
+                                                        "non_cached_input_tokens": non_cached_input_tokens,
                                                         "cost_usd": cost_info.get("total_cost", 0),
                                                         "event": (
                                                             "implicit_cache_hit"
@@ -1377,10 +1427,19 @@ class GeminiProvider(BaseProvider):
                                     prompt_tokens = last_usage["prompt_tokens"]
                                     completion_tokens = last_usage["completion_tokens"]
                                     cached_tokens = last_usage.get("cached_tokens", 0)
+                                    # Bug 25.2 (AC1): use helper-computed
+                                    # non-cached input for Langfuse emission;
+                                    # fall back to recomputation for safety if
+                                    # an older usage shape lacks the key.
+                                    non_cached_input_tokens = last_usage.get(
+                                        "non_cached_input_tokens",
+                                        max(0, prompt_tokens - cached_tokens),
+                                    )
                                 else:
                                     prompt_tokens = 0
                                     completion_tokens = 0
                                     cached_tokens = 0
+                                    non_cached_input_tokens = 0
                                     logger.warning(
                                         "Gemini stream ended without STOP and without usage_metadata",
                                         extra={
@@ -1425,8 +1484,10 @@ class GeminiProvider(BaseProvider):
                                         "completion_tokens": completion_tokens,
                                         "cached_tokens": cached_tokens,
                                     })
+                                    # Bug 25.2 (AC1): emit non-cached input only
+                                    # — see helper docstring for the math.
                                     end_kwargs["usage"] = {
-                                        "input": prompt_tokens,
+                                        "input": non_cached_input_tokens,
                                         "output": completion_tokens,
                                         "input_cached": cached_tokens,
                                         "total": prompt_tokens + completion_tokens,
@@ -1442,6 +1503,7 @@ class GeminiProvider(BaseProvider):
                                             "prompt_tokens": prompt_tokens,
                                             "completion_tokens": completion_tokens,
                                             "cached_tokens": cached_tokens,
+                                            "non_cached_input_tokens": non_cached_input_tokens,
                                             "cost_usd": cost_info.get("total_cost", 0)
                                         }
                                     )

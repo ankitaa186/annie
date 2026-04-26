@@ -981,3 +981,167 @@ async def test_ac11_5_typed_exception_context_length_error():
                 mcp_client=None,
             ):
                 pass
+
+
+# ---------------------------------------------------------------------------
+# Murat 2026-04-25 — closes Harpreet's Nit #1 (parallel function_calls coverage)
+# ---------------------------------------------------------------------------
+
+
+class _MultiPartCandidate:
+    """Candidate carrying MULTIPLE parts in one Content — the wire shape
+    Gemini delivers when the model emits parallel function calls.
+
+    Distinct from _Candidate (single-part) because the production loop at
+    `gemini_provider.py:867-910` iterates `cand_parts`, and parallel calls
+    are precisely the coverage Harpreet's Nit #1 flagged.
+    """
+
+    def __init__(
+        self,
+        parts: List[_Part],
+        finish_value: Optional[int] = None,
+        finish_name: Optional[str] = None,
+    ):
+        self.content = _Content(parts)
+        self.finish_reason = (
+            _FinishReason(finish_value, finish_name)
+            if finish_value is not None
+            else None
+        )
+        self.safety_ratings: List[Any] = []
+
+
+@pytest.mark.asyncio
+async def test_murat_parallel_function_calls_each_part_signature_captured():
+    """Murat 2026-04-25 — Harpreet's Nit #1.
+
+    Real Gemini parallel-tool-calls deliver MULTIPLE function_call Parts
+    in a single Content. Each Part carries its OWN thought_signature.
+    The streaming loop at gemini_provider.py:867-910 iterates over
+    cand_parts; this test confirms each signature is captured per-part,
+    not just the first one.
+
+    If the loop were to bookmark only the candidate-level (not part-level)
+    signature, parallel calls would either drop signatures or attribute
+    them to the wrong call. This test catches that regression.
+
+    Pure mock — no live API spend.
+    """
+    provider = _build_provider()
+
+    # Distinct LENGTHS so the byte-count assertion proves per-part capture
+    # (not a single value smeared across both parts).
+    SIG_A = b"A" * 100
+    SIG_B = b"B" * 250
+
+    # ONE chunk with TWO function_call parts, distinct signatures on each.
+    parallel_part_a = _Part(
+        function_call=_FakeFunctionCall("get_weather", {"city": "Newark"}),
+        thought_signature=SIG_A,
+    )
+    parallel_part_b = _Part(
+        function_call=_FakeFunctionCall("get_traffic", {"city": "Newark"}),
+        thought_signature=SIG_B,
+    )
+    parallel_chunk = _Chunk(candidates=[
+        _MultiPartCandidate(parts=[parallel_part_a, parallel_part_b])
+    ])
+    stop_chunk = _Chunk(
+        candidates=[_Candidate(text="Done.", finish_value=1, finish_name="STOP")],
+        usage_metadata=_UsageMetadata(prompt_token_count=10, candidates_token_count=2),
+    )
+
+    fake_chat = MagicMock()
+    send_calls: List[Any] = []
+
+    async def capture_send(message=None):
+        send_calls.append(message)
+        if len(send_calls) == 1:
+            return _AsyncChunkIter([parallel_chunk])
+        return _AsyncChunkIter([stop_chunk])
+
+    fake_chat.send_message_stream = capture_send
+    provider.client.aio.chats.create = MagicMock(return_value=fake_chat)
+
+    mcp_client = MagicMock()
+    mcp_client.call_tool = AsyncMock(return_value={"ok": True})
+
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "get_weather",
+                "description": "weather",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"city": {"type": "string"}},
+                    "required": ["city"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_traffic",
+                "description": "traffic",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"city": {"type": "string"}},
+                    "required": ["city"],
+                },
+            },
+        },
+    ]
+
+    # Capture every structured INFO log carrying tool_name + has_thought_signature.
+    captured_log_extras: List[Dict[str, Any]] = []
+    real_logger = __import__(
+        "api.providers.gemini_provider", fromlist=["logger"]
+    ).logger
+    original_info = real_logger.info
+
+    def _capture_info(msg, *args, **kwargs):
+        extra = kwargs.get("extra") or {}
+        if "tool_name" in extra and "has_thought_signature" in extra:
+            captured_log_extras.append(extra)
+        return original_info(msg, *args, **kwargs)
+
+    started_events: List[Dict[str, Any]] = []
+    with patch.object(real_logger, "info", side_effect=_capture_info), \
+         patch("api.providers.gemini_provider.get_current_trace", return_value=None):
+        async for ev in provider.stream_chat_completion(
+            messages=[{"role": "user", "content": "weather and traffic in Newark?"}],
+            tools=tools,
+            mcp_client=mcp_client,
+        ):
+            if ev.get("type") == "tool_call_started":
+                started_events.append(ev)
+
+    # Both function_call parts must have surfaced as tool_call_started events.
+    assert len(started_events) == 2, (
+        f"Parallel calls: expected 2 tool_call_started events, "
+        f"got {len(started_events)}: {[e.get('tool') for e in started_events]}"
+    )
+    started_tools = {e["tool"] for e in started_events}
+    assert started_tools == {"get_weather", "get_traffic"}
+
+    # Both signatures must have been captured per-part.
+    assert len(captured_log_extras) == 2, (
+        f"Parallel calls: expected 2 structured log lines (one per Part), "
+        f"got {len(captured_log_extras)}. The streaming loop is collapsing "
+        f"parallel parts into a single bookkeeping entry."
+    )
+    log_by_tool = {e["tool_name"]: e for e in captured_log_extras}
+    assert log_by_tool["get_weather"]["has_thought_signature"] is True
+    assert log_by_tool["get_weather"]["thought_signature_bytes"] == len(SIG_A)
+    assert log_by_tool["get_traffic"]["has_thought_signature"] is True
+    assert log_by_tool["get_traffic"]["thought_signature_bytes"] == len(SIG_B)
+    # Distinct byte-counts prove the per-part signature is what got captured,
+    # not a single candidate-level value smeared across both calls.
+    assert log_by_tool["get_weather"]["thought_signature_bytes"] != \
+        log_by_tool["get_traffic"]["thought_signature_bytes"]
+
+    # MCP client invoked twice (once per parallel call), via Annie's MCP
+    # path — not auto-executed by the SDK.
+    assert mcp_client.call_tool.await_count == 2

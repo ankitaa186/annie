@@ -170,6 +170,14 @@ class ChatGPTProvider(BaseProvider):
                     completion_tokens=completion_tokens,
                     sources_used=0,
                 )
+                # Bug 25.2 (AC2 — documented no-op): ChatGPT has no
+                # cached-token plumbing today (no read of
+                # `prompt_tokens_details.cached_tokens`, no `cached_input` /
+                # `cached_cost` emission), so the Gemini-style double-count
+                # cannot occur here. If OpenAI auto-cache plumbing is added
+                # later, mirror Gemini's `non_cached_input_tokens` shape
+                # (emit `input = prompt_tokens - cached_tokens` to Langfuse)
+                # to avoid recreating the same defect.
                 end_kwargs["usage"] = {
                     "input": prompt_tokens,
                     "output": completion_tokens,

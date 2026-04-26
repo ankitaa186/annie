@@ -222,7 +222,11 @@ class TestGeminiProviderUsageMetadataExtraction:
     """Story 24.1 (AC15): _extract_usage_metadata plumbs cached_tokens."""
 
     def test_extract_usage_metadata_with_cached(self):
-        """cached_content_token_count populates `cached_tokens`."""
+        """cached_content_token_count populates `cached_tokens`.
+
+        Bug 25.2: helper now also returns `non_cached_input_tokens` =
+        `prompt_tokens - cached_tokens` for Langfuse emission shape.
+        """
         chunk = MagicMock()
         chunk.usage_metadata.prompt_token_count = 1000
         chunk.usage_metadata.candidates_token_count = 500
@@ -232,6 +236,7 @@ class TestGeminiProviderUsageMetadataExtraction:
             "prompt_tokens": 1000,
             "completion_tokens": 500,
             "cached_tokens": 600,
+            "non_cached_input_tokens": 400,
         }
 
     def test_extract_usage_metadata_cached_none_defaults_to_zero(self):
@@ -248,6 +253,8 @@ class TestGeminiProviderUsageMetadataExtraction:
         result = GeminiProvider._extract_usage_metadata(chunk)
         assert result is not None
         assert result["cached_tokens"] == 0
+        # Bug 25.2: with cached=0, non_cached_input == prompt (no-op).
+        assert result["non_cached_input_tokens"] == 1000
 
     def test_extract_usage_metadata_cached_field_missing_defaults_to_zero(self):
         """If the field doesn't exist on the chunk, default to 0."""
@@ -258,6 +265,8 @@ class TestGeminiProviderUsageMetadataExtraction:
         result = GeminiProvider._extract_usage_metadata(chunk)
         assert result is not None
         assert result["cached_tokens"] == 0
+        # Bug 25.2: cached missing → non_cached_input falls back to prompt.
+        assert result["non_cached_input_tokens"] == 1000
 
     def test_extract_usage_metadata_returns_none_when_prompt_absent(self):
         """AC3 invariant preserved: prompt absent → None ('we don't know')."""

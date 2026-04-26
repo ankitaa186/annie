@@ -581,7 +581,17 @@ async def test_gemini_cached_tokens_plumbed_to_langfuse():
     assert usage["input_cached"] == 4000, (
         "AC15: input_cached must reflect cached_content_token_count from usage_metadata"
     )
-    assert usage["input"] == 5000
+    # Bug 25.2 (AC1): emission `usage["input"]` is non-cached input
+    # (prompt_tokens - cached_tokens), not raw prompt_tokens. Google's
+    # prompt_token_count INCLUDES the cached subset, so emitting the full
+    # prompt + cached_input separately to Langfuse double-counts the cached
+    # portion. Invariant: input + input_cached == prompt_token_count.
+    assert usage["input"] == 1000, (
+        "Bug 25.2: emission must subtract cached_tokens from prompt_tokens. "
+        "Pre-fix this asserted 5000 (raw prompt) which double-counted the "
+        "cached subset at full input rate."
+    )
+    assert usage["input"] + usage["input_cached"] == 5000
     assert usage["output"] == 200
     # cached_cost should be present (the 90% discount lands here).
     assert "cached_cost" in usage
