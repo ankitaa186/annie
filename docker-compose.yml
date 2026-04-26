@@ -68,6 +68,7 @@ services:
       start_period: 40s
     volumes:
       - ./backend:/app
+      - ./scripts:/app/scripts:ro  # Story 23.1 (AC7): cost_reconciliation.py runnable from inside backend container
     networks:
       - annie-network
     restart: unless-stopped
@@ -189,6 +190,7 @@ services:
       start_period: 120s  # Allow time for first poll cycle
     volumes:
       - ./backend:/app
+      - ./scripts:/app/scripts:ro  # Story 23.1 (AC7): cost_reconciliation.py runnable from inside backend container
     networks:
       - annie-network
     restart: unless-stopped

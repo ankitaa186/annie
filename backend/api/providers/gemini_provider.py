@@ -200,6 +200,96 @@ class GeminiProvider(BaseProvider):
             cached_tokens=usage.get("cached_tokens", 0)
         )
 
+    @staticmethod
+    def _extract_usage_metadata(chunk: Any) -> Optional[Dict[str, int]]:
+        """
+        Extract token usage from a Gemini stream chunk's `usage_metadata`.
+
+        Story 23.1 (AC1): Tokens come from the SDK's `usage_metadata` on the
+        final stream chunk, NOT from chunk-counting. Returns None ("we don't
+        know") when either field is missing — callers should omit the `usage`
+        kwarg entirely from `generation.end()` rather than fabricate zeros
+        (Parminder's note on AC3 — Langfuse coerces None→0 and pollutes
+        reconciliation).
+
+        Args:
+            chunk: A Gemini stream chunk that may have `.usage_metadata`.
+
+        Returns:
+            Dict with `prompt_tokens` and `completion_tokens` if both are
+            present and non-None on the chunk. None otherwise.
+        """
+        usage_md = getattr(chunk, "usage_metadata", None)
+        if usage_md is None:
+            return None
+        prompt = getattr(usage_md, "prompt_token_count", None)
+        completion = getattr(usage_md, "candidates_token_count", None)
+        if prompt is None or completion is None:
+            return None
+        return {
+            "prompt_tokens": int(prompt),
+            "completion_tokens": int(completion),
+        }
+
+    def _trace_error_generation(
+        self,
+        trace: Any,
+        error: Exception,
+        duration_ms: int,
+        last_usage: Optional[Dict[str, int]],
+        tool_iteration: int,
+    ) -> None:
+        """
+        Emit a Langfuse generation with `level="ERROR"` for a failed stream.
+
+        Story 23.1 (AC5): when the provider raises (rate limit / quota /
+        network / 5xx), Langfuse still receives a `generation.end()` so the
+        cap-trip burst becomes observable in reconciliation. Fire-and-forget
+        — never raises out of this helper. Caller must wrap the actual
+        provider call in `try/finally` and pass the latest `last_usage`
+        snapshot (which Gemini populates on the prompt-processed-then-429
+        path, faithfully recording real billed prompt tokens).
+        """
+        if not trace:
+            return
+        generation = None
+        try:
+            generation = trace.generation(
+                name=f"llm_call_{self.model_name}_streaming",
+                model=self.model_name,
+                metadata={
+                    "provider": self.model_name,
+                    "streaming": True,
+                    "tool_iterations": tool_iteration,
+                    "error_path": True,
+                },
+            )
+            end_kwargs: Dict[str, Any] = {
+                "level": "ERROR",
+                "status_message": f"{type(error).__name__}: {str(error)[:200]}",
+                "metadata": {"duration_ms": duration_ms},
+            }
+            if last_usage is not None:
+                cost_info = self.calculate_cost({
+                    "prompt_tokens": last_usage["prompt_tokens"],
+                    "completion_tokens": last_usage["completion_tokens"],
+                    "cached_tokens": 0,
+                })
+                end_kwargs["usage"] = {
+                    "input": last_usage["prompt_tokens"],
+                    "output": last_usage["completion_tokens"],
+                    "total": last_usage["prompt_tokens"] + last_usage["completion_tokens"],
+                    "input_cost": cost_info.get("input_cost", 0),
+                    "output_cost": cost_info.get("output_cost", 0),
+                    "total_cost": cost_info.get("total_cost", 0),
+                }
+            generation.end(**end_kwargs)
+        except Exception as trace_err:
+            logger.warning(
+                f"Failed to record error generation in Langfuse: {trace_err}",
+                extra={"provider": self.model_name, "error": str(trace_err)},
+            )
+
     def _convert_messages_to_gemini_format(
         self, messages: List[Dict[str, Any]], files: Optional[List] = None
     ) -> tuple[Optional[str], List[Dict[str, Any]]]:
@@ -452,6 +542,14 @@ class GeminiProvider(BaseProvider):
                     # Track ALL function calls in this iteration (parallel tool calling support)
                     function_calls = []  # List of {name, args} dicts
                     token_count = 0  # Reset per iteration for accurate retry detection
+                    chunk_count = 0  # Story 23.1: telemetry only, NOT used for cost
+
+                    # Story 23.1 (AC1): capture latest usage_metadata seen across chunks.
+                    # Gemini's SDK delivers token counts on the final chunk's
+                    # `usage_metadata`. We refresh this on every chunk that carries
+                    # one so we always have the most-recent snapshot if the stream
+                    # aborts mid-flight.
+                    last_usage = None  # type: Optional[Dict[str, int]]
 
                     # Debug: Track raw chunk data for MALFORMED_FUNCTION_CALL diagnosis
                     raw_chunk_data = []  # Accumulate for debugging if needed
@@ -459,6 +557,14 @@ class GeminiProvider(BaseProvider):
                     # Process chunks
                     # Note: thought_signatures are handled automatically by ChatSession (Story 9.3)
                     for chunk in response:
+                        chunk_count += 1
+                        # Story 23.1 (AC1): pull usage_metadata as soon as it appears.
+                        # Refresh on every chunk that carries one — the final chunk
+                        # is the canonical source but the SDK can attach earlier too.
+                        usage_snapshot = self._extract_usage_metadata(chunk)
+                        if usage_snapshot is not None:
+                            last_usage = usage_snapshot
+
                         # Debug: Capture raw chunk structure for diagnosing MALFORMED_FUNCTION_CALL
                         try:
                             chunk_info = {
@@ -681,24 +787,37 @@ class GeminiProvider(BaseProvider):
                                         }
                                     )
 
-                                    # Get token counts
-                                    prompt_tokens = 0
-                                    completion_tokens = token_count
-
-                                    try:
-                                        prompt_tokens = self.model.count_tokens(gemini_messages).total_tokens
-                                    except Exception as e:
-                                        logger.warning(f"Failed to count prompt tokens: {str(e)}")
+                                    # Story 23.1 (AC1, AC2): token counts come from the SDK's
+                                    # `usage_metadata` on the final stream chunk. We no longer
+                                    # call `count_tokens()` (extra RPC + silent-failure path
+                                    # that was producing the Apr-04 placeholder traces) and
+                                    # we never substitute chunk count for `completion_tokens`.
+                                    if last_usage is not None:
+                                        prompt_tokens = last_usage["prompt_tokens"]
+                                        completion_tokens = last_usage["completion_tokens"]
+                                    else:
+                                        # AC3: SDK didn't deliver usage_metadata. We don't
+                                        # fabricate numbers — `last_usage is None` is the
+                                        # "we don't know" signal that flows down to the
+                                        # `usage` kwarg being omitted from generation.end().
+                                        prompt_tokens = 0
+                                        completion_tokens = 0
+                                        logger.warning(
+                                            "Gemini stream finished without usage_metadata",
+                                            extra={
+                                                "provider": self.model_name,
+                                                "event": "usage_metadata_missing",
+                                                "model": self.model_name,
+                                                "chunk_count": chunk_count,
+                                                "tool_iterations": tool_iteration,
+                                                "finish_reason": finish_reason_name,
+                                            }
+                                        )
 
                                     # Track in Langfuse (fire-and-forget)
                                     if trace:
+                                        generation = None
                                         try:
-                                            cost_info = self.calculate_cost({
-                                                "prompt_tokens": prompt_tokens,
-                                                "completion_tokens": completion_tokens,
-                                                "cached_tokens": 0
-                                            })
-
                                             prompt_text = json.dumps([m for m in messages if m.get("role") != "tool"])
                                             truncated_prompt = self._truncate_text(prompt_text, 1000)
                                             full_completion = "".join(accumulated_content)
@@ -722,37 +841,66 @@ class GeminiProvider(BaseProvider):
                                                 }
                                             )
 
-                                            # End the generation with output and usage (includes cost)
-                                            # ModelUsage TypedDict: input, output, total, input_cost, output_cost, total_cost
-                                            generation.end(
-                                                output=truncated_completion,
-                                                usage={
+                                            # AC1/AC3: build end() kwargs. When usage_metadata
+                                            # was absent, omit the `usage` kwarg entirely so
+                                            # Langfuse renders the generation with no token
+                                            # data — that's the honest "unknown" signal.
+                                            # Passing usage={"input":None,"output":None}
+                                            # would coerce to 0 and reintroduce false-zero
+                                            # cost rows in reconciliation (Parminder's note).
+                                            end_kwargs = {
+                                                "output": truncated_completion,
+                                                "metadata": {"duration_ms": duration_ms},
+                                            }
+                                            if last_usage is not None:
+                                                cost_info = self.calculate_cost({
+                                                    "prompt_tokens": prompt_tokens,
+                                                    "completion_tokens": completion_tokens,
+                                                    "cached_tokens": 0
+                                                })
+                                                end_kwargs["usage"] = {
                                                     "input": prompt_tokens,
                                                     "output": completion_tokens,
                                                     "total": prompt_tokens + completion_tokens,
                                                     "input_cost": cost_info.get("input_cost", 0),
                                                     "output_cost": cost_info.get("output_cost", 0),
                                                     "total_cost": cost_info.get("total_cost", 0)
-                                                },
-                                                metadata={
-                                                    "duration_ms": duration_ms
                                                 }
-                                            )
-
-                                            logger.info(
-                                                "Langfuse generation tracked successfully",
-                                                extra={
-                                                    "provider": self.model_name,
-                                                    "prompt_tokens": prompt_tokens,
-                                                    "completion_tokens": completion_tokens,
-                                                    "cost_usd": cost_info.get("total_cost", 0)
-                                                }
-                                            )
+                                                logger.info(
+                                                    "Langfuse generation tracked successfully",
+                                                    extra={
+                                                        "provider": self.model_name,
+                                                        "prompt_tokens": prompt_tokens,
+                                                        "completion_tokens": completion_tokens,
+                                                        "cost_usd": cost_info.get("total_cost", 0)
+                                                    }
+                                                )
+                                            else:
+                                                logger.info(
+                                                    "Langfuse generation tracked without usage",
+                                                    extra={
+                                                        "provider": self.model_name,
+                                                        "event": "usage_metadata_missing",
+                                                    }
+                                                )
                                         except Exception as e:
                                             logger.warning(
-                                                f"Failed to track Gemini streaming in Langfuse: {str(e)}",
+                                                f"Failed to build Gemini Langfuse generation: {str(e)}",
                                                 extra={"provider": self.model_name, "error": str(e)}
                                             )
+                                        finally:
+                                            # AC5: ensure generation.end() always fires when
+                                            # generation was created — even if the kwargs
+                                            # build raised partway through. Without this we
+                                            # leak observations that never close.
+                                            if generation is not None:
+                                                try:
+                                                    generation.end(**end_kwargs)
+                                                except Exception as end_err:
+                                                    logger.warning(
+                                                        f"Failed to end Gemini Langfuse generation: {str(end_err)}",
+                                                        extra={"provider": self.model_name, "error": str(end_err)}
+                                                    )
 
                                     # Yield completion event
                                     yield {
@@ -1030,22 +1178,35 @@ class GeminiProvider(BaseProvider):
                                 "code": f"EMPTY_RESPONSE_{fr_name}"
                             }
 
-                        # Still track in Langfuse for this case
+                        # Story 23.1 (AC6): the previous version of this block was
+                        # the source of the Apr-04 placeholder traces (in=10, out=5-28).
+                        # It set `prompt_tokens=0`, then called count_tokens() inside
+                        # `try/except: pass` — when that call failed, prompt_tokens
+                        # stayed 0 while completion was the chunk count, producing
+                        # bogus low-input/low-output rows. AC1+AC2 close that loop:
+                        # we now read from `last_usage` (None if SDK didn't deliver),
+                        # never substitute chunk count, and never call count_tokens().
                         if trace and token_count > 0:
+                            generation = None
+                            end_kwargs: Dict[str, Any] = {}
                             try:
-                                prompt_tokens = 0
-                                completion_tokens = token_count
-
-                                try:
-                                    prompt_tokens = self.model.count_tokens(gemini_messages).total_tokens
-                                except Exception:
-                                    pass
-
-                                cost_info = self.calculate_cost({
-                                    "prompt_tokens": prompt_tokens,
-                                    "completion_tokens": completion_tokens,
-                                    "cached_tokens": 0
-                                })
+                                if last_usage is not None:
+                                    prompt_tokens = last_usage["prompt_tokens"]
+                                    completion_tokens = last_usage["completion_tokens"]
+                                else:
+                                    prompt_tokens = 0
+                                    completion_tokens = 0
+                                    logger.warning(
+                                        "Gemini stream ended without STOP and without usage_metadata",
+                                        extra={
+                                            "provider": self.model_name,
+                                            "event": "usage_metadata_missing",
+                                            "model": self.model_name,
+                                            "chunk_count": chunk_count,
+                                            "tool_iterations": tool_iteration,
+                                            "finish_reason": fr_name,
+                                        }
+                                    )
 
                                 prompt_text = json.dumps([m for m in messages if m.get("role") != "tool"])
                                 truncated_prompt = self._truncate_text(prompt_text, 1000)
@@ -1069,38 +1230,61 @@ class GeminiProvider(BaseProvider):
                                     }
                                 )
 
-                                # ModelUsage TypedDict: input, output, total, input_cost, output_cost, total_cost
-                                generation.end(
-                                    output=truncated_completion,
-                                    usage={
+                                end_kwargs = {
+                                    "output": truncated_completion,
+                                    "metadata": {"duration_ms": duration_ms},
+                                }
+                                if last_usage is not None:
+                                    cost_info = self.calculate_cost({
+                                        "prompt_tokens": prompt_tokens,
+                                        "completion_tokens": completion_tokens,
+                                        "cached_tokens": 0
+                                    })
+                                    end_kwargs["usage"] = {
                                         "input": prompt_tokens,
                                         "output": completion_tokens,
                                         "total": prompt_tokens + completion_tokens,
                                         "input_cost": cost_info.get("input_cost", 0),
                                         "output_cost": cost_info.get("output_cost", 0),
                                         "total_cost": cost_info.get("total_cost", 0)
-                                    },
-                                    metadata={
-                                        "duration_ms": duration_ms
                                     }
-                                )
-
-                                logger.info(
-                                    "Langfuse generation tracked (ended without STOP)",
-                                    extra={
-                                        "provider": self.model_name,
-                                        "prompt_tokens": prompt_tokens,
-                                        "completion_tokens": completion_tokens,
-                                        "cost_usd": cost_info.get("total_cost", 0)
-                                    }
-                                )
+                                    logger.info(
+                                        "Langfuse generation tracked (ended without STOP)",
+                                        extra={
+                                            "provider": self.model_name,
+                                            "prompt_tokens": prompt_tokens,
+                                            "completion_tokens": completion_tokens,
+                                            "cost_usd": cost_info.get("total_cost", 0)
+                                        }
+                                    )
+                                else:
+                                    logger.info(
+                                        "Langfuse generation tracked without usage (ended without STOP)",
+                                        extra={
+                                            "provider": self.model_name,
+                                            "event": "usage_metadata_missing",
+                                        }
+                                    )
                             except Exception as e:
                                 logger.warning(
-                                    f"Failed to track Gemini streaming in Langfuse: {str(e)}",
+                                    f"Failed to build Gemini Langfuse generation (ended without STOP): {str(e)}",
                                     extra={"provider": self.model_name, "error": str(e)}
                                 )
+                            finally:
+                                # AC5: ensure generation closes even on prep failure.
+                                if generation is not None:
+                                    try:
+                                        generation.end(**end_kwargs)
+                                    except Exception as end_err:
+                                        logger.warning(
+                                            f"Failed to end Gemini Langfuse generation: {str(end_err)}",
+                                            extra={"provider": self.model_name, "error": str(end_err)}
+                                        )
 
-                        # Yield done event even without STOP
+                        # Yield done event even without STOP. We pass token_count
+                        # (chunk count) for behavioral compatibility with the
+                        # downstream SSE consumer — this number is NOT used for
+                        # cost; cost rides on Langfuse's usage_metadata path.
                         yield {
                             "type": "done",
                             "tokens_used": {
@@ -1112,6 +1296,23 @@ class GeminiProvider(BaseProvider):
 
                 except Exception as e:
                     error_str = str(e).lower()
+                    err_duration_ms = int((time.time() - start_time) * 1000)
+
+                    # AC5: emit a Langfuse generation with level=ERROR before
+                    # propagating. `last_usage` is populated when Gemini's 429
+                    # comes back after prompt-processing — that's real billed
+                    # input tokens we want recorded. Helper is fire-and-forget.
+                    try:
+                        _err_last_usage = last_usage
+                    except NameError:
+                        _err_last_usage = None
+                    self._trace_error_generation(
+                        trace=trace,
+                        error=e,
+                        duration_ms=err_duration_ms,
+                        last_usage=_err_last_usage,
+                        tool_iteration=tool_iteration,
+                    )
 
                     # Check for context window overflow
                     if ("resource_exhausted" in error_str or "resource exhausted" in error_str) and ("token" in error_str and "limit" in error_str):
@@ -1172,6 +1373,28 @@ class GeminiProvider(BaseProvider):
                     "error_type": type(e).__name__,
                     "error": str(e)
                 }
+            )
+            # AC5: trace error before re-raising. `last_usage` and
+            # `tool_iteration` may not be bound if the failure happened
+            # before the chunk loop — guard each.
+            try:
+                _err_trace = trace
+            except NameError:
+                _err_trace = None
+            try:
+                _err_last_usage = last_usage
+            except NameError:
+                _err_last_usage = None
+            try:
+                _err_tool_iteration = tool_iteration
+            except NameError:
+                _err_tool_iteration = 0
+            self._trace_error_generation(
+                trace=_err_trace,
+                error=e,
+                duration_ms=duration_ms,
+                last_usage=_err_last_usage,
+                tool_iteration=_err_tool_iteration,
             )
             raise ProviderError(self.model_name, f"Unexpected streaming error: {type(e).__name__}", e)
 

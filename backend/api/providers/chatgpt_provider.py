@@ -128,6 +128,63 @@ class ChatGPTProvider(BaseProvider):
             sources_used=0  # ChatGPT-5 doesn't have Live Search
         )
 
+    def _trace_error_generation(
+        self,
+        trace: Any,
+        error: Exception,
+        duration_ms: int,
+        final_usage: Optional[Dict[str, Any]],
+    ) -> None:
+        """
+        Emit a Langfuse generation with `level="ERROR"` for a failed stream.
+
+        Story 23.1 (AC5): mirrors the Gemini error-trace helper. Fire-and-forget.
+        OpenAI 429 responses don't include a usage block, so `final_usage`
+        will typically be empty here — we still record the error generation
+        so the cap-trip pattern is observable in reconciliation.
+        """
+        if not trace:
+            return
+        generation = None
+        try:
+            generation = trace.generation(
+                name="llm_call_chatgpt-5_streaming",
+                model=self.MODEL_NAME,
+                metadata={
+                    "provider": MODEL_GPT_5,
+                    "streaming": True,
+                    "error_path": True,
+                },
+            )
+            end_kwargs: Dict[str, Any] = {
+                "level": "ERROR",
+                "status_message": f"{type(error).__name__}: {str(error)[:200]}",
+                "metadata": {"duration_ms": duration_ms},
+            }
+            if final_usage and "prompt_tokens" in final_usage and "completion_tokens" in final_usage:
+                prompt_tokens = final_usage["prompt_tokens"]
+                completion_tokens = final_usage["completion_tokens"]
+                cost_info = calculate_llm_cost(
+                    provider=MODEL_GPT_5,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    sources_used=0,
+                )
+                end_kwargs["usage"] = {
+                    "input": prompt_tokens,
+                    "output": completion_tokens,
+                    "total": prompt_tokens + completion_tokens,
+                    "input_cost": cost_info.get("input_cost", 0),
+                    "output_cost": cost_info.get("output_cost", 0),
+                    "total_cost": cost_info.get("total_cost", 0),
+                }
+            generation.end(**end_kwargs)
+        except Exception as trace_err:
+            logger.warning(
+                f"Failed to record ChatGPT-5 error generation in Langfuse: {trace_err}",
+                extra={"provider": MODEL_GPT_5, "error": str(trace_err)},
+            )
+
     async def stream_chat_completion(
         self,
         messages: List[Dict[str, Any]],
@@ -228,6 +285,12 @@ class ChatGPTProvider(BaseProvider):
         """
         start_time = time.time()
 
+        # Story 23.1 (AC5): hoist `trace` and `final_usage` out of the `with`
+        # block so the outer exception handlers can record an error generation
+        # before the exception propagates.
+        trace = get_current_trace()
+        final_usage: Dict[str, Any] = {}
+
         try:
             # Build request
             url = f"{self.BASE_URL}/chat/completions"
@@ -318,10 +381,6 @@ class ChatGPTProvider(BaseProvider):
 
                 # Track streaming tool calls (OpenAI sends them in chunks)
                 streaming_tool_calls: Dict[int, Dict[str, Any]] = {}
-                final_usage = {}
-
-                # Get current trace for Langfuse
-                trace = get_current_trace()
 
                 # Parse SSE stream
                 async for line in response.aiter_lines():
@@ -535,22 +594,37 @@ class ChatGPTProvider(BaseProvider):
                                         }
                                         return
 
+                                    # Story 23.1 (AC4): tokens come from the OpenAI
+                                    # final-chunk `usage` block (enabled by
+                                    # stream_options.include_usage=true on the
+                                    # request, see line ~242). When the block is
+                                    # absent we omit `usage` from generation.end()
+                                    # rather than substituting chunk count — same
+                                    # null-and-warn discipline as Gemini AC3.
+                                    has_usage = bool(usage) and "prompt_tokens" in usage and "completion_tokens" in usage
+                                    if has_usage:
+                                        prompt_tokens = usage.get("prompt_tokens", 0)
+                                        completion_tokens = usage.get("completion_tokens", 0)
+                                        total_tokens = prompt_tokens + completion_tokens
+                                    else:
+                                        prompt_tokens = 0
+                                        completion_tokens = 0
+                                        total_tokens = 0
+                                        logger.warning(
+                                            "ChatGPT-5 stream finished without usage block",
+                                            extra={
+                                                "provider": MODEL_GPT_5,
+                                                "event": "usage_metadata_missing",
+                                                "model": self.MODEL_NAME,
+                                                "finish_reason": finish_reason,
+                                            }
+                                        )
+
                                     # Track LLM generation in Langfuse (fire-and-forget)
                                     if trace:
+                                        generation = None
+                                        end_kwargs: Dict[str, Any] = {}
                                         try:
-                                            # Extract token usage
-                                            prompt_tokens = usage.get("prompt_tokens", 0)
-                                            completion_tokens = usage.get("completion_tokens", token_count)
-                                            total_tokens = prompt_tokens + completion_tokens
-
-                                            # Calculate costs
-                                            cost_info = calculate_llm_cost(
-                                                provider=MODEL_GPT_5,
-                                                prompt_tokens=prompt_tokens,
-                                                completion_tokens=completion_tokens,
-                                                sources_used=0
-                                            )
-
                                             # Prepare prompt and completion (truncated)
                                             prompt_text = json.dumps([m for m in messages if m.get("role") != "tool"])
                                             truncated_prompt = self._truncate_text(prompt_text, 1000)
@@ -568,43 +642,65 @@ class ChatGPTProvider(BaseProvider):
                                                 }
                                             )
 
-                                            generation.end(
-                                                output=truncated_completion,
-                                                usage={
+                                            end_kwargs = {
+                                                "output": truncated_completion,
+                                                "metadata": {"duration_ms": duration_ms},
+                                            }
+                                            if has_usage:
+                                                cost_info = calculate_llm_cost(
+                                                    provider=MODEL_GPT_5,
+                                                    prompt_tokens=prompt_tokens,
+                                                    completion_tokens=completion_tokens,
+                                                    sources_used=0
+                                                )
+                                                end_kwargs["usage"] = {
                                                     "input": prompt_tokens,
                                                     "output": completion_tokens,
                                                     "total": total_tokens,
                                                     "input_cost": cost_info.get("input_cost", 0),
                                                     "output_cost": cost_info.get("output_cost", 0),
                                                     "total_cost": cost_info.get("total_cost", 0)
-                                                },
-                                                metadata={
-                                                    "duration_ms": duration_ms
                                                 }
-                                            )
-
-                                            logger.info(
-                                                "Langfuse generation tracked successfully",
-                                                extra={
-                                                    "provider": MODEL_GPT_5,
-                                                    "prompt_tokens": prompt_tokens,
-                                                    "completion_tokens": completion_tokens,
-                                                    "cost_usd": cost_info.get("total_cost", 0)
-                                                }
-                                            )
+                                                logger.info(
+                                                    "Langfuse generation tracked successfully",
+                                                    extra={
+                                                        "provider": MODEL_GPT_5,
+                                                        "prompt_tokens": prompt_tokens,
+                                                        "completion_tokens": completion_tokens,
+                                                        "cost_usd": cost_info.get("total_cost", 0)
+                                                    }
+                                                )
+                                            else:
+                                                logger.info(
+                                                    "Langfuse generation tracked without usage",
+                                                    extra={
+                                                        "provider": MODEL_GPT_5,
+                                                        "event": "usage_metadata_missing",
+                                                    }
+                                                )
                                         except Exception as e:
                                             # Fire-and-forget: log but don't fail stream
                                             logger.warning(
-                                                f"Failed to track ChatGPT-5 streaming generation in Langfuse: {str(e)}",
+                                                f"Failed to build ChatGPT-5 Langfuse generation: {str(e)}",
                                                 extra={"provider": MODEL_GPT_5, "error": str(e)}
                                             )
+                                        finally:
+                                            # AC5: ensure generation always closes.
+                                            if generation is not None:
+                                                try:
+                                                    generation.end(**end_kwargs)
+                                                except Exception as end_err:
+                                                    logger.warning(
+                                                        f"Failed to end ChatGPT-5 Langfuse generation: {str(end_err)}",
+                                                        extra={"provider": MODEL_GPT_5, "error": str(end_err)}
+                                                    )
 
                                     # Yield completion event
                                     yield {
                                         "type": "done",
                                         "tokens_used": {
-                                            "prompt": usage.get("prompt_tokens", 0),
-                                            "completion": usage.get("completion_tokens", token_count)
+                                            "prompt": prompt_tokens,
+                                            "completion": completion_tokens if has_usage else token_count
                                         }
                                     }
 
@@ -629,6 +725,7 @@ class ChatGPTProvider(BaseProvider):
                     "timeout": self.streaming_timeout
                 }
             )
+            self._trace_error_generation(trace, e, duration_ms, final_usage)
             raise ProviderError(MODEL_GPT_5, "Streaming timeout", e)
 
         except httpx.NetworkError as e:
@@ -641,14 +738,20 @@ class ChatGPTProvider(BaseProvider):
                     "error": str(e)
                 }
             )
+            self._trace_error_generation(trace, e, duration_ms, final_usage)
             raise ProviderError(MODEL_GPT_5, "Network error during streaming", e)
 
-        except RateLimitError:
-            # Re-raise rate limit errors as-is
+        except RateLimitError as e:
+            # AC5: trace 429s before re-raising. OpenAI's 429 response doesn't
+            # include a usage block, so cost data will be absent — but the
+            # error generation makes the cap-trip pattern observable.
+            duration_ms = int((time.time() - start_time) * 1000)
+            self._trace_error_generation(trace, e, duration_ms, final_usage)
             raise
 
-        except ContextLengthError:
-            # Re-raise context length errors as-is
+        except ContextLengthError as e:
+            duration_ms = int((time.time() - start_time) * 1000)
+            self._trace_error_generation(trace, e, duration_ms, final_usage)
             raise
 
         except Exception as e:
@@ -662,6 +765,7 @@ class ChatGPTProvider(BaseProvider):
                     "error": str(e)
                 }
             )
+            self._trace_error_generation(trace, e, duration_ms, final_usage)
             raise ProviderError(MODEL_GPT_5, f"Unexpected streaming error: {type(e).__name__}", e)
 
     def _truncate_text(self, text: str, max_length: int) -> str:
