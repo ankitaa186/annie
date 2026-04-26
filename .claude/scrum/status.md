@@ -1,5 +1,5 @@
 # Sprint Status
-Last Updated: 2026-04-25 (Story 23.1 implementation complete — review)
+Last Updated: 2026-04-25 (Story 23.1 testing approved by Murat — done, awaiting Ankit's merge/push)
 
 ## Project
 - Name: Annie (Personal AI Companion)
@@ -142,7 +142,7 @@ Last Updated: 2026-04-25 (Story 23.1 implementation complete — review)
 - Theme: Make Annie's spend numbers trustworthy enough to base budget alarms / soft caps / auto-shutoff on. Reconciliation 2026-03-26→04-25 found Annie recorded $12.19 vs Google billed ~$100 (-88%). Cost tracking is the load-bearing input for any future cost-safety machinery; right now it would fail silently long before any guardrail fires. This epic absorbs follow-ons: budget alerts, soft-cap throttling, monthly reconciliation tooling, and per-user cost attribution.
 
 ### Story 23.1: Fix provider token counting in streaming providers
-- Status: review (David finished 2026-04-25 — handed off to Harpreet)
+- Status: done (Murat approved 2026-04-25 — awaiting Ankit's merge/push; +24h/+7d/+30d watchdog plan in bus)
 - Assigned: David (implementation)
 - Priority: P0
 - Size: M (~250-400 LOC across 3 prod files + 1 reconciliation script + tests)

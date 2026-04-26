@@ -335,6 +335,99 @@ async def test_gemini_ended_without_stop_no_false_zero():
 
 
 @pytest.mark.asyncio
+async def test_gemini_mid_stream_429_records_real_prompt_tokens():
+    """AC5 / Harpreet handoff #2: mid-stream 429 after prompt processing must
+    surface a `level=ERROR` generation with NON-EMPTY usage reflecting the
+    real billed prompt_token_count Gemini delivered before the failure.
+
+    Simulates the prompt-processed-then-429 path that David could not unit-test:
+    the first chunk carries a `usage_metadata.prompt_token_count > 0` (real
+    billed input), then the next iteration raises a 429-shaped exception.
+    The error generation must record those prompt tokens — they are real
+    billed work that must NOT silently disappear from cost tracking.
+    """
+    provider = _build_gemini_provider()
+
+    class _MidStream429Iterator:
+        """Yields one chunk with usage_metadata, then raises 429.
+
+        Mimics Gemini's behavior where prompt processing succeeds (and is
+        billed) but generation is refused with ResourceExhausted/429.
+        """
+
+        def __init__(self):
+            self._yielded = False
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            if not self._yielded:
+                self._yielded = True
+                # First chunk: prompt_token_count is real (prompt was processed
+                # and billed by Gemini); candidates_token_count=0 (generation
+                # never produced output).
+                return _Chunk(
+                    candidates=[_Candidate(text=None)],
+                    usage_metadata=_UsageMetadata(
+                        prompt_token_count=2500,
+                        candidates_token_count=0,
+                    ),
+                )
+            # Now the 429 fires mid-stream.
+            raise Exception(
+                "ResourceExhausted: 429 Your project has exceeded its monthly "
+                "spending cap. Please go to AI Studio at https://ai.studio/spend"
+            )
+
+    fake_chat = MagicMock()
+    fake_chat.send_message = MagicMock(return_value=_MidStream429Iterator())
+    provider.model.start_chat = MagicMock(return_value=fake_chat)
+    fake_trace = _FakeTrace()
+
+    with patch("api.providers.gemini_provider.get_current_trace", return_value=fake_trace):
+        with pytest.raises(RateLimitError):
+            async for _ in provider.stream_chat_completion(
+                messages=[{"role": "user", "content": "expensive prompt"}],
+                tools=None,
+                mcp_client=None,
+            ):
+                pass
+
+    # AC5: an ERROR-level generation must exist.
+    err_gens = [
+        g for g in fake_trace.generations
+        if g.end_kwargs and g.end_kwargs.get("level") == "ERROR"
+    ]
+    assert err_gens, (
+        "Mid-stream 429 must emit a level=ERROR generation. Without this, "
+        "the prompt-processed-then-429 burst goes silent in Langfuse — exactly "
+        "what triggered the original $88 cost-tracking gap."
+    )
+
+    err = err_gens[0]
+    # The smoking gun: real billed prompt tokens must NOT silently disappear.
+    assert "usage" in err.end_kwargs, (
+        "Mid-stream 429 with usage_metadata MUST record prompt tokens. "
+        "Found error generation without `usage` key — real billed work is "
+        "missing from Langfuse and reconciliation will under-report again."
+    )
+    usage = err.end_kwargs["usage"]
+    assert usage["input"] == 2500, (
+        f"Expected prompt_token_count=2500 (real billed input), got {usage.get('input')}"
+    )
+    assert usage["output"] == 0, (
+        f"Expected candidates_token_count=0 (generation refused), got {usage.get('output')}"
+    )
+    # Cost must be computed for the input tokens (sanity check on calculate_cost
+    # plumbing in _trace_error_generation).
+    assert usage.get("input_cost", 0) > 0, (
+        "input_cost must be non-zero for 2500 prompt tokens — otherwise the "
+        "billing reconciliation script will under-report the 429-burst."
+    )
+
+
+@pytest.mark.asyncio
 async def test_gemini_log_spam_regression(caplog):
     """AC10: on 100 happy-path generations the WARNING fires 0 times."""
     happy_count = 100
