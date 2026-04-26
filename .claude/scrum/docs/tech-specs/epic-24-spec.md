@@ -1,9 +1,11 @@
-# Epic 23 — Story 23.2: `google.generativeai` → `google.genai` SDK migration
+# Epic 24 — Story 24.1: `google.generativeai` → `google.genai` SDK migration
 
 **Author:** Parminder
 **Date:** 2026-04-25
-**Status:** draft (pending Disha refinement, David/Murat sign-off on parallel research)
-**Depends on:** Story 23.1 merged to remote first (rationale below)
+**Status:** drafted (Disha refinement done 2026-04-25)
+**Depends on:** none — Epic 23 / Story 23.1 is merged. (Section 10 below was written when 23.1 was still in flight; preserved for historical record but no longer load-bearing.)
+
+> **Renaming note:** This spec was originally authored as "Story 23.2 under Epic 23." Epic 23 (Cost & Observability Hardening) is now complete with Story 23.1 pushed, so the SDK migration was reframed as a new **Epic 24 (Provider Modernization & Tech Debt)** with this story as **24.1**. References to **Story 23.1** below are real cross-references to the merged cost-tracking work and remain accurate; everywhere else, "23.2" was renamed to "24.1" in this update.
 
 ---
 
@@ -111,9 +113,9 @@ Two options were considered:
 
 ## 7. Per-story breakdown (1 story is enough)
 
-I'd recommend Disha draft this as a **single story (23.2)**, not multiple. The work is one provider rewrite — splitting it would create more PR-coordination overhead than it saves.
+I'd recommend Disha draft this as a **single story (24.1)**, not multiple. The work is one provider rewrite — splitting it would create more PR-coordination overhead than it saves.
 
-**Story 23.2** — Migrate Gemini provider from `google.generativeai` to `google.genai`.
+**Story 24.1** — Migrate Gemini provider from `google.generativeai` to `google.genai`.
 
 **Sub-tasks:**
 1. Update `requirements.txt` + `make rebuild`.
@@ -165,24 +167,26 @@ I'd recommend Disha draft this as a **single story (23.2)**, not multiple. The w
 - **+7d**: AC6-style Langfuse query (any `usage.input < 50 AND output_chars > 200` placeholder rows) returns zero. Plus first cost-recon dry-run.
 - **+30d**: cost-recon variance <10% target.
 
-The new check unique to Story 23.2:
+The new check unique to Story 24.1:
 - **+24h**: zero log entries matching `"google.generativeai"` or `"deprecat"` — proves the warning is gone and the legacy package isn't being import-pulled by some transitive dep we missed.
 
 ---
 
-## 10. Dependency on Story 23.1 merge
+## 10. Dependency on Story 23.1 merge — RESOLVED
 
-**YES — Story 23.1 must merge to remote before 23.2 picks up.** Three reasons:
+> **2026-04-25 update:** Story 23.1 is merged/pushed. This section is preserved as historical record of why sequencing mattered. The prerequisite is satisfied; Story 24.1 has zero blocking dependencies.
 
-1. **Merge conflicts.** Story 23.1 rewrote `_extract_usage_metadata`, the success-STOP and ended-without-STOP token-counting blocks, and the `_trace_error_generation` helper. Story 23.2 rewrites the surrounding chunk-iteration loop and the `__init__`. These are spatially adjacent in `gemini_provider.py` (same file, overlapping ranges). Doing 23.2 against a tree where 23.1 isn't merged would force David into a manual three-way merge later.
+**YES — Story 23.1 must merge to remote before 24.1 picks up.** Three reasons:
 
-2. **Shared test file.** `test_story_23_1_token_counting.py` is THE regression-prevention battery for token counting. Story 23.2's AC6 explicitly preserves these tests. If 23.1 isn't merged, the test file isn't on `develop`, and 23.2 would be re-implementing both at once.
+1. **Merge conflicts.** Story 23.1 rewrote `_extract_usage_metadata`, the success-STOP and ended-without-STOP token-counting blocks, and the `_trace_error_generation` helper. Story 24.1 rewrites the surrounding chunk-iteration loop and the `__init__`. These are spatially adjacent in `gemini_provider.py` (same file, overlapping ranges). Doing 24.1 against a tree where 23.1 isn't merged would force David into a manual three-way merge later.
 
-3. **Watchdog calendar continuity.** Murat's +24h/+7d/+30d post-23.1 watchdog is in flight (first checkpoint 2026-04-26 16:00 PT). Stacking 23.2 on top of an unmerged 23.1 would make it impossible to attribute regressions to one or the other if something fires.
+2. **Shared test file.** `test_story_23_1_token_counting.py` is THE regression-prevention battery for token counting. Story 24.1's AC6 explicitly preserves these tests. If 23.1 isn't merged, the test file isn't on `develop`, and 24.1 would be re-implementing both at once.
 
-**Sequencing:** Ankit pushes 23.1 → 23.1 lands on remote → Disha drafts 23.2 → I review and move to `ready` → David picks up.
+3. **Watchdog calendar continuity.** Murat's +24h/+7d/+30d post-23.1 watchdog is in flight (first checkpoint 2026-04-26 16:00 PT). Stacking 24.1 on top of an unmerged 23.1 would make it impossible to attribute regressions to one or the other if something fires.
 
-**Story 23.2 itself blocks no other work.** Provider contract is stable; cross-cutting changes are zero.
+**Sequencing:** Ankit pushes 23.1 → 23.1 lands on remote → Disha drafts 24.1 → I review and move to `ready` → David picks up.
+
+**Story 24.1 itself blocks no other work.** Provider contract is stable; cross-cutting changes are zero.
 
 ---
 

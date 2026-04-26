@@ -326,7 +326,8 @@ class TestGeminiMultimodalIntegration:
                 "GEMINI_MAX_TOOL_ITERATIONS": "20"
             }
 
-            with patch("api.providers.gemini_provider.genai"):
+            # Story 24.1 (AC9): patch `genai.Client` (the singleton constructor).
+            with patch("api.providers.gemini_provider.genai.Client"):
                 from api.providers.gemini_provider import GeminiProvider
                 provider = GeminiProvider()
 

@@ -13,6 +13,15 @@ Verifies that:
   via the "ended without STOP" path (AC6 regression).
 - Log-spam regression: the WARNING fires <1% of generations on the
   happy path (AC10).
+
+Story 24.1 (AC9) — patch sites re-targeted to provider-owned attributes.
+The fakes simulate the new SDK's async chat API:
+- `client.aio.chats.create(model=, history=, config=)` returns a fake chat.
+- `chat.send_message_stream(message=)` is an async coroutine that returns
+  an async iterator over `_Chunk` objects.
+- `function_call.args` is a plain Python `dict` (no proto walker).
+- Cached-token plumbing (AC15) verified via `cached_content_token_count`
+  field on `_UsageMetadata`.
 """
 
 import base64  # noqa: F401  (kept for parity with sibling test files)
@@ -36,11 +45,22 @@ from api.providers.grok_provider import RateLimitError
 
 
 class _UsageMetadata:
-    """Mimics the SDK's usage_metadata object on a Gemini stream chunk."""
+    """Mimics the SDK's usage_metadata object on a Gemini stream chunk.
 
-    def __init__(self, prompt_token_count: Optional[int], candidates_token_count: Optional[int]):
+    Story 24.1 (AC15): adds `cached_content_token_count` field. Defaults to
+    None (no cache hit / pre-3.x model) but can be set to a non-None int
+    to simulate an implicit-cache hit.
+    """
+
+    def __init__(
+        self,
+        prompt_token_count: Optional[int],
+        candidates_token_count: Optional[int],
+        cached_content_token_count: Optional[int] = None,
+    ):
         self.prompt_token_count = prompt_token_count
         self.candidates_token_count = candidates_token_count
+        self.cached_content_token_count = cached_content_token_count
 
 
 class _Part:
@@ -105,8 +125,79 @@ class _Chunk:
             self.usage_metadata = usage_metadata
 
 
+class _AsyncChunkIterator:
+    """Async iterator over chunks. Story 24.1 (AC3): the new SDK's
+    `send_message_stream(...)` returns an async iterator, not a sync iter.
+
+    Optionally raises an exception after a given chunk index (used by the
+    mid-stream-429 test to simulate the prompt-processed-then-429 path).
+    """
+
+    def __init__(
+        self,
+        chunks: List[_Chunk],
+        raise_after: Optional[int] = None,
+        raise_exc: Optional[Exception] = None,
+    ):
+        self._chunks = chunks
+        self._idx = 0
+        self._raise_after = raise_after
+        self._raise_exc = raise_exc
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self._raise_after is not None and self._idx >= self._raise_after:
+            assert self._raise_exc is not None
+            raise self._raise_exc
+        if self._idx >= len(self._chunks):
+            raise StopAsyncIteration
+        chunk = self._chunks[self._idx]
+        self._idx += 1
+        return chunk
+
+
+class _FakeAsyncChat:
+    """Pretends to be the object returned by `client.aio.chats.create(...)`.
+
+    `send_message_stream` is an async coroutine that returns an async
+    iterator. Story 24.1 (AC3): matches the new SDK's surface.
+    """
+
+    def __init__(
+        self,
+        chunks: List[_Chunk],
+        raise_after: Optional[int] = None,
+        raise_exc: Optional[Exception] = None,
+        send_side_effect: Optional[Exception] = None,
+    ):
+        self._chunks = chunks
+        self._raise_after = raise_after
+        self._raise_exc = raise_exc
+        self._send_side_effect = send_side_effect
+        # Capture last call args for assertions.
+        self.last_message: Any = None
+
+    async def send_message_stream(self, message=None):
+        self.last_message = message
+        if self._send_side_effect is not None:
+            raise self._send_side_effect
+        return _AsyncChunkIterator(
+            self._chunks,
+            raise_after=self._raise_after,
+            raise_exc=self._raise_exc,
+        )
+
+
 def _build_gemini_provider() -> GeminiProvider:
-    """Construct a GeminiProvider with all SDK side effects mocked away."""
+    """Construct a GeminiProvider with the SDK Client mocked away.
+
+    Story 24.1 (AC9): patches `genai.Client` (the singleton constructor)
+    rather than module-global `genai.configure` / `genai.GenerativeModel`.
+    The full backend test suite must pass with `google-generativeai`
+    uninstalled — silent-pass class is closed.
+    """
     cfg = {
         "GOOGLE_API_KEY": "test-google-key",
         "GEMINI_MODEL": "gemini-3.1-pro-preview",
@@ -117,27 +208,25 @@ def _build_gemini_provider() -> GeminiProvider:
         "GEMINI_MAX_TOOL_ITERATIONS": "5",
     }
     with patch("api.providers.gemini_provider.get_config", return_value=cfg), \
-         patch("api.providers.gemini_provider.genai.configure"), \
-         patch("api.providers.gemini_provider.genai.GenerativeModel"):
+         patch("api.providers.gemini_provider.genai.Client") as mock_client_cls:
+        # The Client() instance has `.aio.chats.create(...)` — wire it up
+        # so tests can override `provider.client.aio.chats.create` to
+        # return their fake chat.
+        fake_client = MagicMock()
+        fake_client.aio.chats.create = MagicMock()
+        mock_client_cls.return_value = fake_client
         provider = GeminiProvider()
-    # Ensure a sentinel: count_tokens MUST NOT be called by the streaming path.
-    provider.model.count_tokens = MagicMock(
-        side_effect=AssertionError(
-            "count_tokens() must not be called from the streaming path (Story 23.1 AC2)"
-        )
-    )
     return provider
 
 
-class _FakeChat:
-    """Pretends to be the object returned by `model.start_chat()`."""
+def _install_fake_chat(provider: GeminiProvider, fake_chat: _FakeAsyncChat) -> None:
+    """Wire a fake chat into the provider's SDK client.
 
-    def __init__(self, chunks: List[_Chunk]):
-        self._chunks = chunks
-
-    def send_message(self, last_user_message, stream=True, tools=None):
-        # Return a generator-like iterable. The provider iterates it directly.
-        return iter(self._chunks)
+    Story 24.1 (AC3): the streaming path calls
+    `self.client.aio.chats.create(...)` (synchronous return — async only
+    on `send_message_stream`). Use a regular MagicMock with return_value.
+    """
+    provider.client.aio.chats.create = MagicMock(return_value=fake_chat)
 
 
 class _FakeTrace:
@@ -177,11 +266,14 @@ async def test_gemini_provider_uses_usage_metadata():
         _Chunk(candidates=[_Candidate(text="world!")]),
         _Chunk(
             candidates=[_Candidate(finish_value=1, finish_name="STOP")],
-            usage_metadata=_UsageMetadata(prompt_token_count=1234, candidates_token_count=567),
+            usage_metadata=_UsageMetadata(
+                prompt_token_count=1234,
+                candidates_token_count=567,
+            ),
         ),
     ]
-    fake_chat = _FakeChat(chunks)
-    provider.model.start_chat = MagicMock(return_value=fake_chat)
+    fake_chat = _FakeAsyncChat(chunks)
+    _install_fake_chat(provider, fake_chat)
     fake_trace = _FakeTrace()
 
     with patch("api.providers.gemini_provider.get_current_trace", return_value=fake_trace):
@@ -215,7 +307,7 @@ async def test_gemini_provider_omits_usage_when_metadata_absent(caplog):
         _Chunk(candidates=[_Candidate(finish_value=1, finish_name="STOP")]),
         # NOTE: no usage_metadata on any chunk.
     ]
-    provider.model.start_chat = MagicMock(return_value=_FakeChat(chunks))
+    _install_fake_chat(provider, _FakeAsyncChat(chunks))
     fake_trace = _FakeTrace()
 
     with patch("api.providers.gemini_provider.get_current_trace", return_value=fake_trace), \
@@ -242,8 +334,20 @@ async def test_gemini_provider_omits_usage_when_metadata_absent(caplog):
 
 @pytest.mark.asyncio
 async def test_gemini_provider_no_count_tokens_call():
-    """AC2: count_tokens() must not be invoked from the streaming path."""
+    """AC2: count_tokens() must not be invoked from the streaming path.
+
+    Story 24.1: the new SDK exposes `client.models.count_tokens(...)` (not
+    `model.count_tokens(...)`). We sentinel both to enforce.
+    """
     provider = _build_gemini_provider()
+    # Sentinel both possible call sites: the new SDK's `client.models.count_tokens`
+    # AND the legacy `client.aio.models.count_tokens` (in case it exists).
+    provider.client.models = MagicMock()
+    provider.client.models.count_tokens = MagicMock(
+        side_effect=AssertionError(
+            "count_tokens() must not be called from the streaming path (Story 23.1 AC2)"
+        )
+    )
     chunks = [
         _Chunk(candidates=[_Candidate(text="ok")]),
         _Chunk(
@@ -251,7 +355,7 @@ async def test_gemini_provider_no_count_tokens_call():
             usage_metadata=_UsageMetadata(prompt_token_count=10, candidates_token_count=3),
         ),
     ]
-    provider.model.start_chat = MagicMock(return_value=_FakeChat(chunks))
+    _install_fake_chat(provider, _FakeAsyncChat(chunks))
 
     with patch("api.providers.gemini_provider.get_current_trace", return_value=_FakeTrace()):
         async for _ in provider.stream_chat_completion(
@@ -262,7 +366,7 @@ async def test_gemini_provider_no_count_tokens_call():
             pass
 
     # The mock's side_effect would have raised AssertionError if called.
-    provider.model.count_tokens.assert_not_called()
+    provider.client.models.count_tokens.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -270,12 +374,11 @@ async def test_gemini_error_path_traces_generation():
     """AC5: provider exception still emits a generation with level=ERROR."""
     provider = _build_gemini_provider()
 
-    def _explode(*args, **kwargs):
-        raise Exception("ResourceExhausted: 429 quota exceeded")
-
-    fake_chat = MagicMock()
-    fake_chat.send_message = _explode
-    provider.model.start_chat = MagicMock(return_value=fake_chat)
+    fake_chat = _FakeAsyncChat(
+        chunks=[],
+        send_side_effect=Exception("ResourceExhausted: 429 quota exceeded"),
+    )
+    _install_fake_chat(provider, fake_chat)
     fake_trace = _FakeTrace()
 
     with patch("api.providers.gemini_provider.get_current_trace", return_value=fake_trace):
@@ -301,15 +404,14 @@ async def test_gemini_ended_without_stop_no_false_zero():
     """AC6 regression: 'ended without STOP' path no longer ships in=0/out=chunk_count."""
     provider = _build_gemini_provider()
     # Mimic the Apr-04 shape: the model emits a few content chunks then the
-    # stream ends with a non-STOP finish reason. Pre-23.1 this path called
-    # `count_tokens()`; if the call failed, it shipped (in=0, out=chunk_count).
+    # stream ends with a non-STOP finish reason.
     chunks = [
         _Chunk(candidates=[_Candidate(text="chunk1")]),
         _Chunk(candidates=[_Candidate(text="chunk2")]),
         # finish_reason MAX_TOKENS (value=2) — non-STOP. NO usage_metadata.
         _Chunk(candidates=[_Candidate(finish_value=2, finish_name="MAX_TOKENS")]),
     ]
-    provider.model.start_chat = MagicMock(return_value=_FakeChat(chunks))
+    _install_fake_chat(provider, _FakeAsyncChat(chunks))
     fake_trace = _FakeTrace()
 
     with patch("api.providers.gemini_provider.get_current_trace", return_value=fake_trace):
@@ -330,8 +432,6 @@ async def test_gemini_ended_without_stop_no_false_zero():
         assert not (usage.get("input") == 0 and 0 < usage.get("output", 0) < 50), (
             "AC6: must not emit false-zero placeholder rows like (in=0, out=<small>)"
         )
-    # The mock's side_effect would have asserted if count_tokens were called.
-    provider.model.count_tokens.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -340,49 +440,31 @@ async def test_gemini_mid_stream_429_records_real_prompt_tokens():
     surface a `level=ERROR` generation with NON-EMPTY usage reflecting the
     real billed prompt_token_count Gemini delivered before the failure.
 
-    Simulates the prompt-processed-then-429 path that David could not unit-test:
-    the first chunk carries a `usage_metadata.prompt_token_count > 0` (real
-    billed input), then the next iteration raises a 429-shaped exception.
-    The error generation must record those prompt tokens — they are real
-    billed work that must NOT silently disappear from cost tracking.
+    Story 24.1: simulates the prompt-processed-then-429 path on the new
+    async iter — first chunk carries usage_metadata, then the iterator
+    raises a 429-shaped exception.
     """
     provider = _build_gemini_provider()
 
-    class _MidStream429Iterator:
-        """Yields one chunk with usage_metadata, then raises 429.
+    # First chunk carries real billed prompt tokens; second chunk raises 429.
+    first_chunk = _Chunk(
+        candidates=[_Candidate(text=None)],
+        usage_metadata=_UsageMetadata(
+            prompt_token_count=2500,
+            candidates_token_count=0,
+        ),
+    )
 
-        Mimics Gemini's behavior where prompt processing succeeds (and is
-        billed) but generation is refused with ResourceExhausted/429.
-        """
-
-        def __init__(self):
-            self._yielded = False
-
-        def __iter__(self):
-            return self
-
-        def __next__(self):
-            if not self._yielded:
-                self._yielded = True
-                # First chunk: prompt_token_count is real (prompt was processed
-                # and billed by Gemini); candidates_token_count=0 (generation
-                # never produced output).
-                return _Chunk(
-                    candidates=[_Candidate(text=None)],
-                    usage_metadata=_UsageMetadata(
-                        prompt_token_count=2500,
-                        candidates_token_count=0,
-                    ),
-                )
-            # Now the 429 fires mid-stream.
-            raise Exception(
-                "ResourceExhausted: 429 Your project has exceeded its monthly "
-                "spending cap. Please go to AI Studio at https://ai.studio/spend"
-            )
-
-    fake_chat = MagicMock()
-    fake_chat.send_message = MagicMock(return_value=_MidStream429Iterator())
-    provider.model.start_chat = MagicMock(return_value=fake_chat)
+    rate_limit_exc = Exception(
+        "ResourceExhausted: 429 Your project has exceeded its monthly "
+        "spending cap. Please go to AI Studio at https://ai.studio/spend"
+    )
+    fake_chat = _FakeAsyncChat(
+        chunks=[first_chunk],
+        raise_after=1,
+        raise_exc=rate_limit_exc,
+    )
+    _install_fake_chat(provider, fake_chat)
     fake_trace = _FakeTrace()
 
     with patch("api.providers.gemini_provider.get_current_trace", return_value=fake_trace):
@@ -406,7 +488,6 @@ async def test_gemini_mid_stream_429_records_real_prompt_tokens():
     )
 
     err = err_gens[0]
-    # The smoking gun: real billed prompt tokens must NOT silently disappear.
     assert "usage" in err.end_kwargs, (
         "Mid-stream 429 with usage_metadata MUST record prompt tokens. "
         "Found error generation without `usage` key — real billed work is "
@@ -443,7 +524,7 @@ async def test_gemini_log_spam_regression(caplog):
                     usage_metadata=_UsageMetadata(prompt_token_count=12, candidates_token_count=3),
                 ),
             ]
-            provider.model.start_chat = MagicMock(return_value=_FakeChat(chunks))
+            _install_fake_chat(provider, _FakeAsyncChat(chunks))
             with patch("api.providers.gemini_provider.get_current_trace", return_value=fake_trace):
                 async for _ in provider.stream_chat_completion(
                     messages=[{"role": "user", "content": "hi"}],
@@ -455,6 +536,95 @@ async def test_gemini_log_spam_regression(caplog):
     misses = [r for r in caplog.records if getattr(r, "event", None) == "usage_metadata_missing"]
     rate = len(misses) / happy_count
     assert rate < 0.01, f"AC10: usage_metadata_missing rate {rate:.2%} >= 1% on happy path"
+
+
+# ---------------------------------------------------------------------------
+# Story 24.1 — AC15 (cached_tokens plumbing)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_gemini_cached_tokens_plumbed_to_langfuse():
+    """AC15: cached_content_token_count surfaces in Langfuse `usage` payload.
+
+    Verifies the implicit-cache hit-rate is observable via traces. When a
+    generation has cached tokens, the `usage.input_cached` field is the
+    integer count (not None, not zero — the real value).
+    """
+    provider = _build_gemini_provider()
+    chunks = [
+        _Chunk(candidates=[_Candidate(text="ok")]),
+        _Chunk(
+            candidates=[_Candidate(finish_value=1, finish_name="STOP")],
+            usage_metadata=_UsageMetadata(
+                prompt_token_count=5000,
+                candidates_token_count=200,
+                cached_content_token_count=4000,  # 80% input cached
+            ),
+        ),
+    ]
+    _install_fake_chat(provider, _FakeAsyncChat(chunks))
+    fake_trace = _FakeTrace()
+
+    with patch("api.providers.gemini_provider.get_current_trace", return_value=fake_trace):
+        async for _ in provider.stream_chat_completion(
+            messages=[{"role": "user", "content": "hi"}],
+            tools=None,
+            mcp_client=None,
+        ):
+            pass
+
+    assert len(fake_trace.generations) == 1
+    gen = fake_trace.generations[0]
+    assert "usage" in gen.end_kwargs
+    usage = gen.end_kwargs["usage"]
+    assert usage["input_cached"] == 4000, (
+        "AC15: input_cached must reflect cached_content_token_count from usage_metadata"
+    )
+    assert usage["input"] == 5000
+    assert usage["output"] == 200
+    # cached_cost should be present (the 90% discount lands here).
+    assert "cached_cost" in usage
+
+
+@pytest.mark.asyncio
+async def test_gemini_cached_tokens_zero_when_field_none(caplog):
+    """AC15: cached=None on chunk → input_cached=0 in trace, no log spam.
+
+    Per Parminder steer: missing/None cached field is "we know it was zero",
+    NOT "we don't know" — first-turn / non-3.x models legitimately have
+    no cache hit.
+    """
+    provider = _build_gemini_provider()
+    chunks = [
+        _Chunk(candidates=[_Candidate(text="ok")]),
+        _Chunk(
+            candidates=[_Candidate(finish_value=1, finish_name="STOP")],
+            usage_metadata=_UsageMetadata(
+                prompt_token_count=1000,
+                candidates_token_count=500,
+                cached_content_token_count=None,  # first turn
+            ),
+        ),
+    ]
+    _install_fake_chat(provider, _FakeAsyncChat(chunks))
+    fake_trace = _FakeTrace()
+
+    with patch("api.providers.gemini_provider.get_current_trace", return_value=fake_trace):
+        async for _ in provider.stream_chat_completion(
+            messages=[{"role": "user", "content": "hi"}],
+            tools=None,
+            mcp_client=None,
+        ):
+            pass
+
+    gen = fake_trace.generations[0]
+    usage = gen.end_kwargs["usage"]
+    assert usage["input_cached"] == 0
+    # A `usage_metadata_missing` warning would mean we treated cache=None as
+    # the whole-metadata-missing case — wrong. Verify NO such warning.
+    misses = [r for r in caplog.records if getattr(r, "event", None) == "usage_metadata_missing"]
+    assert len(misses) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -623,10 +793,6 @@ def test_cost_reconciliation_script(tmp_path, monkeypatch):
     import os
 
     # Load the script as a module (it's outside the importable package tree).
-    # The backend test container mounts only `backend/` at /app, so the
-    # script lives outside the container's filesystem when tests run there.
-    # The fallback path is repo-relative and works in both environments
-    # when scripts/ is mounted; otherwise we skip with a clear message.
     candidates = [
         "/app/scripts/cost_reconciliation.py",
         os.path.abspath(

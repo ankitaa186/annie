@@ -233,6 +233,15 @@ def markdown_to_telegram_html(text: str) -> str:
     text = text.replace(r'\]', ']')
     text = text.replace(r'\(', '(')
     text = text.replace(r'\)', ')')
+    text = text.replace(r'\~', '~')
+    text = text.replace(r'\|', '|')
+    text = text.replace(r'\+', '+')
+    text = text.replace(r'\=', '=')
+    text = text.replace(r'\{', '{')
+    text = text.replace(r'\}', '}')
+    # \> is special: html.escape ran first and turned ">" into "&gt;",
+    # so the literal LLM-emitted "\>" is now "\&gt;" in the buffer.
+    text = text.replace(r'\&gt;', '&gt;')
 
     return text
 

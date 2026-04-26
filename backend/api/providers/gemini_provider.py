@@ -1,16 +1,30 @@
 """
-Gemini 3 Pro Provider
+Gemini 3 Pro Provider — google.genai SDK (Story 24.1)
 
 Implementation of Gemini 3 Pro (Google AI API) provider with streaming support,
 safety filter handling, function calling, and Langfuse tracing integration.
+
+Story 24.1 migrated this file from the deprecated `google.generativeai` package
+to `google.genai` (the new official SDK). Key shape changes:
+- `genai.Client(api_key=...)` singleton (constructed once in __init__)
+- Per-call `types.GenerateContentConfig(...)` for generation/safety/tools/AFC
+- `client.aio.chats.create(...)` + `chat.send_message_stream(...)` async path
+- `types.Part.from_function_response(...)` for tool responses
+- `function_call.args` is a plain Python dict (no proto unwrapping)
+- `automatic_function_calling=AutomaticFunctionCallingConfig(disable=True)`
+  is set in a config builder, non-overridable from call sites — critical
+  tripwire because the new SDK auto-executes Python callables by default.
 """
 
 import json
 import time
 import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional
-import google.generativeai as genai
-from google.generativeai.types import HarmCategory, HarmBlockThreshold
+
+from google import genai
+from google.genai import errors as genai_errors
+from google.genai import types as genai_types
+
 from api.config import get_config
 from api.logging import get_logger
 from api.constants import MODEL_GEMINI_PRO, MODEL_GEMINI_FLASH, MODEL_GEMINI_LEGACY
@@ -24,6 +38,50 @@ from api.utils import inject_user_id, strip_base64_from_tool_result
 logger = get_logger(__name__)
 
 
+# Story 24.1: legacy-compatible numeric values for FinishReason names.
+# The legacy SDK's FinishReason was a proto IntEnum (STOP=1, MAX_TOKENS=2,
+# MALFORMED_FUNCTION_CALL=10, etc.). The new SDK exposes FinishReason as a
+# string enum (FinishReason.STOP, FinishReason.MAX_TOKENS, ...). The
+# downstream finish-reason logic in this file is keyed off the legacy
+# numeric values (especially fr_value == 10 for MALFORMED_FUNCTION_CALL
+# retry triggering); rather than rewrite all those comparisons, we map
+# the new enum's name back to the legacy numeric value.
+_FINISH_REASON_NAME_TO_LEGACY_VALUE = {
+    "FINISH_REASON_UNSPECIFIED": 0,
+    "STOP": 1,
+    "MAX_TOKENS": 2,
+    "SAFETY": 3,
+    "RECITATION": 4,
+    "LANGUAGE": 6,
+    "OTHER": 5,
+    "BLOCKLIST": 7,
+    "PROHIBITED_CONTENT": 8,
+    "SPII": 9,
+    "MALFORMED_FUNCTION_CALL": 10,
+    "IMAGE_SAFETY": 11,
+    "UNEXPECTED_TOOL_CALL": 13,
+    # Story 9.x's THINKING_OVERFLOW (12) / others not in new SDK enum;
+    # default to -1 / unknown handled by the .get() fallback.
+}
+
+
+def _finish_reason_to_legacy_int(fr: Any) -> int:
+    """Translate a new-SDK FinishReason (str enum) to the legacy numeric value.
+
+    Story 24.1: the streaming code path was written against the legacy
+    proto IntEnum and uses fr_value comparisons (e.g., 10 ==
+    MALFORMED_FUNCTION_CALL). Rather than rewrite every comparison, this
+    helper preserves the old contract.
+    """
+    if fr is None:
+        return 0
+    name = getattr(fr, "name", None)
+    if name is None:
+        # Last resort: convert via str() and strip "FinishReason." prefix.
+        name = str(fr).rsplit(".", 1)[-1]
+    return _FINISH_REASON_NAME_TO_LEGACY_VALUE.get(name, -1)
+
+
 class GeminiProvider(BaseProvider):
     """
     Gemini (Google AI API) provider implementation.
@@ -33,8 +91,9 @@ class GeminiProvider(BaseProvider):
     - Message format conversion (OpenAI → Gemini)
     - Safety filter handling (4 harm categories)
     - Quota and rate limit handling
-    - Cost calculation with tiered pricing
+    - Cost calculation with tiered pricing + cached-token discount
     - Langfuse tracing integration (fire-and-forget)
+    - Implicit prompt-cache instrumentation (Story 24.1 AC15)
     - Supports multiple Gemini models (gemini-3.1-pro-preview, gemini-2.5-pro, etc.)
     """
 
@@ -44,17 +103,23 @@ class GeminiProvider(BaseProvider):
     # Supported Gemini models
     SUPPORTED_MODELS = [MODEL_GEMINI_PRO, MODEL_GEMINI_FLASH, MODEL_GEMINI_LEGACY]
 
-    # Safety filter user-friendly messages
+    # Safety filter user-friendly messages, keyed by HarmCategory enum.
     SAFETY_MESSAGES = {
-        HarmCategory.HARM_CATEGORY_HARASSMENT: "I cannot respond due to content policy. Please rephrase.",
-        HarmCategory.HARM_CATEGORY_HATE_SPEECH: "I cannot respond due to content policy. Please rephrase.",
-        HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: "I cannot respond due to content policy. Please rephrase.",
-        HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: "I cannot respond due to content policy. Please rephrase.",
+        genai_types.HarmCategory.HARM_CATEGORY_HARASSMENT: "I cannot respond due to content policy. Please rephrase.",
+        genai_types.HarmCategory.HARM_CATEGORY_HATE_SPEECH: "I cannot respond due to content policy. Please rephrase.",
+        genai_types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: "I cannot respond due to content policy. Please rephrase.",
+        genai_types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: "I cannot respond due to content policy. Please rephrase.",
     }
 
     def __init__(self, model_override: Optional[str] = None):
         """
         Initialize Gemini provider with configuration from environment.
+
+        Story 24.1 (AC2): client construction migrated to `genai.Client(api_key=...)`,
+        constructed once and reused for the life of this provider instance
+        (Parminder's singleton steer). Generation config + safety settings + tool
+        configuration moved to per-call `types.GenerateContentConfig` (built by
+        `_build_generate_content_config`).
 
         Args:
             model_override: Optional model name to use instead of env config.
@@ -86,39 +151,39 @@ class GeminiProvider(BaseProvider):
         # Load safety setting (default: BLOCK_NONE for minimal filtering)
         safety_setting_str = config.get("GEMINI_SAFETY_SETTING", "BLOCK_NONE")
         self.safety_setting = self._parse_safety_setting(safety_setting_str)
+        self.safety_setting_str = safety_setting_str
 
-        # Configure Gemini API
-        genai.configure(api_key=self.api_key)
-
-        # Create model instance
-        self.model = genai.GenerativeModel(
-            model_name=self.model_name,
-            generation_config={
-                "temperature": self.temperature,
-                "max_output_tokens": self.max_output_tokens,
-            },
-            safety_settings=self._get_safety_settings()
-        )
+        # Story 24.1 (AC2): construct the SDK client once. The new SDK no
+        # longer has a module-global `genai.configure(...)` step; instead the
+        # API key flows through the Client. Reused across every
+        # stream_chat_completion call (Parminder's singleton steer — avoids
+        # per-request httpx/auth setup churn and lets future SDK pooling
+        # work).
+        self.client = genai.Client(api_key=self.api_key)
 
         # Initialize tool adapter for function calling (Story 9.3)
+        # Story 24.1 (AC14): kept on Parminder's strong steer — MCP boundary
+        # delivers OpenAI-shaped tool dicts; `from_callable` requires Python
+        # callables we don't have. The adapter is the right primitive.
         self.tool_adapter = GeminiToolAdapter()
 
         # Load max tool iterations from config (prevent infinite loops)
         self.max_tool_iterations = int(config.get("GEMINI_MAX_TOOL_ITERATIONS", "20"))
 
         logger.info(
-            "Gemini 3 Pro provider initialized",
+            "Gemini 3 Pro provider initialized (google.genai SDK)",
             extra={
                 "provider": self.model_name,
                 "model": self.model_name,
                 "temperature": self.temperature,
                 "max_output_tokens": self.max_output_tokens,
                 "safety_setting": safety_setting_str,
-                "max_tool_iterations": self.max_tool_iterations
+                "max_tool_iterations": self.max_tool_iterations,
+                "sdk": "google.genai",
             }
         )
 
-    def _parse_safety_setting(self, setting_str: str) -> HarmBlockThreshold:
+    def _parse_safety_setting(self, setting_str: str) -> "genai_types.HarmBlockThreshold":
         """
         Parse safety setting string to HarmBlockThreshold enum.
 
@@ -129,26 +194,95 @@ class GeminiProvider(BaseProvider):
             HarmBlockThreshold enum value
         """
         setting_map = {
-            "BLOCK_NONE": HarmBlockThreshold.BLOCK_NONE,
-            "BLOCK_ONLY_HIGH": HarmBlockThreshold.BLOCK_ONLY_HIGH,
-            "BLOCK_MEDIUM_AND_ABOVE": HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
-            "BLOCK_LOW_AND_ABOVE": HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
+            "BLOCK_NONE": genai_types.HarmBlockThreshold.BLOCK_NONE,
+            "BLOCK_ONLY_HIGH": genai_types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+            "BLOCK_MEDIUM_AND_ABOVE": genai_types.HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+            "BLOCK_LOW_AND_ABOVE": genai_types.HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
         }
-        return setting_map.get(setting_str, HarmBlockThreshold.BLOCK_NONE)
+        return setting_map.get(setting_str, genai_types.HarmBlockThreshold.BLOCK_NONE)
 
-    def _get_safety_settings(self) -> Dict[HarmCategory, HarmBlockThreshold]:
+    def _build_safety_settings(self) -> List[genai_types.SafetySetting]:
         """
-        Get safety settings for all harm categories.
+        Build safety settings as a list[SafetySetting] for the new SDK.
+
+        Story 24.1 (AC7): the new SDK takes safety settings as a list of
+        `types.SafetySetting(category=, threshold=)`, not a dict keyed by
+        HarmCategory. This builder produces that list for inclusion in
+        `GenerateContentConfig.safety_settings`.
+        """
+        return [
+            genai_types.SafetySetting(
+                category=cat,
+                threshold=self.safety_setting,
+            )
+            for cat in (
+                genai_types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                genai_types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                genai_types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                genai_types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+            )
+        ]
+
+    def _build_generate_content_config(
+        self,
+        tools_config: Optional[List[Dict[str, Any]]] = None,
+        system_instruction: Optional[str] = None,
+    ) -> genai_types.GenerateContentConfig:
+        """
+        Build a GenerateContentConfig for the streaming call.
+
+        Story 24.1 (AC4 + Parminder steer): `automatic_function_calling.disable=True`
+        is set ALWAYS by this builder, regardless of caller. The new SDK's default
+        is to auto-execute Python callables passed via `tools=...`, bypassing
+        Annie's MCP layer entirely. We don't pass Python callables, but the
+        explicit disable is the correct tripwire and is non-overridable from
+        call sites by design — `_build_generate_content_config` is the single
+        place where AFC behavior is decided.
+
+        Args:
+            tools_config: Optional list of `{"function_declarations": [...]}`
+                dicts (output of GeminiToolAdapter.convert_openai_to_gemini_schema
+                wrapped per-call). The adapter delivers OpenAI-shaped function
+                declarations the SDK accepts.
+            system_instruction: Optional system instruction string. The new SDK
+                accepts this as a top-level field on GenerateContentConfig
+                (no more prepending to first user message).
 
         Returns:
-            Dictionary mapping harm categories to thresholds
+            A GenerateContentConfig ready to pass into chats.create(config=...).
         """
-        return {
-            HarmCategory.HARM_CATEGORY_HARASSMENT: self.safety_setting,
-            HarmCategory.HARM_CATEGORY_HATE_SPEECH: self.safety_setting,
-            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: self.safety_setting,
-            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: self.safety_setting,
+        kwargs: Dict[str, Any] = {
+            "temperature": self.temperature,
+            "max_output_tokens": self.max_output_tokens,
+            "safety_settings": self._build_safety_settings(),
+            # Story 24.1 (AC4): non-negotiable. New SDK auto-executes Python
+            # callables when `tools=[fn]` unless this disable flag is set.
+            # Annie's tools are MCP-routed dicts (no Python callables) so
+            # the disable is technically a no-op today, but it's the
+            # tripwire that prevents a future regression where someone
+            # adds a callable tool spec.
+            "automatic_function_calling": genai_types.AutomaticFunctionCallingConfig(
+                disable=True
+            ),
         }
+
+        if system_instruction:
+            kwargs["system_instruction"] = system_instruction
+
+        if tools_config:
+            # tools_config is List[{"function_declarations": [...]}] — wrap each
+            # in a Tool. The SDK accepts a list of Tool objects.
+            tools_list: List[genai_types.Tool] = []
+            for tc in tools_config:
+                fds = tc.get("function_declarations", [])
+                # Build FunctionDeclarations directly from the adapter's
+                # OpenAI-shaped dicts — the SDK accepts dict-shaped fds via
+                # the `tools=` arg, but going through the typed wrapper makes
+                # the call site explicit and gives Pydantic validation.
+                tools_list.append(genai_types.Tool(function_declarations=fds))
+            kwargs["tools"] = tools_list
+
+        return genai_types.GenerateContentConfig(**kwargs)
 
     async def __aenter__(self):
         """Async context manager entry."""
@@ -156,12 +290,12 @@ class GeminiProvider(BaseProvider):
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async context manager exit."""
-        # Gemini SDK doesn't require explicit cleanup
+        # google.genai SDK doesn't require explicit cleanup
         pass
 
     async def close(self):
         """Close provider resources (no-op for Gemini)."""
-        # Gemini SDK handles cleanup internally
+        # google.genai SDK handles cleanup internally
         pass
 
     def _normalize_model_name(self, model_name: str) -> str:
@@ -207,17 +341,25 @@ class GeminiProvider(BaseProvider):
 
         Story 23.1 (AC1): Tokens come from the SDK's `usage_metadata` on the
         final stream chunk, NOT from chunk-counting. Returns None ("we don't
-        know") when either field is missing — callers should omit the `usage`
-        kwarg entirely from `generation.end()` rather than fabricate zeros
-        (Parminder's note on AC3 — Langfuse coerces None→0 and pollutes
-        reconciliation).
+        know") when either prompt/candidates field is missing — callers should
+        omit the `usage` kwarg entirely from `generation.end()` rather than
+        fabricate zeros (Parminder's note on AC3 — Langfuse coerces None→0
+        and pollutes reconciliation).
+
+        Story 24.1 (AC15 + Parminder steer): extends the helper with a third
+        key `cached_tokens` (read from `cached_content_token_count`). Default
+        is 0 (not None) when the field is missing — semantically "we know it
+        was zero" on first turn / non-caching models, NOT "we don't know".
+        Plumbed through `last_usage` into Langfuse `usage` payload so
+        implicit-cache hit-rate is observable in traces.
 
         Args:
             chunk: A Gemini stream chunk that may have `.usage_metadata`.
 
         Returns:
-            Dict with `prompt_tokens` and `completion_tokens` if both are
-            present and non-None on the chunk. None otherwise.
+            Dict with `prompt_tokens`, `completion_tokens`, `cached_tokens` if
+            both required fields are present and non-None on the chunk. None
+            otherwise.
         """
         usage_md = getattr(chunk, "usage_metadata", None)
         if usage_md is None:
@@ -226,10 +368,71 @@ class GeminiProvider(BaseProvider):
         completion = getattr(usage_md, "candidates_token_count", None)
         if prompt is None or completion is None:
             return None
+        # Story 24.1 (AC15): cached_content_token_count is None when no cache
+        # hit / pre-3.x model / first turn. Default to 0 — we KNOW it was
+        # zero in those cases, not "unknown".
+        cached_raw = getattr(usage_md, "cached_content_token_count", None)
+        cached = int(cached_raw) if cached_raw is not None else 0
         return {
             "prompt_tokens": int(prompt),
             "completion_tokens": int(completion),
+            "cached_tokens": cached,
         }
+
+    @staticmethod
+    def _is_context_length_error(exc: Exception) -> bool:
+        """
+        Detect a context-window-overflow exception across the typed and
+        substring paths.
+
+        Story 24.1 (AC11.5): the new SDK raises typed errors
+        (`google.genai.errors.ClientError` / `APIError`) carrying a `code`,
+        a `status`, and a `message`. Our 1M-token edge-case test relies on
+        catching this specifically as `ContextLengthError` (not as a generic
+        ProviderError or RateLimitError), so the orchestrator's overflow
+        recovery (Story 9.x) can fire compaction + retry. We must handle
+        BOTH the typed exception (code/status checks) AND the substring path
+        (legacy + safety net).
+
+        Returns True when the exception looks like a token-limit overflow.
+        """
+        # 1. Typed-exception path: prefer structured fields.
+        # ClientError carries `.code` (HTTP int), `.status` (str enum),
+        # and `.message`. RESOURCE_EXHAUSTED + token + limit pattern.
+        code = getattr(exc, "code", None)
+        status = getattr(exc, "status", None) or ""
+        message = getattr(exc, "message", None) or ""
+        # Combine all available textual signal sources (lowercased).
+        combined = f"{status} {message} {exc}".lower()
+
+        has_resource_exhausted = (
+            code == 429
+            or "resource_exhausted" in combined
+            or "resource exhausted" in combined
+        )
+        has_token_limit = "token" in combined and "limit" in combined
+        return has_resource_exhausted and has_token_limit
+
+    @staticmethod
+    def _is_rate_limit_error(exc: Exception) -> bool:
+        """
+        Detect a rate-limit / quota exception (NOT context overflow).
+
+        Story 24.1 (AC11.5): typed-exception migration. RESOURCE_EXHAUSTED
+        without token+limit pattern == rate limit / monthly cap.
+        """
+        code = getattr(exc, "code", None)
+        status = getattr(exc, "status", None) or ""
+        message = getattr(exc, "message", None) or ""
+        combined = f"{status} {message} {exc}".lower()
+        return (
+            code == 429
+            or "quota" in combined
+            or "resource_exhausted" in combined
+            or "resource exhausted" in combined
+            or " 429" in combined
+            or "429 " in combined
+        )
 
     def _trace_error_generation(
         self,
@@ -249,6 +452,10 @@ class GeminiProvider(BaseProvider):
         provider call in `try/finally` and pass the latest `last_usage`
         snapshot (which Gemini populates on the prompt-processed-then-429
         path, faithfully recording real billed prompt tokens).
+
+        Story 24.1 (AC15): plumbs `cached_tokens` through too — error paths
+        with prompt processed then 429 may have a non-zero cached count we
+        want to record for cost attribution.
         """
         if not trace:
             return
@@ -270,17 +477,20 @@ class GeminiProvider(BaseProvider):
                 "metadata": {"duration_ms": duration_ms},
             }
             if last_usage is not None:
+                cached_tokens = last_usage.get("cached_tokens", 0)
                 cost_info = self.calculate_cost({
                     "prompt_tokens": last_usage["prompt_tokens"],
                     "completion_tokens": last_usage["completion_tokens"],
-                    "cached_tokens": 0,
+                    "cached_tokens": cached_tokens,
                 })
                 end_kwargs["usage"] = {
                     "input": last_usage["prompt_tokens"],
                     "output": last_usage["completion_tokens"],
+                    "input_cached": cached_tokens,
                     "total": last_usage["prompt_tokens"] + last_usage["completion_tokens"],
                     "input_cost": cost_info.get("input_cost", 0),
                     "output_cost": cost_info.get("output_cost", 0),
+                    "cached_cost": cost_info.get("cached_cost", 0),
                     "total_cost": cost_info.get("total_cost", 0),
                 }
             generation.end(**end_kwargs)
@@ -302,7 +512,8 @@ class GeminiProvider(BaseProvider):
         Role mapping:
         - user → user
         - assistant → model
-        - system → prepended to first user message (Gemini has no native system role)
+        - system → returned as system_instruction (the new SDK supports this
+          natively on GenerateContentConfig)
 
         Args:
             messages: List of OpenAI-format messages
@@ -380,6 +591,10 @@ class GeminiProvider(BaseProvider):
         Implements multi-turn function calling with thought_signature preservation (Story 9.3).
         Supports multimodal inputs (images, documents, spreadsheets) via inline_data (Story 18.2).
 
+        Story 24.1 (AC3): migrated to `client.aio.chats.create(...)` +
+        `chat.send_message_stream(...)` — full async, no sync-iter wrapping
+        inside an async function.
+
         Args:
             messages: List of message dictionaries (OpenAI format)
             tools: Optional list of tools in OpenAI format for function calling
@@ -398,10 +613,14 @@ class GeminiProvider(BaseProvider):
         Raises:
             ProviderError: If provider call fails
             RateLimitError: If rate limit is hit
+            ContextLengthError: If the request exceeds the model's context window
         """
         start_time = time.time()
         files = kwargs.get("files")  # Extract files from kwargs
         user_id = kwargs.get("user_id")  # Extract user_id for tool argument injection
+        last_usage: Optional[Dict[str, int]] = None
+        tool_iteration = 0
+        trace = None
 
         try:
             # Convert messages to Gemini format with optional file attachments
@@ -453,13 +672,12 @@ class GeminiProvider(BaseProvider):
 
             # Multi-turn tool calling loop (Story 9.3)
             # Use ChatSession API for automatic thought_signature handling
-            tool_iteration = 0
 
             # Initialize ChatSession with history (all messages except the last user message)
-            # The last user message will be sent via send_message()
+            # The last user message will be sent via send_message_stream()
             history = gemini_messages[:-1] if len(gemini_messages) > 1 else []
 
-            # Extract the last user message parts for send_message()
+            # Extract the last user message parts for send_message_stream()
             # For multimodal requests, we need to send the full parts array (text + inline_data)
             # For text-only, we can send just the text string
             if gemini_messages:
@@ -475,45 +693,33 @@ class GeminiProvider(BaseProvider):
             else:
                 last_user_message = ""
 
-            # CRITICAL: Prepend system_instruction to history if provided
-            # Gemini doesn't have native system role, so we inject it into first user message
-            if system_instruction and history:
-                # Find first user message in history and prepend system instruction
-                for msg in history:
-                    if msg.get("role") == "user" and msg.get("parts"):
-                        msg["parts"][0]["text"] = f"{system_instruction}\n\n{msg['parts'][0]['text']}"
-                        logger.debug(
-                            "Prepended system instruction to first user message in history",
-                            extra={"provider": self.model_name}
-                        )
-                        break
-            elif system_instruction and not history:
-                # No history, prepend to last_user_message instead
-                # Handle both string (text-only) and list (multimodal) formats
-                if isinstance(last_user_message, list):
-                    # Multimodal: prepend to text part
-                    for part in last_user_message:
-                        if "text" in part:
-                            part["text"] = f"{system_instruction}\n\n{part['text']}"
-                            break
-                else:
-                    # Text-only: prepend to string
-                    last_user_message = f"{system_instruction}\n\n{last_user_message}"
-                logger.debug(
-                    "Prepended system instruction to first user message",
-                    extra={"provider": self.model_name}
-                )
+            # Story 24.1 (AC2): system_instruction is a top-level field on
+            # GenerateContentConfig in the new SDK — no more prepending to
+            # the first user message. The legacy prepend hack is GONE.
 
-            # Build tool configuration
+            # Build tool configuration (passed into _build_generate_content_config)
             tools_config = None
             if gemini_tools:
                 tools_config = [{"function_declarations": gemini_tools}]
 
-            # Start chat session with history
-            chat = self.model.start_chat(history=history)
+            # Build per-call generation config (AC4 + AC7 + Parminder steer:
+            # AFC disable is set non-overridably here)
+            gen_config = self._build_generate_content_config(
+                tools_config=tools_config,
+                system_instruction=system_instruction,
+            )
+
+            # Story 24.1 (AC3): async path. `client.aio.chats.create(...)`
+            # returns an async chat session. Tools live in `config`, not on
+            # send_message_stream. send_message_stream returns an async iterator.
+            chat = self.client.aio.chats.create(
+                model=self.model_name,
+                history=history,
+                config=gen_config,
+            )
 
             logger.debug(
-                "Initialized ChatSession for automatic thought_signature handling",
+                "Initialized async ChatSession",
                 extra={
                     "provider": self.model_name,
                     "history_length": len(history),
@@ -527,16 +733,11 @@ class GeminiProvider(BaseProvider):
             while tool_iteration < self.max_tool_iterations:
                 # Generate streaming response using ChatSession
                 try:
-                    # Build generation config
-
                     # Send message with streaming
-                    # Note: system_instruction is handled at model initialization, not per-message
-                    # On first iteration: send user message (string)
-                    # On subsequent iterations: send function response (dict with parts)
-                    response = chat.send_message(
-                        last_user_message,
-                        stream=True,
-                        tools=tools_config
+                    # On first iteration: send user message (string or list[Part]/list[dict])
+                    # On subsequent iterations: send list of function-response Parts
+                    response = await chat.send_message_stream(
+                        message=last_user_message,
                     )
 
                     # Track ALL function calls in this iteration (parallel tool calling support)
@@ -545,93 +746,98 @@ class GeminiProvider(BaseProvider):
                     chunk_count = 0  # Story 23.1: telemetry only, NOT used for cost
 
                     # Story 23.1 (AC1): capture latest usage_metadata seen across chunks.
-                    # Gemini's SDK delivers token counts on the final chunk's
-                    # `usage_metadata`. We refresh this on every chunk that carries
-                    # one so we always have the most-recent snapshot if the stream
-                    # aborts mid-flight.
                     last_usage = None  # type: Optional[Dict[str, int]]
 
                     # Debug: Track raw chunk data for MALFORMED_FUNCTION_CALL diagnosis
                     raw_chunk_data = []  # Accumulate for debugging if needed
 
-                    # Process chunks
-                    # Note: thought_signatures are handled automatically by ChatSession (Story 9.3)
-                    for chunk in response:
+                    # Process chunks (async iter — Story 24.1 AC3)
+                    async for chunk in response:
                         chunk_count += 1
-                        # Story 23.1 (AC1): pull usage_metadata as soon as it appears.
-                        # Refresh on every chunk that carries one — the final chunk
-                        # is the canonical source but the SDK can attach earlier too.
+                        # Story 23.1 (AC1) + 24.1 (AC15): pull usage_metadata as soon
+                        # as it appears. Refresh on every chunk that carries one — the
+                        # final chunk is canonical, but the SDK can attach earlier too.
                         usage_snapshot = self._extract_usage_metadata(chunk)
                         if usage_snapshot is not None:
                             last_usage = usage_snapshot
 
                         # Debug: Capture raw chunk structure for diagnosing MALFORMED_FUNCTION_CALL
+                        # Story 24.1 (AC8): typed Pydantic field access — chunks have
+                        # .candidates / .candidates[0].content.parts / .function_call /
+                        # .function_call.name / .function_call.args (plain dict).
                         try:
+                            candidates = chunk.candidates or []
                             chunk_info = {
-                                "has_candidates": bool(chunk.candidates),
-                                "candidate_count": len(chunk.candidates) if chunk.candidates else 0
+                                "has_candidates": bool(candidates),
+                                "candidate_count": len(candidates),
                             }
-                            if chunk.candidates and len(chunk.candidates) > 0:
-                                cand = chunk.candidates[0]
-                                chunk_info["finish_reason"] = str(cand.finish_reason) if cand.finish_reason else None
-                                chunk_info["finish_reason_value"] = int(cand.finish_reason) if cand.finish_reason else None
-                                chunk_info["has_content"] = bool(cand.content)
-                                if cand.content:
-                                    chunk_info["has_parts"] = bool(cand.content.parts)
-                                    chunk_info["part_count"] = len(cand.content.parts) if cand.content.parts else 0
-                                    # Capture part types and any function call info
+                            if candidates:
+                                cand = candidates[0]
+                                fr = cand.finish_reason
+                                chunk_info["finish_reason"] = str(fr) if fr is not None else None
+                                chunk_info["finish_reason_value"] = (
+                                    _finish_reason_to_legacy_int(fr) if fr is not None else None
+                                )
+                                cand_content = cand.content
+                                chunk_info["has_content"] = bool(cand_content)
+                                if cand_content:
+                                    cand_parts = cand_content.parts or []
+                                    chunk_info["has_parts"] = bool(cand_parts)
+                                    chunk_info["part_count"] = len(cand_parts)
                                     part_details = []
-                                    if cand.content.parts:
-                                        for part in cand.content.parts:
-                                            part_info = {"has_text": hasattr(part, 'text') and bool(part.text)}
-                                            if hasattr(part, 'function_call') and part.function_call:
-                                                # Capture raw function call info before any conversion
-                                                part_info["has_function_call"] = True
-                                                part_info["function_name"] = getattr(part.function_call, 'name', 'UNKNOWN')
-                                                # Try to get raw args as string to avoid conversion errors
-                                                try:
-                                                    part_info["function_args_raw"] = str(part.function_call.args)[:500]
-                                                except Exception as args_err:
-                                                    part_info["function_args_error"] = str(args_err)
-                                            else:
-                                                part_info["has_function_call"] = False
-                                            part_details.append(part_info)
+                                    for part in cand_parts:
+                                        part_text = getattr(part, "text", None)
+                                        part_info = {"has_text": bool(part_text)}
+                                        fc = getattr(part, "function_call", None)
+                                        if fc:
+                                            part_info["has_function_call"] = True
+                                            part_info["function_name"] = getattr(fc, "name", "UNKNOWN")
+                                            try:
+                                                part_info["function_args_raw"] = str(fc.args)[:500]
+                                            except Exception as args_err:
+                                                part_info["function_args_error"] = str(args_err)
+                                        else:
+                                            part_info["has_function_call"] = False
+                                        part_details.append(part_info)
                                     chunk_info["parts"] = part_details
                             raw_chunk_data.append(chunk_info)
                         except Exception as debug_err:
                             raw_chunk_data.append({"debug_capture_error": str(debug_err)})
 
-                        # Check for safety blocks
-                        if hasattr(chunk, 'prompt_feedback') and chunk.prompt_feedback.block_reason:
-                            # Safety filter blocked the prompt
-                            block_reason = chunk.prompt_feedback.block_reason
-                            logger.warning(
-                                "Gemini safety filter blocked prompt",
-                                extra={
-                                    "provider": self.model_name,
-                                    "block_reason": str(block_reason)
+                        # Check for safety blocks at the prompt level
+                        prompt_feedback = getattr(chunk, "prompt_feedback", None)
+                        if prompt_feedback is not None:
+                            block_reason = getattr(prompt_feedback, "block_reason", None)
+                            if block_reason:
+                                logger.warning(
+                                    "Gemini safety filter blocked prompt",
+                                    extra={
+                                        "provider": self.model_name,
+                                        "block_reason": str(block_reason)
+                                    }
+                                )
+                                yield {
+                                    "type": "error",
+                                    "message": "I cannot respond due to content policy. Please rephrase your question.",
+                                    "code": "SAFETY_FILTER_BLOCKED"
                                 }
-                            )
-                            yield {
-                                "type": "error",
-                                "message": "I cannot respond due to content policy. Please rephrase your question.",
-                                "code": "SAFETY_FILTER_BLOCKED"
-                            }
-                            return
+                                return
 
                         # Extract content from chunk
-                        if chunk.candidates and len(chunk.candidates) > 0:
-                            candidate = chunk.candidates[0]
+                        candidates = chunk.candidates or []
+                        if candidates:
+                            candidate = candidates[0]
 
                             # Check for safety block in candidate
-                            if candidate.finish_reason and "SAFETY" in str(candidate.finish_reason):
+                            finish_reason = candidate.finish_reason
+                            if finish_reason is not None and "SAFETY" in str(finish_reason):
                                 # Get harm category if available
                                 harm_category = None
-                                if hasattr(candidate, 'safety_ratings') and candidate.safety_ratings:
-                                    for rating in candidate.safety_ratings:
-                                        if rating.blocked:
-                                            harm_category = rating.category
-                                            break
+                                safety_ratings = getattr(candidate, "safety_ratings", None) or []
+                                for rating in safety_ratings:
+                                    if getattr(rating, "blocked", False):
+                                        harm_category = rating.category
+                                        break
 
                                 safety_msg = self.SAFETY_MESSAGES.get(
                                     harm_category,
@@ -642,7 +848,7 @@ class GeminiProvider(BaseProvider):
                                     "Gemini safety filter blocked response",
                                     extra={
                                         "provider": self.model_name,
-                                        "finish_reason": str(candidate.finish_reason),
+                                        "finish_reason": str(finish_reason),
                                         "harm_category": str(harm_category) if harm_category else None
                                     }
                                 )
@@ -655,68 +861,51 @@ class GeminiProvider(BaseProvider):
                                 return
 
                             # Extract content (text or function_call)
-                            if candidate.content and candidate.content.parts:
-                                for part in candidate.content.parts:
+                            cand_content = candidate.content
+                            cand_parts = cand_content.parts if cand_content else None
+                            if cand_parts:
+                                for part in cand_parts:
                                     # Check for function call (Story 9.3) - supports parallel tool calls
-                                    if hasattr(part, 'function_call') and part.function_call:
-                                        func_name = part.function_call.name
-                                        # Convert args to JSON-serializable format
-                                        # Need to handle nested protobuf objects recursively
+                                    # Story 24.1 (AC6): function_call.args is a plain dict
+                                    # in the new SDK (Pydantic-backed). The proto-walker is GONE.
+                                    fc = getattr(part, "function_call", None)
+                                    if fc:
+                                        func_name = fc.name
+                                        # New SDK delivers args as a Python dict directly.
+                                        # `dict(...)` is a defensive copy and tolerates None.
+                                        func_args = dict(fc.args) if fc.args else {}
 
-                                        def convert_proto_to_dict(obj):
-                                            """Recursively convert protobuf objects to JSON-serializable dict."""
-                                            # Import proto.marshal for type checking
-                                            try:
-                                                import proto.marshal.collections  # noqa: F401
-                                                import proto.marshal.collections.repeated  # noqa: F401
-                                                import proto.marshal.collections.maps  # noqa: F401
-                                            except ImportError:
-                                                pass
-
-                                            # Handle proto.marshal wrapper types
-                                            type_name = type(obj).__name__
-                                            if 'Repeated' in type_name or 'MapComposite' in type_name:
-                                                # Convert proto.marshal collections to list/dict
-                                                if 'Repeated' in type_name:
-                                                    # It's a list-like proto object
-                                                    return [convert_proto_to_dict(item) for item in obj]
-                                                elif 'MapComposite' in type_name:
-                                                    # It's a dict-like proto object
-                                                    return {k: convert_proto_to_dict(v) for k, v in obj.items()}
-
-                                            # Handle normal Python types
-                                            if isinstance(obj, dict):
-                                                return {k: convert_proto_to_dict(v) for k, v in obj.items()}
-                                            elif isinstance(obj, (list, tuple)):
-                                                return [convert_proto_to_dict(item) for item in obj]
-                                            elif isinstance(obj, (str, int, float, bool, type(None))):
-                                                return obj
-                                            elif hasattr(obj, '__dict__'):
-                                                # This is likely a proto object, try to convert to dict
-                                                try:
-                                                    return convert_proto_to_dict(dict(obj))
-                                                except (TypeError, ValueError):
-                                                    # If that fails, use string representation
-                                                    return str(obj)
-                                            else:
-                                                return obj
-
-                                        # Convert the args dict recursively
-                                        func_args = convert_proto_to_dict(dict(part.function_call.args))
+                                        # Hotfix 2026-04-25: capture thought_signature
+                                        # alongside the function_call for observability.
+                                        # The chat session writes the full Part (including
+                                        # thought_signature) into _curated_history via
+                                        # output_contents, so the next send_message_stream
+                                        # automatically prepends the signed function_call
+                                        # ahead of our function_response — but only if the
+                                        # SDK is >=1.40 where thought_signature is a real
+                                        # field on types.Part (not stripped by extra=forbid).
+                                        # We capture the value here purely so logs prove
+                                        # the wire delivered it; chat-session is what
+                                        # threads it through.
+                                        thought_sig = getattr(part, "thought_signature", None)
 
                                         # Append to list (supports parallel tool calls)
                                         function_calls.append({
                                             "name": func_name,
-                                            "args": func_args
+                                            "args": func_args,
+                                            "thought_signature": thought_sig,
                                         })
 
-                                        # ChatSession handles thought_signatures automatically
                                         logger.info(
                                             f"Gemini requesting tool: {func_name}",
                                             extra={
                                                 "provider": self.model_name,
                                                 "tool_name": func_name,
-                                                "iteration": tool_iteration
+                                                "iteration": tool_iteration,
+                                                "has_thought_signature": thought_sig is not None,
+                                                "thought_signature_bytes": (
+                                                    len(thought_sig) if thought_sig else 0
+                                                ),
                                             }
                                         )
 
@@ -728,8 +917,9 @@ class GeminiProvider(BaseProvider):
                                         }
 
                                     # Extract text content (can co-exist with function_call)
-                                    if hasattr(part, 'text') and part.text:
-                                        content = part.text
+                                    part_text = getattr(part, "text", None)
+                                    if part_text:
+                                        content = part_text
 
                                         # Track first token latency
                                         if first_token:
@@ -754,11 +944,16 @@ class GeminiProvider(BaseProvider):
                                         }
 
                             # Check for finish reason (completion or function call)
-                            if candidate.finish_reason:
-                                # finish_reason is an enum - check both value and name
-                                # glm.Candidate.FinishReason.STOP has value 1
-                                finish_reason_value = int(candidate.finish_reason) if candidate.finish_reason else 0
-                                finish_reason_name = candidate.finish_reason.name if hasattr(candidate.finish_reason, 'name') else str(candidate.finish_reason)
+                            if finish_reason is not None:
+                                # Story 24.1: new SDK delivers FinishReason as a
+                                # string enum. Translate to legacy numeric value
+                                # so the downstream (==1 STOP, ==10 MALFORMED, etc.)
+                                # comparisons keep working without rewriting.
+                                finish_reason_value = _finish_reason_to_legacy_int(finish_reason)
+                                finish_reason_name = (
+                                    finish_reason.name if hasattr(finish_reason, "name")
+                                    else str(finish_reason)
+                                )
 
                                 logger.debug(
                                     "Gemini finish reason received",
@@ -787,21 +982,18 @@ class GeminiProvider(BaseProvider):
                                         }
                                     )
 
-                                    # Story 23.1 (AC1, AC2): token counts come from the SDK's
-                                    # `usage_metadata` on the final stream chunk. We no longer
-                                    # call `count_tokens()` (extra RPC + silent-failure path
-                                    # that was producing the Apr-04 placeholder traces) and
-                                    # we never substitute chunk count for `completion_tokens`.
+                                    # Story 23.1 (AC1, AC2) + 24.1 (AC15):
+                                    # token counts come from the SDK's `usage_metadata`,
+                                    # including `cached_tokens` for implicit-cache observability.
                                     if last_usage is not None:
                                         prompt_tokens = last_usage["prompt_tokens"]
                                         completion_tokens = last_usage["completion_tokens"]
+                                        cached_tokens = last_usage.get("cached_tokens", 0)
                                     else:
-                                        # AC3: SDK didn't deliver usage_metadata. We don't
-                                        # fabricate numbers — `last_usage is None` is the
-                                        # "we don't know" signal that flows down to the
-                                        # `usage` kwarg being omitted from generation.end().
+                                        # AC3: SDK didn't deliver usage_metadata.
                                         prompt_tokens = 0
                                         completion_tokens = 0
+                                        cached_tokens = 0
                                         logger.warning(
                                             "Gemini stream finished without usage_metadata",
                                             extra={
@@ -823,8 +1015,6 @@ class GeminiProvider(BaseProvider):
                                             full_completion = "".join(accumulated_content)
                                             truncated_completion = self._truncate_text(full_completion, 1000)
 
-                                            # Create generation and finalize with end()
-                                            # Langfuse v2 requires end() to be called for proper tracking
                                             generation = trace.generation(
                                                 name=f"llm_call_{self.model_name}_streaming",
                                                 input=truncated_prompt,
@@ -841,13 +1031,6 @@ class GeminiProvider(BaseProvider):
                                                 }
                                             )
 
-                                            # AC1/AC3: build end() kwargs. When usage_metadata
-                                            # was absent, omit the `usage` kwarg entirely so
-                                            # Langfuse renders the generation with no token
-                                            # data — that's the honest "unknown" signal.
-                                            # Passing usage={"input":None,"output":None}
-                                            # would coerce to 0 and reintroduce false-zero
-                                            # cost rows in reconciliation (Parminder's note).
                                             end_kwargs = {
                                                 "output": truncated_completion,
                                                 "metadata": {"duration_ms": duration_ms},
@@ -856,14 +1039,16 @@ class GeminiProvider(BaseProvider):
                                                 cost_info = self.calculate_cost({
                                                     "prompt_tokens": prompt_tokens,
                                                     "completion_tokens": completion_tokens,
-                                                    "cached_tokens": 0
+                                                    "cached_tokens": cached_tokens,
                                                 })
                                                 end_kwargs["usage"] = {
                                                     "input": prompt_tokens,
                                                     "output": completion_tokens,
+                                                    "input_cached": cached_tokens,
                                                     "total": prompt_tokens + completion_tokens,
                                                     "input_cost": cost_info.get("input_cost", 0),
                                                     "output_cost": cost_info.get("output_cost", 0),
+                                                    "cached_cost": cost_info.get("cached_cost", 0),
                                                     "total_cost": cost_info.get("total_cost", 0)
                                                 }
                                                 logger.info(
@@ -872,7 +1057,13 @@ class GeminiProvider(BaseProvider):
                                                         "provider": self.model_name,
                                                         "prompt_tokens": prompt_tokens,
                                                         "completion_tokens": completion_tokens,
-                                                        "cost_usd": cost_info.get("total_cost", 0)
+                                                        "cached_tokens": cached_tokens,
+                                                        "cost_usd": cost_info.get("total_cost", 0),
+                                                        "event": (
+                                                            "implicit_cache_hit"
+                                                            if cached_tokens > 0
+                                                            else "implicit_cache_miss"
+                                                        ),
                                                     }
                                                 )
                                             else:
@@ -889,10 +1080,6 @@ class GeminiProvider(BaseProvider):
                                                 extra={"provider": self.model_name, "error": str(e)}
                                             )
                                         finally:
-                                            # AC5: ensure generation.end() always fires when
-                                            # generation was created — even if the kwargs
-                                            # build raised partway through. Without this we
-                                            # leak observations that never close.
                                             if generation is not None:
                                                 try:
                                                     generation.end(**end_kwargs)
@@ -1007,20 +1194,23 @@ class GeminiProvider(BaseProvider):
                             )
                             tool_results.append(formatted_result)
 
-                        # With ChatSession, thought_signatures are preserved automatically
-                        # We just need to format the tool responses and continue the loop
-                        # Reference: https://ai.google.dev/gemini-api/docs/thought-signatures
-
-                        # ChatSession automatically includes the function calls and preserves thought_signatures
-                        # Send ALL function responses as Parts with functionResponse
-                        # The SDK expects a list of parts for multi-part messages (parallel tool calls)
-                        from google.ai import generativelanguage as glm
-
+                        # ChatSession preserves thought_signatures automatically when
+                        # SDK is >=1.40 (Part.thought_signature is a real field there).
+                        # The chat's _curated_history holds the prior assistant Content
+                        # (with signed function_call Parts). We send only the new
+                        # function_response Parts; the SDK prepends curated history,
+                        # so each function_response is preceded by its signed
+                        # function_call → API accepts the request.
+                        # Story 24.1 (AC5): build function-response Parts via the new
+                        # `types.Part.from_function_response` helper. The legacy
+                        # `glm.Part(function_response=glm.FunctionResponse(...))` shape
+                        # is GONE — `from google.ai import generativelanguage as glm`
+                        # is no longer imported anywhere in this file.
                         last_user_message = [
-                            glm.Part(function_response=glm.FunctionResponse(
+                            genai_types.Part.from_function_response(
                                 name=result["name"],
-                                response=result["response"]
-                            ))
+                                response=result["response"],
+                            )
                             for result in tool_results
                         ]
 
@@ -1083,8 +1273,6 @@ class GeminiProvider(BaseProvider):
                         )
 
                         # CRITICAL: If no tokens were generated, send error to user
-                        # This happens with finish_reason like THINKING_OVERFLOW (12),
-                        # BLOCKLIST (7), PROHIBITED_CONTENT (8), MALFORMED_FUNCTION_CALL (10) etc.
                         if token_count == 0:
                             # Map common finish reasons to user-friendly messages
                             error_messages = {
@@ -1178,14 +1366,9 @@ class GeminiProvider(BaseProvider):
                                 "code": f"EMPTY_RESPONSE_{fr_name}"
                             }
 
-                        # Story 23.1 (AC6): the previous version of this block was
-                        # the source of the Apr-04 placeholder traces (in=10, out=5-28).
-                        # It set `prompt_tokens=0`, then called count_tokens() inside
-                        # `try/except: pass` — when that call failed, prompt_tokens
-                        # stayed 0 while completion was the chunk count, producing
-                        # bogus low-input/low-output rows. AC1+AC2 close that loop:
-                        # we now read from `last_usage` (None if SDK didn't deliver),
-                        # never substitute chunk count, and never call count_tokens().
+                        # Story 23.1 (AC6): no more placeholder-row writes from
+                        # this branch. Use last_usage if present, otherwise omit
+                        # the usage kwarg.
                         if trace and token_count > 0:
                             generation = None
                             end_kwargs: Dict[str, Any] = {}
@@ -1193,9 +1376,11 @@ class GeminiProvider(BaseProvider):
                                 if last_usage is not None:
                                     prompt_tokens = last_usage["prompt_tokens"]
                                     completion_tokens = last_usage["completion_tokens"]
+                                    cached_tokens = last_usage.get("cached_tokens", 0)
                                 else:
                                     prompt_tokens = 0
                                     completion_tokens = 0
+                                    cached_tokens = 0
                                     logger.warning(
                                         "Gemini stream ended without STOP and without usage_metadata",
                                         extra={
@@ -1238,14 +1423,16 @@ class GeminiProvider(BaseProvider):
                                     cost_info = self.calculate_cost({
                                         "prompt_tokens": prompt_tokens,
                                         "completion_tokens": completion_tokens,
-                                        "cached_tokens": 0
+                                        "cached_tokens": cached_tokens,
                                     })
                                     end_kwargs["usage"] = {
                                         "input": prompt_tokens,
                                         "output": completion_tokens,
+                                        "input_cached": cached_tokens,
                                         "total": prompt_tokens + completion_tokens,
                                         "input_cost": cost_info.get("input_cost", 0),
                                         "output_cost": cost_info.get("output_cost", 0),
+                                        "cached_cost": cost_info.get("cached_cost", 0),
                                         "total_cost": cost_info.get("total_cost", 0)
                                     }
                                     logger.info(
@@ -1254,6 +1441,7 @@ class GeminiProvider(BaseProvider):
                                             "provider": self.model_name,
                                             "prompt_tokens": prompt_tokens,
                                             "completion_tokens": completion_tokens,
+                                            "cached_tokens": cached_tokens,
                                             "cost_usd": cost_info.get("total_cost", 0)
                                         }
                                     )
@@ -1271,7 +1459,6 @@ class GeminiProvider(BaseProvider):
                                     extra={"provider": self.model_name, "error": str(e)}
                                 )
                             finally:
-                                # AC5: ensure generation closes even on prep failure.
                                 if generation is not None:
                                     try:
                                         generation.end(**end_kwargs)
@@ -1294,43 +1481,42 @@ class GeminiProvider(BaseProvider):
                         }
                         return
 
+                except (ContextLengthError, RateLimitError):
+                    # Already-typed Annie exceptions: no need to re-classify.
+                    raise
                 except Exception as e:
-                    error_str = str(e).lower()
                     err_duration_ms = int((time.time() - start_time) * 1000)
 
-                    # AC5: emit a Langfuse generation with level=ERROR before
-                    # propagating. `last_usage` is populated when Gemini's 429
-                    # comes back after prompt-processing — that's real billed
-                    # input tokens we want recorded. Helper is fire-and-forget.
-                    try:
-                        _err_last_usage = last_usage
-                    except NameError:
-                        _err_last_usage = None
+                    # Story 23.1 (AC5): emit a Langfuse generation with level=ERROR
+                    # before propagating. last_usage is populated when Gemini's
+                    # 429 comes back after prompt-processing.
                     self._trace_error_generation(
                         trace=trace,
                         error=e,
                         duration_ms=err_duration_ms,
-                        last_usage=_err_last_usage,
+                        last_usage=last_usage,
                         tool_iteration=tool_iteration,
                     )
 
-                    # Check for context window overflow
-                    if ("resource_exhausted" in error_str or "resource exhausted" in error_str) and ("token" in error_str and "limit" in error_str):
+                    # Story 24.1 (AC11.5): typed-exception-aware classification.
+                    # Check context-overflow FIRST (more specific), then rate limit.
+                    if self._is_context_length_error(e):
                         logger.warning(
                             "Gemini context length exceeded",
                             extra={
                                 "provider": self.model_name,
+                                "error_type": type(e).__name__,
                                 "error": str(e)
                             }
                         )
                         raise ContextLengthError(self.model_name, str(e), e)
 
-                    # Check for quota/rate limit errors
-                    if "quota" in error_str or "resource exhausted" in error_str or "429" in error_str:
+                    if self._is_rate_limit_error(e):
                         logger.warning(
                             "Gemini quota/rate limit exceeded",
                             extra={
                                 "provider": self.model_name,
+                                "error_type": type(e).__name__,
                                 "error": str(e)
                             }
                         )
@@ -1374,27 +1560,12 @@ class GeminiProvider(BaseProvider):
                     "error": str(e)
                 }
             )
-            # AC5: trace error before re-raising. `last_usage` and
-            # `tool_iteration` may not be bound if the failure happened
-            # before the chunk loop — guard each.
-            try:
-                _err_trace = trace
-            except NameError:
-                _err_trace = None
-            try:
-                _err_last_usage = last_usage
-            except NameError:
-                _err_last_usage = None
-            try:
-                _err_tool_iteration = tool_iteration
-            except NameError:
-                _err_tool_iteration = 0
             self._trace_error_generation(
-                trace=_err_trace,
+                trace=trace,
                 error=e,
                 duration_ms=duration_ms,
-                last_usage=_err_last_usage,
-                tool_iteration=_err_tool_iteration,
+                last_usage=last_usage,
+                tool_iteration=tool_iteration,
             )
             raise ProviderError(self.model_name, f"Unexpected streaming error: {type(e).__name__}", e)
 

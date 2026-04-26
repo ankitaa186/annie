@@ -161,7 +161,12 @@ class TestChatGPTContextDetection:
 
 
 class TestGeminiContextDetection:
-    """Test that GeminiProvider raises ContextLengthError for context errors."""
+    """Test that GeminiProvider raises ContextLengthError for context errors.
+
+    Story 24.1 (AC9): patches `provider.client.aio.chats.create` (provider-owned
+    attribute) instead of legacy `provider.model.start_chat`. Story 24.1 (AC11.5)
+    also exercises the typed-exception path.
+    """
 
     @pytest.mark.asyncio
     async def test_resource_exhausted_token_limit(self):
@@ -170,21 +175,54 @@ class TestGeminiContextDetection:
 
         provider = GeminiProvider()
 
-        # Simulate the Gemini SDK raising an error with token limit message
+        # Simulate the Gemini SDK raising an error with token limit message.
+        # The streaming path calls `client.aio.chats.create(...)` then
+        # `chat.send_message_stream(...)`. We make the latter raise.
+        # NOTE: `client.aio.chats` is a property that returns a fresh
+        # AsyncChats instance per access — patch the entire `client` to
+        # avoid transient-instance issues.
         error = Exception("400 RESOURCE_EXHAUSTED: Request payload exceeds the token limit of 1048576 tokens")
 
-        with patch.object(provider.model, 'start_chat') as mock_chat:
-            mock_session = MagicMock()
-            mock_session.send_message.side_effect = error
-            mock_chat.return_value = mock_session
+        fake_chat = MagicMock()
+        fake_chat.send_message_stream = AsyncMock(side_effect=error)
+        fake_client = MagicMock()
+        fake_client.aio.chats.create = MagicMock(return_value=fake_chat)
+        provider.client = fake_client
 
-            with pytest.raises(ContextLengthError) as exc_info:
-                async for _ in provider.stream_chat_completion(
-                    [{"role": "user", "content": "hello"}]
-                ):
-                    pass
+        with pytest.raises(ContextLengthError) as exc_info:
+            async for _ in provider.stream_chat_completion(
+                [{"role": "user", "content": "hello"}]
+            ):
+                pass
 
-            assert "token" in str(exc_info.value).lower() or "limit" in str(exc_info.value).lower()
+        assert "token" in str(exc_info.value).lower() or "limit" in str(exc_info.value).lower()
+
+    @pytest.mark.asyncio
+    async def test_resource_exhausted_typed_exception(self):
+        """Story 24.1 (AC11.5): typed exception (code=429, status=RESOURCE_EXHAUSTED)
+        with token-limit message must produce ContextLengthError, not RateLimitError.
+        """
+        from api.providers.gemini_provider import GeminiProvider
+
+        provider = GeminiProvider()
+
+        # Synthesize a typed-shaped exception (mimics google.genai.errors.ClientError).
+        error = Exception("input token count exceeds context length limit")
+        error.code = 429
+        error.status = "RESOURCE_EXHAUSTED"
+        error.message = "input token count exceeds context length limit"
+
+        fake_chat = MagicMock()
+        fake_chat.send_message_stream = AsyncMock(side_effect=error)
+        fake_client = MagicMock()
+        fake_client.aio.chats.create = MagicMock(return_value=fake_chat)
+        provider.client = fake_client
+
+        with pytest.raises(ContextLengthError):
+            async for _ in provider.stream_chat_completion(
+                [{"role": "user", "content": "hello"}]
+            ):
+                pass
 
     @pytest.mark.asyncio
     async def test_rate_limit_not_context_error(self):
@@ -196,16 +234,17 @@ class TestGeminiContextDetection:
         # Simulate quota error without token/limit keywords
         error = Exception("429 RESOURCE EXHAUSTED: Quota exceeded for the day")
 
-        with patch.object(provider.model, 'start_chat') as mock_chat:
-            mock_session = MagicMock()
-            mock_session.send_message.side_effect = error
-            mock_chat.return_value = mock_session
+        fake_chat = MagicMock()
+        fake_chat.send_message_stream = AsyncMock(side_effect=error)
+        fake_client = MagicMock()
+        fake_client.aio.chats.create = MagicMock(return_value=fake_chat)
+        provider.client = fake_client
 
-            with pytest.raises(RateLimitError):
-                async for _ in provider.stream_chat_completion(
-                    [{"role": "user", "content": "hello"}]
-                ):
-                    pass
+        with pytest.raises(RateLimitError):
+            async for _ in provider.stream_chat_completion(
+                [{"role": "user", "content": "hello"}]
+            ):
+                pass
 
 
 # ---------------------------------------------------------------------------
