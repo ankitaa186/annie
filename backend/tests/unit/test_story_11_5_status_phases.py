@@ -513,3 +513,169 @@ class TestIntegrationScenarios:
             assert any("Profile loaded (80% complete)" in msg for msg in status_messages), "Should emit profile loaded"
             assert any("Composing response" in msg for msg in status_messages), "Should emit composition phase"
             assert any("Found 8 sources" in msg for msg in status_messages), "Should emit Live Search sources"
+
+
+class TestComposingEagerDrain:
+    """
+    UX hotfix (2026-04-25): "Composing response..." must reach the SSE client
+    BEFORE the LLM produces its first event. Post-24.1 SDK migration TTFT is
+    ~22s, so without the eager-drain the user sees "Annie is thinking..." for
+    the entire wait and "Composing response..." only flashes by alongside the
+    first token. This test pins the eager-drain ordering.
+    """
+
+    @pytest.mark.asyncio
+    async def test_composing_status_yielded_before_llm_first_event_gemini(self):
+        """
+        Gemini path: status frame must be yielded BEFORE awaiting the first LLM event.
+
+        We gate the mock LLM stream behind an asyncio.Event. The test consumes
+        events from stream_generator one at a time. The "Composing response..."
+        status frame must arrive WITHOUT the LLM stream having produced anything
+        (i.e., before we set the gate).
+        """
+        import asyncio
+        import json
+        from api.routes.stream import stream_generator
+
+        mock_request = Mock()
+        mock_request.is_disconnected = AsyncMock(return_value=False)
+        messages = [{"role": "user", "content": "Hello"}]
+
+        llm_gate = asyncio.Event()
+        llm_iteration_started = False
+
+        with patch("api.routes.stream.LLMClient") as mock_llm_cls, \
+             patch("api.routes.stream.MCPClient") as mock_mcp_cls, \
+             patch("api.routes.stream.StateManager"):
+
+            mock_mcp = mock_mcp_cls.return_value.__aenter__.return_value
+            mock_mcp.list_tools = AsyncMock(return_value=[])
+
+            mock_llm = mock_llm_cls.return_value.__aenter__.return_value
+            # Gemini path uses internal tool handling
+            mock_llm.primary_provider_name = "gemini-2.5-pro"
+            mock_llm.convert_mcp_tools_to_functions = Mock(return_value=[])
+
+            async def gated_stream(*args, **kwargs):
+                nonlocal llm_iteration_started
+                llm_iteration_started = True
+                # Simulate ~22s LLM TTFT — block until the test releases the gate.
+                await llm_gate.wait()
+                yield {"type": "token", "content": "Hi!"}
+                yield {"type": "done", "tokens_used": {"prompt": 5, "completion": 1}}
+
+            mock_llm.stream_chat_completion = gated_stream
+
+            with patch(
+                "api.routes.stream.MODELS_WITH_INTERNAL_TOOL_HANDLING",
+                {"gemini-2.5-pro"},
+            ):
+                gen = stream_generator("conv-eager", messages, mock_request)
+
+                # Consume events until we see the "Composing response..." status
+                # frame. The gate is intentionally NOT set yet; if the eager-drain
+                # works, the frame must arrive without the LLM stream producing
+                # anything.
+                composing_seen_before_llm = False
+                async def consume_until_composing():
+                    nonlocal composing_seen_before_llm
+                    async for event in gen:
+                        if event.get("event") == "message":
+                            data = json.loads(event["data"])
+                            if (
+                                data.get("type") == "status"
+                                and "Composing response" in data.get("message", "")
+                            ):
+                                composing_seen_before_llm = not llm_iteration_started or not llm_gate.is_set()
+                                return
+
+                # Bound the wait — if the eager-drain regresses, this would hang
+                # forever (the LLM stream is gated). Give it a generous 2s.
+                try:
+                    await asyncio.wait_for(consume_until_composing(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    pytest.fail(
+                        "Composing status was not yielded before the LLM stream "
+                        "produced its first event — eager-drain regression"
+                    )
+
+                assert composing_seen_before_llm, (
+                    "Composing status arrived only after the LLM stream was "
+                    "released — eager-drain is not firing"
+                )
+
+                # Release the gate so the generator can complete cleanly.
+                llm_gate.set()
+                async for _ in gen:
+                    pass
+
+    @pytest.mark.asyncio
+    async def test_composing_status_yielded_before_llm_first_event_grok(self):
+        """
+        OpenAI/Grok path (non-Gemini): same eager-drain expectation.
+        """
+        import asyncio
+        import json
+        from api.routes.stream import stream_generator
+
+        mock_request = Mock()
+        mock_request.is_disconnected = AsyncMock(return_value=False)
+        messages = [{"role": "user", "content": "Hello"}]
+
+        llm_gate = asyncio.Event()
+
+        with patch("api.routes.stream.LLMClient") as mock_llm_cls, \
+             patch("api.routes.stream.MCPClient") as mock_mcp_cls, \
+             patch("api.routes.stream.StateManager"):
+
+            mock_mcp = mock_mcp_cls.return_value.__aenter__.return_value
+            mock_mcp.list_tools = AsyncMock(return_value=[])
+
+            mock_llm = mock_llm_cls.return_value.__aenter__.return_value
+            mock_llm.primary_provider_name = "grok-4"
+            mock_llm.convert_mcp_tools_to_functions = Mock(return_value=[])
+            # Non-streaming pre-check returns no tool calls -> proceed to streaming.
+            mock_llm.chat_completion = AsyncMock(return_value={
+                "choices": [{"message": {"content": ""}}]
+            })
+
+            async def gated_stream(*args, **kwargs):
+                await llm_gate.wait()
+                yield {"type": "token", "content": "Hi!"}
+                yield {"type": "done", "tokens_used": {"prompt": 5, "completion": 1}}
+
+            mock_llm.stream_chat_completion = gated_stream
+
+            gen = stream_generator("conv-eager-grok", messages, mock_request)
+
+            composing_seen_before_release = False
+
+            async def consume_until_composing():
+                nonlocal composing_seen_before_release
+                async for event in gen:
+                    if event.get("event") == "message":
+                        data = json.loads(event["data"])
+                        if (
+                            data.get("type") == "status"
+                            and "Composing response" in data.get("message", "")
+                        ):
+                            composing_seen_before_release = not llm_gate.is_set()
+                            return
+
+            try:
+                await asyncio.wait_for(consume_until_composing(), timeout=2.0)
+            except asyncio.TimeoutError:
+                pytest.fail(
+                    "Composing status was not yielded before the LLM stream "
+                    "produced its first event (grok path) — eager-drain regression"
+                )
+
+            assert composing_seen_before_release, (
+                "Composing status arrived only after the LLM stream was "
+                "released (grok path) — eager-drain is not firing"
+            )
+
+            llm_gate.set()
+            async for _ in gen:
+                pass

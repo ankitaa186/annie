@@ -549,6 +549,16 @@ async def stream_generator(
                 else:
                     emit_status("Composing response...", icon="🧠")
 
+                # Eager-drain: yield "Composing..." before awaiting LLM TTFT so the
+                # bot transitions out of "Annie is thinking..." immediately rather
+                # than after the first token arrives (~22s post-24.1 SDK migration).
+                while not status_queue.empty():
+                    try:
+                        status_msg = status_queue.get_nowait()
+                        yield format_status_frame(status_msg)
+                    except asyncio.QueueEmpty:
+                        break
+
                 async for event in llm_client.stream_chat_completion(
                     conversation_messages,
                     tools=tools,
@@ -861,6 +871,16 @@ async def stream_generator(
                         emit_status("Analyzing your files...", icon="📎")
                     else:
                         emit_status("Composing response...", icon="🧠")
+
+                    # Eager-drain: yield "Composing..." before awaiting LLM TTFT so the
+                    # bot transitions out of "Annie is thinking..." immediately rather
+                    # than after the first token arrives (~22s post-24.1 SDK migration).
+                    while not status_queue.empty():
+                        try:
+                            status_msg = status_queue.get_nowait()
+                            yield format_status_frame(status_msg)
+                        except asyncio.QueueEmpty:
+                            break
 
                     # Stream tokens from LLM
                     async for event in llm_client.stream_chat_completion(
@@ -1281,6 +1301,14 @@ async def stream_generator(
                         emit_status("Analyzing your files...", icon="📎")
                     else:
                         emit_status("Composing response...", icon="🧠")
+
+                    # Eager-drain: yield "Composing..." before awaiting LLM TTFT (max iterations path).
+                    while not status_queue.empty():
+                        try:
+                            status_msg = status_queue.get_nowait()
+                            yield format_status_frame(status_msg)
+                        except asyncio.QueueEmpty:
+                            break
 
                     # Stream final response anyway
                     async for event in llm_client.stream_chat_completion(conversation_messages, tools=tools, mcp_client=mcp_client, files=files, user_id=user_id, conversation_id=conversation_id, state_manager=state_manager):
