@@ -899,6 +899,7 @@ async def test_ac13_inline_data_image_reaches_sdk_via_new_contents_path():
     asserts against the NEW SDK call surface (history+message via
     chats.create + send_message_stream), not the old `mock_model` MagicMock.
     """
+    from google.genai import types
     from api.models.file_attachment import FileAttachment
 
     provider = _build_provider()
@@ -942,10 +943,15 @@ async def test_ac13_inline_data_image_reaches_sdk_via_new_contents_path():
             pass
 
     # The first turn's `message=` payload should be the multimodal parts list
-    # (text + inline_data) when files are attached, not a plain string.
+    # (text + inline_data) when files are attached, not a plain string. The
+    # parts must be native types.Part instances (not raw PartDicts) — the
+    # google.genai SDK rejects list[dict] in send_message_stream.
     msg = captured["message"]
     assert isinstance(msg, list), "multimodal message must be a list of parts, not a string"
-    has_inline_data = any("inline_data" in part for part in msg)
+    assert all(isinstance(p, types.Part) for p in msg), (
+        "AC13: parts must be native types.Part instances; SDK rejects list[dict]"
+    )
+    has_inline_data = any(p.inline_data is not None for p in msg)
     assert has_inline_data, "AC13: inline_data part must reach the SDK message"
 
 

@@ -16,6 +16,7 @@ to `google.genai` (the new official SDK). Key shape changes:
   tripwire because the new SDK auto-executes Python callables by default.
 """
 
+import base64
 import json
 import time
 import uuid
@@ -36,6 +37,29 @@ from api.observability.cost import calculate_llm_cost
 from api.utils import inject_user_id, strip_base64_from_tool_result
 
 logger = get_logger(__name__)
+
+
+def _part_dict_to_part(part_dict: Dict[str, Any]) -> "genai_types.Part":
+    """Convert a PartDict (text or inline_data) to a native types.Part.
+
+    send_message_stream(message=...) in the google.genai SDK accepts
+    list[Part] but rejects list[PartDict] (validation says got <class 'list'>).
+    Blob.data is bytes — base64 strings must be decoded.
+    """
+    if "text" in part_dict:
+        return genai_types.Part(text=part_dict["text"])
+    if "inline_data" in part_dict:
+        inline = part_dict["inline_data"]
+        data = inline["data"]
+        if isinstance(data, str):
+            data = base64.b64decode(data)
+        return genai_types.Part(
+            inlineData=genai_types.Blob(
+                mimeType=inline["mime_type"],
+                data=data,
+            )
+        )
+    raise ValueError(f"Unrecognized part shape: keys={list(part_dict.keys())}")
 
 
 # Story 24.1: legacy-compatible numeric values for FinishReason names.
@@ -722,8 +746,12 @@ class GeminiProvider(BaseProvider):
                 # Check if this is multimodal (has inline_data parts)
                 has_files = any("inline_data" in part for part in last_parts)
                 if has_files:
-                    # Send full parts array for multimodal
-                    last_user_message = last_parts
+                    # send_message_stream rejects list[dict] PartDicts in the
+                    # google.genai SDK — must be list[types.Part]. Decode base64
+                    # data → bytes for Blob (Blob.data is bytes, not str).
+                    last_user_message = [
+                        _part_dict_to_part(p) for p in last_parts
+                    ]
                 else:
                     # Send just text for text-only (backward compatible)
                     last_user_message = last_parts[0]["text"] if last_parts else ""
