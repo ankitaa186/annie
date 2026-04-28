@@ -1094,6 +1094,32 @@ class StateManager:
         return f"[Tool result: {content_len} chars]"
 
     @staticmethod
+    def _drop_orphan_tool_results(
+        messages: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Drop role=tool messages whose tool_call_id has no matching
+        preceding assistant.tool_calls entry. Required when truncation
+        cuts mid-pair: OpenAI rejects orphan tool results.
+        """
+        seen_tool_call_ids: set = set()
+        out: List[Dict[str, Any]] = []
+        for msg in messages:
+            role = msg.get("role")
+            if role == "assistant":
+                for tc in msg.get("tool_calls") or []:
+                    tcid = tc.get("id")
+                    if tcid:
+                        seen_tool_call_ids.add(tcid)
+                out.append(msg)
+            elif role == "tool":
+                if msg.get("tool_call_id") in seen_tool_call_ids:
+                    out.append(msg)
+                # else: orphan — drop silently
+            else:
+                out.append(msg)
+        return out
+
+    @staticmethod
     def _prune_tool_results(
         messages: List[Dict[str, Any]],
         keep_recent_turns: int = 2
@@ -1819,6 +1845,14 @@ class StateManager:
                 while total_tokens > self.MAX_TOKENS and messages:
                     removed_msg = messages.pop(0)
                     total_tokens -= estimate_tokens(removed_msg.get("content", ""))
+
+        # Drop any role=tool messages whose matching assistant.tool_calls was
+        # truncated away. OpenAI rejects orphan tool results with:
+        # "messages with role 'tool' must be a response to a preceeding
+        # message with 'tool_calls'." Assistant tool_call messages have tiny
+        # content tokens, so the truncator above can drop the assistant turn
+        # but stop on the next message — leaving an orphan tool at the head.
+        messages = self._drop_orphan_tool_results(messages)
 
         # Add conversation messages
         context_messages.extend(messages)
