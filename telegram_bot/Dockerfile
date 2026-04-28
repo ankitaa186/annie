@@ -20,7 +20,8 @@ COPY . /app/telegram_bot/
 # Set Python path to include /app
 ENV PYTHONPATH=/app
 
-# Health check - verify bot module can be imported
+# Health check - verify bot module can be imported. The real liveness signal
+# is the watchdog inside bot.py (sys.exit(1) when polling dies → Docker restart).
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD python -c "import telegram_bot; import sys; sys.exit(0)" || exit 1
 

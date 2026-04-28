@@ -19,6 +19,10 @@ logger = get_logger(__name__)
 # Global application instance for graceful shutdown
 app_instance = None
 
+# Watchdog cadence: if the updater task dies, sys.exit(1) within this window
+# so Docker's restart policy brings the container back up.
+WATCHDOG_INTERVAL_SECONDS = 30
+
 
 def setup_signal_handlers():
     """Setup signal handlers for graceful shutdown."""
@@ -183,11 +187,27 @@ async def main():
             timeout=polling_timeout
         )
 
-        # Keep running until stopped
+        # Watchdog loop: heartbeat while polling is alive; exit (so Docker
+        # restarts us) if the updater task dies. PTB recovers from most
+        # transient Telegram errors internally, but a sustained connection
+        # failure can leave the updater in a stopped state with the main
+        # coroutine still waiting forever — that was the bug.
         try:
-            # Run forever
             stop_signal = asyncio.Event()
-            await stop_signal.wait()
+            while not stop_signal.is_set():
+                if not app.updater.running:
+                    logger.critical(
+                        "Updater is no longer polling — exiting for restart",
+                        extra={"event": "polling_dead"}
+                    )
+                    sys.exit(1)
+                try:
+                    await asyncio.wait_for(
+                        stop_signal.wait(),
+                        timeout=WATCHDOG_INTERVAL_SECONDS,
+                    )
+                except asyncio.TimeoutError:
+                    continue
         finally:
             # Cleanup
             await app.updater.stop()
