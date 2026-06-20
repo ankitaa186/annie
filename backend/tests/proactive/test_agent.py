@@ -148,6 +148,75 @@ def test_parse_agent_response_with_preamble_text():
     assert result.reasoning == "Found significant price movement"
 
 
+def test_parse_agent_response_research_plain_markdown():
+    """Research triggers return plain markdown; entire body becomes message."""
+    response = '''# Lightguns for OLED TVs
+
+## Top picks
+- Gun4IR
+- Sinden
+- Retro Shooter
+
+## Caveats
+None are truly "open box, done in 90 seconds".
+'''
+    result = parse_agent_response(response, ["web_search", "reddit_search"], is_research=True)
+
+    assert result.skip is False
+    assert result.message.startswith("# Lightguns for OLED TVs")
+    assert "\n## Top picks\n" in result.message
+    assert "\\n" not in result.message
+    # tools_called comes from the streaming layer, not the LLM's claim.
+    assert result.tools_called == ["web_search", "reddit_search"]
+
+
+def test_parse_agent_response_research_strips_outer_code_fence():
+    """```markdown fences around the whole response get stripped."""
+    response = "```markdown\n# Title\n\nBody text.\n```"
+    result = parse_agent_response(response, [], is_research=True)
+
+    assert result.skip is False
+    assert result.message == "# Title\n\nBody text."
+
+
+def test_parse_agent_response_research_legacy_report_marker():
+    """Back-compat: old JSON-header + ---REPORT--- + markdown shape still parses."""
+    response = (
+        '{"skip": false, "tools_called": ["web_search"], "reasoning": "ok"}\n'
+        "---REPORT---\n"
+        "# Title\n\nBody."
+    )
+    result = parse_agent_response(response, ["web_search"], is_research=True)
+
+    assert result.skip is False
+    assert result.message.startswith("# Title")
+    # Streaming-layer tools win; LLM-claimed tools in the legacy header are ignored.
+    assert result.tools_called == ["web_search"]
+
+
+def test_parse_agent_response_research_legacy_json_envelope():
+    """Back-compat: research response still wrapped in a JSON envelope."""
+    response = '{"skip": false, "message": "# Title\\n\\nBody.", "reasoning": "ok"}'
+    result = parse_agent_response(response, ["web_search"], is_research=True)
+
+    assert result.skip is False
+    assert result.message == "# Title\n\nBody."
+
+
+def test_parse_agent_response_non_research_unescapes_double_escaped_newlines():
+    """Non-research JSON-envelope path: literal `\\n` sequences get un-escaped."""
+    response = (
+        '{"skip": false, '
+        '"message": "Intro\\\\n\\\\n## Header\\\\n- bullet", '
+        '"reasoning": "test"}'
+    )
+    result = parse_agent_response(response, [])
+
+    assert result.skip is False
+    assert "\\n" not in result.message
+    assert result.message == "Intro\n\n## Header\n- bullet"
+
+
 # ============================================================================
 # Prompt Building Tests
 # ============================================================================
